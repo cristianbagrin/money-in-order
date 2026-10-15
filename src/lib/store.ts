@@ -1,0 +1,430 @@
+import { buildIndex, DEFAULT_SETTINGS, fundingPlan, monthView, settingsOf, type Index } from './budget'
+import { addMonths, isoDate, monthOf } from './dates'
+import { convert, type Rates } from './money'
+import {
+  COLLECTIONS,
+  emptyDB,
+  RTA,
+  type Account,
+  type Assign,
+  type Category,
+  type CollectionName,
+  type DB,
+  type Group,
+  type ID,
+  type Month,
+  type Rec,
+  type Settings,
+  type Txn,
+} from './types'
+
+type Listener = () => void
+
+export interface Persistence {
+  save(db: DB): void
+}
+
+let db: DB = emptyDB()
+let ix: Index | null = null
+let lastStamp = 0
+let persistence: Persistence | null = null
+const listeners = new Set<Listener>()
+const changeListeners = new Set<Listener>()
+
+export function uid(): ID {
+  const a = new Uint8Array(9)
+  crypto.getRandomValues(a)
+  return btoa(String.fromCharCode(...a)).replace(/[+/=]/g, (c) => (c === '+' ? '-' : c === '/' ? '_' : ''))
+}
+
+/** Monotonic timestamp so two edits in the same millisecond still order correctly. */
+function stamp(): number {
+  lastStamp = Math.max(Date.now(), lastStamp + 1)
+  return lastStamp
+}
+
+export function getDB(): DB {
+  return db
+}
+
+export function getIndex(): Index {
+  if (!ix) ix = buildIndex(db)
+  return ix
+}
+
+export function subscribe(fn: Listener): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+/** Called only for local edits (not for data arriving from sync). */
+export function onLocalChange(fn: Listener): () => void {
+  changeListeners.add(fn)
+  return () => changeListeners.delete(fn)
+}
+
+function emit() {
+  ix = null
+  persistence?.save(db)
+  for (const fn of listeners) fn()
+}
+
+export function setPersistence(p: Persistence | null) {
+  persistence = p
+}
+
+/** Replace the whole database (startup load, sync merge, restore from backup). */
+export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
+  const fixed = emptyDB()
+  for (const name of COLLECTIONS) (fixed as unknown as Record<string, unknown>)[name] = next[name] ?? {}
+  db = fixed
+  for (const name of COLLECTIONS) {
+    for (const r of Object.values(db[name]) as Rec[]) if (r.u > lastStamp) lastStamp = r.u
+  }
+  emit()
+  if (opts.local) for (const fn of changeListeners) fn()
+}
+
+type Patch = { [K in CollectionName]?: DB[K][string][] }
+
+/** Write records. Each gets a fresh timestamp. */
+export function commit(patch: Patch) {
+  const next = { ...db } as unknown as Record<string, Record<ID, Rec>>
+  for (const name of Object.keys(patch) as CollectionName[]) {
+    const recs = patch[name]
+    if (!recs?.length) continue
+    const coll = { ...next[name] }
+    for (const r of recs) coll[r.id] = { ...r, u: stamp() }
+    next[name] = coll
+  }
+  db = next as unknown as DB
+  emit()
+  for (const fn of changeListeners) fn()
+}
+
+function tomb<T extends Rec>(r: T): T {
+  return { ...r, d: 1 }
+}
+
+// ---------------------------------------------------------------- settings
+
+export function settings(): Settings {
+  return settingsOf(db)
+}
+
+export function updateSettings(patch: Partial<Settings>) {
+  commit({ meta: [{ ...DEFAULT_SETTINGS, ...settings(), ...patch, id: 'settings' } as Settings] })
+}
+
+export function toBase(amt: number, from: string, rates: Rates = settings().rates): number {
+  const s = settings()
+  return convert(amt, from, s.base, rates, s.base)
+}
+
+// ---------------------------------------------------------------- transactions
+
+export interface NewTxn {
+  date: string
+  cat: ID
+  amt: number
+  cur: string
+  note?: string
+  kind?: Txn['kind']
+  base?: number
+}
+
+export function addTxn(t: NewTxn): Txn {
+  const rec: Txn = {
+    id: uid(),
+    u: 0,
+    date: t.date,
+    cat: t.cat,
+    amt: t.amt,
+    cur: t.cur,
+    base: t.base ?? toBase(t.amt, t.cur),
+    ...(t.note ? { note: t.note } : {}),
+    ...(t.kind ? { kind: t.kind } : {}),
+  }
+  commit({ txns: [rec] })
+  return rec
+}
+
+export function updateTxn(id: ID, patch: Partial<NewTxn>) {
+  const old = db.txns[id]
+  if (!old) return
+  const next: Txn = { ...old, ...patch } as Txn
+  if (patch.amt !== undefined || patch.cur !== undefined) {
+    if (patch.base === undefined) {
+      // Keep the rate the transaction was recorded with if only the amount changed.
+      next.base =
+        next.cur === old.cur && old.amt !== 0 ? Math.round((old.base / old.amt) * next.amt) : toBase(next.amt, next.cur)
+    }
+  }
+  if (!next.note) delete next.note
+  commit({ txns: [next] })
+}
+
+export function deleteTxn(id: ID) {
+  const t = db.txns[id]
+  if (t) commit({ txns: [tomb(t)] })
+}
+
+export function restoreTxn(t: Txn) {
+  const copy = { ...t }
+  delete copy.d
+  commit({ txns: [copy] })
+}
+
+// ---------------------------------------------------------------- assigning
+
+function assignRec(month: Month, cat: ID, amt: number): Assign {
+  return { id: `${month}|${cat}`, u: 0, m: month, cat, amt }
+}
+
+export function assignedOf(month: Month, cat: ID): number {
+  const a = db.assigns[`${month}|${cat}`]
+  return a && !a.d ? a.amt : 0
+}
+
+export function setAssigned(month: Month, cat: ID, amt: number) {
+  commit({ assigns: [assignRec(month, cat, amt)] })
+}
+
+/** Move money between categories (or to/from Ready to Assign) within a month. */
+export function moveMoney(month: Month, from: ID, to: ID, amt: number) {
+  if (!amt || from === to) return
+  const recs: Assign[] = []
+  if (from !== RTA) recs.push(assignRec(month, from, assignedOf(month, from) - amt))
+  if (to !== RTA) recs.push(assignRec(month, to, assignedOf(month, to) + amt))
+  commit({ assigns: recs })
+}
+
+/** Give every category with a target what it still needs, as far as Ready to Assign allows. */
+export function fundTargets(month: Month, current: Month): number {
+  const view = monthView(getIndex(), month, current)
+  const plan = fundingPlan(view)
+  if (!plan.length) return 0
+  commit({ assigns: plan.map((p) => assignRec(month, p.cat, assignedOf(month, p.cat) + p.amount)) })
+  return plan.reduce((s, p) => s + p.amount, 0)
+}
+
+/** Copy last month's assigned amounts into a month where nothing is assigned yet. */
+export function repeatLastMonth(month: Month) {
+  const prev = addMonths(month, -1)
+  const ix = getIndex()
+  const recs: Assign[] = []
+  for (const [cat, amt] of ix.asg.get(prev) ?? []) {
+    const c = ix.catById.get(cat)
+    if (!c || c.archived || amt <= 0) continue
+    recs.push(assignRec(month, cat, assignedOf(month, cat) + amt))
+  }
+  commit({ assigns: recs })
+}
+
+// ---------------------------------------------------------------- categories & groups
+
+export function saveCategory(c: Category) {
+  commit({ cats: [c] })
+}
+
+export function addCategory(group: ID, name: string, extra: Partial<Category> = {}): Category {
+  const order = Math.max(0, ...Object.values(db.cats).filter((c) => c.group === group && !c.d).map((c) => c.order + 1))
+  const c: Category = { id: uid(), u: 0, name, group, order, ...extra }
+  commit({ cats: [c] })
+  return c
+}
+
+/** Archive keeps history. Whatever is left in it goes back to Ready to Assign this month. */
+export function archiveCategory(id: ID, month: Month, current: Month) {
+  const c = db.cats[id]
+  if (!c) return
+  const view = monthView(getIndex(), month, current)
+  const left = view.byId.get(id)?.available ?? 0
+  const patch: Patch = { cats: [{ ...c, archived: 1 }] }
+  if (left) patch.assigns = [assignRec(month, id, assignedOf(month, id) - left)]
+  commit(patch)
+}
+
+export function unarchiveCategory(id: ID) {
+  const c = db.cats[id]
+  if (!c) return
+  const copy = { ...c }
+  delete copy.archived
+  commit({ cats: [copy] })
+}
+
+export function categoryHasHistory(id: ID): boolean {
+  return (
+    Object.values(db.txns).some((t) => !t.d && t.cat === id) ||
+    Object.values(db.assigns).some((a) => !a.d && a.cat === id && a.amt !== 0)
+  )
+}
+
+export function deleteCategory(id: ID) {
+  const c = db.cats[id]
+  if (c) commit({ cats: [tomb(c)] })
+}
+
+export function reorderCategory(id: ID, dir: -1 | 1) {
+  const c = db.cats[id]
+  if (!c) return
+  const siblings = Object.values(db.cats)
+    .filter((x) => !x.d && x.group === c.group)
+    .sort((a, b) => a.order - b.order)
+  const i = siblings.findIndex((x) => x.id === id)
+  const j = i + dir
+  if (j < 0 || j >= siblings.length) return
+  ;[siblings[i], siblings[j]] = [siblings[j], siblings[i]]
+  commit({ cats: siblings.map((s, k) => ({ ...s, order: k })) })
+}
+
+export function saveGroup(g: Group) {
+  commit({ groups: [g] })
+}
+
+export function addGroup(name: string): Group {
+  const order = Math.max(0, ...Object.values(db.groups).filter((g) => !g.d).map((g) => g.order + 1))
+  const g: Group = { id: uid(), u: 0, name, order }
+  commit({ groups: [g] })
+  return g
+}
+
+export function deleteGroup(id: ID) {
+  const g = db.groups[id]
+  if (g) commit({ groups: [tomb(g)] })
+}
+
+// ---------------------------------------------------------------- accounts & counting
+
+export function saveAccount(a: Account) {
+  commit({ accounts: [a] })
+}
+
+export function addAccount(name: string, currency: string): Account {
+  const order = Math.max(0, ...Object.values(db.accounts).filter((a) => !a.d).map((a) => a.order + 1))
+  const a: Account = { id: uid(), u: 0, name, cur: currency, order }
+  commit({ accounts: [a] })
+  return a
+}
+
+export function deleteAccount(id: ID) {
+  const a = db.accounts[id]
+  if (a) commit({ accounts: [tomb(a)] })
+}
+
+export interface CountInput {
+  date: string
+  bal: Record<ID, number>
+  rates: Rates
+  /** where the unexplained difference goes: RTA or a category (e.g. forgotten spending) */
+  diffTo: ID
+}
+
+export interface CountResult {
+  total: number
+  expected: number
+  fx: number
+  diff: number
+  first: boolean
+}
+
+/** Work out what a count would change, without saving anything. */
+export function previewCount(input: Omit<CountInput, 'diffTo'>): CountResult {
+  const s = settings()
+  const accounts = Object.values(db.accounts).filter((a) => !a.d)
+  let total = 0
+  for (const a of accounts) total += convert(input.bal[a.id] ?? 0, a.cur, s.base, input.rates, s.base)
+  let expected = 0
+  for (const t of Object.values(db.txns)) if (!t.d) expected += t.base
+  const counts = Object.values(db.counts)
+    .filter((c) => !c.d)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+  const prev = counts[0]
+  const first = !prev && !Object.values(db.txns).some((t) => !t.d && t.kind === 'start')
+  // Exchange-rate drift: how much the foreign balances from the last count changed in value.
+  let fx = 0
+  if (prev) {
+    for (const a of accounts) {
+      if (a.cur === s.base) continue
+      const b = prev.bal[a.id]
+      if (!b) continue
+      fx += convert(b, a.cur, s.base, input.rates, s.base) - convert(b, a.cur, s.base, prev.rates, s.base)
+    }
+  }
+  return { total, expected, fx: first ? 0 : fx, diff: total - expected - (first ? 0 : fx), first }
+}
+
+export function recordCount(input: CountInput): CountResult {
+  const s = settings()
+  const r = previewCount(input)
+  const txns: Txn[] = []
+  const mk = (base: number, cat: ID, kind: Txn['kind'], note: string): Txn => ({
+    id: uid(),
+    u: 0,
+    date: input.date,
+    cat,
+    amt: base,
+    cur: s.base,
+    base,
+    kind,
+    note,
+  })
+  if (r.first) {
+    if (r.diff) txns.push(mk(r.diff, RTA, 'start', 'Starting balance'))
+  } else {
+    if (r.fx) txns.push(mk(r.fx, RTA, 'fx', 'Exchange rates moved'))
+    if (r.diff) txns.push(mk(r.diff, input.diffTo, 'adj', r.diff < 0 ? 'Unlogged spending (found when counting)' : 'Extra money found when counting'))
+  }
+  commit({
+    counts: [{ id: uid(), u: 0, date: input.date, bal: input.bal, rates: input.rates, total: r.total, expected: r.expected }],
+    txns,
+  })
+  return r
+}
+
+export function lastCount() {
+  return Object.values(db.counts)
+    .filter((c) => !c.d)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.u - a.u))[0]
+}
+
+// ---------------------------------------------------------------- notes
+
+export function setNote(month: Month, text: string) {
+  commit({ notes: [{ id: month, u: 0, text }] })
+}
+
+// ---------------------------------------------------------------- first run
+
+export const STARTER: { group: string; cats: (Partial<Category> & { name: string })[] }[] = [
+  { group: 'Every day', cats: [{ name: 'Living', daily: true, note: 'groceries · eating out · transport' }] },
+  { group: 'Fixed', cats: [{ name: 'Phone' }, { name: 'BJJ / gym' }, { name: 'Business', note: 'Google Workspace' }] },
+  { group: 'Flexible', cats: [{ name: 'Purchases' }, { name: 'Trips' }, { name: 'Other' }] },
+  {
+    group: 'Future',
+    cats: [
+      { name: 'Future me', saving: true, note: 'investing' },
+      { name: 'Emergency', saving: true },
+      { name: 'NAWA (hold)', saving: true },
+    ],
+  },
+]
+
+export function seedCategories() {
+  const groups: Group[] = []
+  const cats: Category[] = []
+  STARTER.forEach((g, gi) => {
+    const group: Group = { id: uid(), u: 0, name: g.group, order: gi }
+    groups.push(group)
+    g.cats.forEach((c, ci) => cats.push({ id: uid(), u: 0, group: group.id, order: ci, ...c }))
+  })
+  commit({ groups, cats })
+}
+
+export function today(): string {
+  return isoDate()
+}
+
+export function currentMonth(): Month {
+  return monthOf(today())
+}
