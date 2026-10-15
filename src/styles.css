@@ -748,7 +748,7 @@ dialog.sheet::backdrop {
   border-radius: 0;
   background: transparent;
   padding: 4px 0;
-  font-size: 15px;
+  font-size: 16px; /* below 16px iOS zooms the page on focus */
 }
 .memo input:focus {
   box-shadow: none;

@@ -56,7 +56,14 @@ export function Today(props: {
             <span class={`marked${d.leftToday < 0 ? ' neg' : ''}`}>{fmt(Math.abs(d.leftToday), base)}</span>
           </div>
           <div class="hero-cap">
-            {d.leftToday < 0 ? (
+            {d.available < 0 && d.allowance === 0 ? (
+              <>
+                <b>over</b> for the month in {d.cats.map((c) => c.name).join(' + ')}.{' '}
+                <button class="link" style={{ padding: 0 }} onClick={() => props.onCover(d.cats[0].id)}>
+                  Cover it
+                </button>
+              </>
+            ) : d.leftToday < 0 ? (
               <>
                 <b>over</b> today's share
               </>

@@ -110,18 +110,25 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
     props.onChange(v)
   }
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', props.decimals ? '.' : '00', '0', 'back']
+  const hit = (k: string) => {
+    if (k === '00') {
+      if (!props.value || props.value.length >= 8) return
+      props.onChange(props.value + '00')
+    } else press(k)
+  }
   return (
     <div class="keypad" role="group" aria-label="Amount keypad">
       {keys.map((k) => (
         <button
           key={k}
           class={`key${k === 'back' ? ' key-back' : ''}`}
+          // Pointer-down feels instant on a phone; click (detail 0) keeps keyboard users covered.
           onPointerDown={(e) => {
             e.preventDefault()
-            if (k === '00') {
-              if (!props.value || props.value.length >= 8) return
-              props.onChange(props.value + '00')
-            } else press(k)
+            hit(k)
+          }}
+          onClick={(e) => {
+            if (e.detail === 0) hit(k)
           }}
           onContextMenu={(e) => {
             e.preventDefault()
