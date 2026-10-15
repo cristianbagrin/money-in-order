@@ -132,7 +132,9 @@ async function syncOnce(): Promise<void> {
         throw new Error(`Server said ${res.status}`)
       }
       if (!cfg.dirty) break
-      const body = await seal(getDB(), keys.key)
+      // Remember exactly what we upload: edits made while the upload is in flight must stay dirty.
+      const snapshot = getDB()
+      const body = await seal(snapshot, keys.key)
       const put = await fetch(`/api/vault/${keys.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'text/plain', 'X-Base-Rev': remoteRev ?? 'new' },
@@ -141,7 +143,8 @@ async function syncOnce(): Promise<void> {
       if (put.status === 412) continue // someone else wrote first: pull, merge, try again
       if (!put.ok) throw new Error(`Upload failed (${put.status})`)
       cfg.rev = put.headers.get('X-Rev')
-      cfg.dirty = false
+      cfg.dirty = getDB() !== snapshot
+      if (cfg.dirty) again = true
       break
     }
     cfg.last = Date.now()
