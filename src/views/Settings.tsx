@@ -242,8 +242,8 @@ export function Settings(props: { header: preact.ComponentChildren; onCount: () 
       <div class="section">
         <span class="label">On your iPhone</span>
         <p class="muted" style={{ fontSize: '14px' }}>
-          Open this page in Safari, tap Share, then <b>Add to Home Screen</b>. It opens full screen like an app, works offline, and syncs when it's back
-          online.
+          Open this page in Safari, tap Share, then <b>Add to Home Screen</b>. Open it from the Home Screen and choose “I already use it on another
+          device” to join with your sync code. It runs full screen, works offline, and syncs when it's back online.
         </p>
       </div>
     </div>
@@ -339,7 +339,10 @@ function SyncBox() {
       <p class="muted" style={{ fontSize: '14px', marginBottom: '6px' }}>
         {status}
       </p>
-      <Field label="Your sync code" hint="Anyone with this code can read your budget. Keep it like a password.">
+      <Field
+        label="Your sync code"
+        hint="Anyone with this code can read your budget, so keep it like a password. On an iPhone, add the app to your Home Screen first, open it from there, then enter this code (the Home Screen app keeps its own storage, separate from Safari)."
+      >
         <input type="text" readOnly value={sync.code} class="num" onFocus={(e) => e.currentTarget.select()} />
       </Field>
       <div class="row">

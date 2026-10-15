@@ -77,7 +77,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
     return (
       <div class="welcome">
         <h1 style={{ fontSize: '34px' }}>Join your other device</h1>
-        <p class="lede">On the device you already use: Review → Settings → Sync. Copy the link or the code.</p>
+        <p class="lede">On the device you already use, open Settings → Sync between devices and copy the code. Type or paste it here.</p>
         <Field label="Sync code">
           <input type="text" class="num" value={code} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocapitalize="characters" onInput={(e) => setCode(e.currentTarget.value)} />
         </Field>
