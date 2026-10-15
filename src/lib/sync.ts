@@ -11,7 +11,7 @@ export type SyncState = 'off' | 'idle' | 'syncing' | 'offline' | 'error'
 
 interface SyncConfig {
   code: string
-  etag: string | null
+  rev: string | null
   /** local edits not yet uploaded */
   dirty: boolean
   last: number
@@ -113,34 +113,34 @@ async function syncOnce(): Promise<void> {
   try {
     for (let attempt = 0; attempt < 4; attempt++) {
       const res = await fetch(`/api/vault/${keys.id}`, {
-        headers: cfg.etag ? { 'If-None-Match': cfg.etag } : {},
+        headers: cfg.rev ? { 'X-Have-Rev': cfg.rev } : {},
         cache: 'no-store',
       })
-      let remoteEtag: string | null = cfg.etag
+      let remoteRev: string | null = cfg.rev
       if (res.status === 200) {
-        remoteEtag = res.headers.get('ETag')
+        remoteRev = res.headers.get('X-Rev')
         const remote = await open(await res.text(), keys.key)
         const local = getDB()
         if (hasNews(local, remote)) replaceDB(merge(local, remote))
         if (hasNews(remote, getDB())) cfg.dirty = true
-        cfg.etag = remoteEtag
+        cfg.rev = remoteRev
       } else if (res.status === 404) {
-        remoteEtag = null
-        cfg.etag = null
+        remoteRev = null
+        cfg.rev = null
         cfg.dirty = true
-      } else if (res.status !== 304) {
+      } else if (res.status !== 204) {
         throw new Error(`Server said ${res.status}`)
       }
       if (!cfg.dirty) break
       const body = await seal(getDB(), keys.key)
       const put = await fetch(`/api/vault/${keys.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'text/plain', 'If-Match': remoteEtag ?? 'new' },
+        headers: { 'Content-Type': 'text/plain', 'X-Base-Rev': remoteRev ?? 'new' },
         body,
       })
       if (put.status === 412) continue // someone else wrote first: pull, merge, try again
       if (!put.ok) throw new Error(`Upload failed (${put.status})`)
-      cfg.etag = put.headers.get('ETag')
+      cfg.rev = put.headers.get('X-Rev')
       cfg.dirty = false
       break
     }
@@ -205,7 +205,7 @@ export async function initSync() {
 
 /** Start syncing with a code. Local data is merged with whatever is stored under the code. */
 export async function enableSync(code: string) {
-  cfg = { code, etag: null, dirty: true, last: 0 }
+  cfg = { code, rev: null, dirty: true, last: 0 }
   keys = await derive(code)
   await saveCfg()
   wire()
