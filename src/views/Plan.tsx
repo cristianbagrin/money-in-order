@@ -1,21 +1,38 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { monthView, type CatMonth } from '../lib/budget'
 import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { fmt, parseAmount } from '../lib/money'
-import { addTxn, fundTargets, lastCount, repeatLastMonth, setAssigned } from '../lib/store'
-import { live, RTA, type ID } from '../lib/types'
+import { evalAmount, fmt } from '../lib/money'
+import {
+  addCategory,
+  addGroup,
+  addTxn,
+  deleteCategory,
+  deleteGroup,
+  fundTargets,
+  lastCount,
+  placeCategory,
+  placeGroup,
+  repeatLastMonth,
+  saveCategory,
+  saveGroup,
+  setAssigned,
+  undoable,
+} from '../lib/store'
+import { live, RTA, type Category, type Group, type ID } from '../lib/types'
 import { useIndex } from '../ui/hooks'
-import { Gauge, IconChevron, toast } from '../ui/kit'
+import { IconChevron, IconGear, IconPlus, toast } from '../ui/kit'
+import { flash, useCountUp } from '../ui/motion'
+import { play } from '../ui/sound'
+import { useSortable } from '../ui/sortable'
 
 export function Plan(props: {
   today: string
   month: string
   setMonth: (m: string) => void
-  wide: boolean
-  header: preact.ComponentChildren
-  onCategory: (id: ID | 'new') => void
+  onCategory: (id: ID) => void
   onCount: () => void
   onReflect: (month: string) => void
+  onSettings: () => void
 }) {
   const ix = useIndex()
   const { today, month } = props
@@ -23,20 +40,66 @@ export function Plan(props: {
   const base = ix.settings.base
   const view = useMemo(() => monthView(ix, month, current), [ix, month, current])
   const rta = view.readyToAssign
-  const nothingAssigned = view.assigned === 0
+  const shownRta = useCountUp(rta)
+  const rtaRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const [editing, setEditing] = useState<{ id: ID; field: 'name' | 'note' } | null>(null)
+  const [editingGroup, setEditingGroup] = useState<ID | null>(null)
+
   const prevHasPlan = (ix.asg.get(addMonths(month, -1))?.size ?? 0) > 0
-  const ritual = useRitual(today, view.need, rta)
-  const showRitual = month === current && ritual.visible
+  const showRitual = month === current && dayOfMonth(today) <= 12
+
+  useSortable(listRef, {
+    groupSelector: '[data-sort-group]',
+    disabled: !!editing || !!editingGroup,
+    onDrop: (info) => {
+      if (!info.toGroup) return
+      undoable('Moved category', () => placeCategory(info.id, info.toGroup!, info.index))
+      play('drop')
+    },
+  })
+  useSortable(listRef, {
+    itemSelector: '[data-group-id]',
+    idAttr: 'data-group-id',
+    handleSelector: '[data-group-handle]',
+    disabled: !!editing || !!editingGroup,
+    onDrop: (info) => {
+      undoable('Moved group', () => placeGroup(info.id, info.index))
+      play('drop')
+    },
+  })
+
+  // ← → switch months on a keyboard.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      if (document.querySelector('dialog[open]') || e.metaKey || e.ctrlKey) return
+      if (e.key === 'ArrowLeft') props.setMonth(addMonths(month, -1))
+      else if (e.key === 'ArrowRight') props.setMonth(addMonths(month, 1))
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [month])
 
   function fund() {
-    const amt = fundTargets(month, current)
-    if (amt) toast(`Assigned ${fmt(amt, base)} to targets`)
+    const amt = undoable('Funded targets', () => fundTargets(month, current))
+    if (!amt) return
+    play('success')
+    flash(rtaRef.current, 'pulse-once')
+    toast(`${fmt(amt, base)} went to your targets`, { undo: true })
+  }
+
+  function newCategory(group: ID) {
+    const c = addCategory(group, '')
+    setEditing({ id: c.id, field: 'name' })
   }
 
   return (
     <div>
-      {props.header}
-      <div class="topline" style={{ minHeight: '40px', paddingTop: 0 }}>
+      <div class="pagehead">
         <div class="monthnav">
           <button class="iconbtn" aria-label="Previous month" onClick={() => props.setMonth(addMonths(month, -1))}>
             <IconChevron dir="left" />
@@ -46,139 +109,265 @@ export function Plan(props: {
             <IconChevron dir="right" />
           </button>
         </div>
-        {month !== current && (
-          <button class="link" onClick={() => props.setMonth(current)}>
-            This month
+        {month !== current ? (
+          <button class="pill sm" onClick={() => props.setMonth(current)}>
+            Now
+          </button>
+        ) : (
+          <button class="iconbtn gear" aria-label="Settings" onClick={props.onSettings}>
+            <IconGear />
           </button>
         )}
       </div>
 
       <section class="rta">
-        <div class={`rta-num ${rta < 0 ? 'neg' : rta > 0 ? 'pos' : ''}`} style={rta === 0 ? { color: 'var(--pen)' } : undefined}>
-          <span class={`marked${rta < 0 ? ' neg' : ''}`}>{fmt(rta, base)}</span>
+        <div class="rta-num" ref={rtaRef} style={{ color: rta < 0 ? 'var(--red)' : rta > 0 ? 'var(--green)' : 'var(--pen)' }}>
+          <span class={`marked${rta < 0 ? ' neg' : ''}`}>{fmt(shownRta, base)}</span>
         </div>
         <div class="rta-cap">
-          {rta > 0
-            ? 'ready to assign. Give it a job.'
-            : rta < 0
-              ? 'more assigned than you have. Take some back.'
-              : 'Every bit of money has a job.'}
+          {rta > 0 ? 'ready to assign, give it all a job.' : rta < 0 ? 'more assigned than you have.' : 'Every bit has a job.'}
         </div>
-        <div class="rta-actions">
-          {view.need > 0 && rta > 0 && !showRitual && (
-            <button class="btn" onClick={fund}>
-              Fund targets · {fmt(Math.min(view.need, rta), base)}
-            </button>
-          )}
-          {nothingAssigned && prevHasPlan && rta > 0 && (
-            <button
-              class="btn ghost"
-              onClick={() => {
-                repeatLastMonth(month)
-                toast('Copied last month’s plan')
-              }}
-            >
-              Repeat last month
-            </button>
-          )}
-        </div>
+        {(view.need > 0 && rta > 0) || (view.assigned === 0 && prevHasPlan && rta > 0) ? (
+          <div class="rta-actions">
+            {view.need > 0 && rta > 0 && (
+              <button class="pill main" onClick={fund}>
+                Fund targets <small>{fmt(Math.min(view.need, rta), base)}</small>
+              </button>
+            )}
+            {view.assigned === 0 && prevHasPlan && rta > 0 && (
+              <button
+                class="pill"
+                onClick={() => {
+                  undoable('Repeated last month', () => repeatLastMonth(month))
+                  play('success')
+                  toast('Last month’s plan copied', { undo: true })
+                }}
+              >
+                Repeat last month
+              </button>
+            )}
+          </div>
+        ) : null}
       </section>
 
-      {showRitual && <Ritual r={ritual} today={today} onCount={props.onCount} onReflect={props.onReflect} onFund={fund} needs={view.need} />}
+      {showRitual && <Ritual today={today} onCount={props.onCount} onReflect={props.onReflect} />}
 
-      {view.groups.map((g) => (
-        <div key={g.group.id}>
-          <div class="budget-head">
-            <span class="label">{g.group.name}</span>
-            <span class="cols">
-              <span class="label">Assigned</span>
-              <span class="label">Spent</span>
-            </span>
-            <span class="label" style={{ textAlign: 'right' }}>
-              {fmt(g.available, base)}
-            </span>
+      <div class="colhead" aria-hidden="true">
+        <span style={{ textAlign: 'left' }} />
+        <span>Assigned</span>
+        <span>Spent</span>
+        <span>Available</span>
+      </div>
+
+      <div ref={listRef}>
+        {view.groups.map((g) => (
+          <div class="grp" key={g.group.id} data-group-id={g.group.id}>
+            <div class="grp-head">
+              <div class="grp-name" data-group-handle>
+                {editingGroup === g.group.id ? (
+                  <InlineInput
+                    value={g.group.name}
+                    label="Group name"
+                    onDone={(v) => {
+                      setEditingGroup(null)
+                      if (v === null) return
+                      if (!v.trim()) {
+                        if (!g.cats.length) undoable('Deleted group', () => deleteGroup(g.group.id))
+                        return
+                      }
+                      if (v.trim() !== g.group.name) saveGroup({ ...g.group, name: v.trim() } as Group)
+                    }}
+                  />
+                ) : (
+                  <span onClick={() => setEditingGroup(g.group.id)}>{g.group.name}</span>
+                )}
+              </div>
+              <button class="iconbtn grp-add" aria-label={`Add a category to ${g.group.name}`} onClick={() => newCategory(g.group.id)}>
+                <IconPlus />
+              </button>
+            </div>
+            <div data-sort-group={g.group.id} style={{ minHeight: g.cats.length ? undefined : '14px' }}>
+              {g.cats.map((c) => (
+                <CatRow
+                  key={c.cat.id}
+                  c={c}
+                  base={base}
+                  month={month}
+                  editing={editing?.id === c.cat.id ? editing.field : null}
+                  setEditing={(f) => setEditing(f ? { id: c.cat.id, field: f } : null)}
+                  onOpen={() => props.onCategory(c.cat.id)}
+                />
+              ))}
+            </div>
           </div>
-          {g.cats.map((c) => (
-            <CatRow key={c.cat.id} c={c} base={base} month={month} wide={props.wide} onOpen={() => props.onCategory(c.cat.id)} />
-          ))}
-        </div>
-      ))}
+        ))}
+      </div>
 
-      <div class="addcat">
-        <button class="link" onClick={() => props.onCategory('new')}>
-          + New category
+      <div class="newgroup">
+        <button
+          class="pill ghost"
+          onClick={() => {
+            const g = addGroup('New group')
+            setEditingGroup(g.id)
+          }}
+        >
+          <IconPlus /> Group
         </button>
       </div>
     </div>
   )
 }
 
-function CatRow(props: { c: CatMonth; base: string; month: string; wide: boolean; onOpen: () => void }) {
+/** A text input that commits on Enter/blur (value) and cancels on Escape (null). */
+function InlineInput(props: { value: string; label: string; onDone: (v: string | null) => void; placeholder?: string }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const done = useRef(false)
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+  const finish = (v: string | null) => {
+    if (done.current) return
+    done.current = true
+    props.onDone(v)
+  }
+  return (
+    <input
+      ref={ref}
+      type="text"
+      aria-label={props.label}
+      placeholder={props.placeholder}
+      defaultValue={props.value}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={(e) => finish(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') finish(e.currentTarget.value)
+        if (e.key === 'Escape') finish(null)
+      }}
+    />
+  )
+}
+
+function CatRow(props: {
+  c: CatMonth
+  base: string
+  month: string
+  editing: 'name' | 'note' | null
+  setEditing: (f: 'name' | 'note' | null) => void
+  onOpen: () => void
+}) {
   const { c, base } = props
+  const cat = c.cat
   const budget = c.carry + c.assigned
   const spent = -c.activity
   const short = c.need > 0 && c.available >= 0
   const tone = c.available < 0 ? 'neg' : short ? 'short' : c.available > 0 ? 'pos' : 'zero'
-  let sub = c.cat.note ?? ''
-  let subClass = ''
-  if (c.need > 0) {
-    sub = `needs ${fmt(c.need, base)} more`
-    subClass = 'needs'
-  } else if (c.available < 0) {
-    sub = `overspent by ${fmt(-c.available, base)}`
+  const used = budget > 0 ? Math.min(100, (Math.max(0, spent) / budget) * 100) : spent > 0 ? 100 : 0
+  const [draft, setDraftVal] = useState<string | null>(null)
+
+  function saveName(v: string | null) {
+    props.setEditing(null)
+    if (v === null) {
+      if (!cat.name) deleteCategory(cat.id)
+      return
+    }
+    const name = v.trim()
+    if (!name) {
+      if (!cat.name) deleteCategory(cat.id)
+      return
+    }
+    if (name !== cat.name) undoable('Renamed category', () => saveCategory({ ...cat, name }))
   }
-  const [editing, setEditing] = useState<string | null>(null)
+
+  function saveNote(v: string | null) {
+    props.setEditing(null)
+    if (v === null) return
+    const note = v.trim()
+    if (note === (cat.note ?? '')) return
+    const next: Category = { ...cat }
+    if (note) next.note = note
+    else delete next.note
+    undoable('Edited note', () => saveCategory(next))
+  }
+
+  function commitAssign(raw: string) {
+    setDraftVal(null)
+    const v = raw.trim() === '' ? 0 : evalAmount(raw)
+    if (v === null || v === c.assigned) return
+    undoable(`Assigned ${cat.name}`, () => setAssigned(props.month, cat.id, v))
+    play('tap')
+  }
+
   return (
-    <div class="cat" role="button" tabIndex={0} onClick={props.onOpen} onKeyDown={(e) => e.key === 'Enter' && props.onOpen()}>
-      <div class="cat-name">
-        <b>{c.cat.name}</b>
-        {sub && <small class={subClass}>{sub}</small>}
+    <div class={`crow${c.available < 0 ? ' over' : ''}${props.editing ? ' editing' : ''}`} data-sort-id={cat.id} style={{ '--used': `${used}%` }}>
+      <div class="cname">
+        <div class="cname-line">
+          {props.editing === 'name' ? (
+            <InlineInput value={cat.name} label="Category name" placeholder="Name" onDone={saveName} />
+          ) : (
+            <span class="cname-text" onClick={() => props.setEditing('name')}>
+              {cat.name || '—'}
+            </span>
+          )}
+          {!cat.note && props.editing !== 'note' && (
+            <span class="cnote-add" onClick={() => props.setEditing('note')}>
+              Add note
+            </span>
+          )}
+        </div>
+        {props.editing === 'note' ? (
+          <div class="cnote">
+            <InlineInput value={cat.note ?? ''} label="Note" placeholder="Note" onDone={saveNote} />
+          </div>
+        ) : cat.note ? (
+          <div class="cnote" onClick={() => props.setEditing('note')}>
+            {cat.note}
+          </div>
+        ) : null}
       </div>
-      <div class="cat-assigned" onClick={(e) => e.stopPropagation()}>
-        {props.wide && (
-          <input
-            type="text"
-            inputMode="decimal"
-            aria-label={`Assigned to ${c.cat.name}`}
-            value={editing ?? fmt(c.assigned, base, { bare: true })}
-            onFocus={(e) => {
-              setEditing(c.assigned ? String(c.assigned / 100) : '')
-              requestAnimationFrame(() => e.currentTarget?.select())
-            }}
-            onInput={(e) => setEditing(e.currentTarget.value)}
-            onBlur={(e) => {
-              const raw = e.currentTarget.value.trim()
-              const v = raw === '' ? 0 : parseAmount(raw)
-              if (v !== null && v !== c.assigned) setAssigned(props.month, c.cat.id, v)
-              setEditing(null)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur()
-              if (e.key === 'Escape') {
-                setEditing(null)
-                e.currentTarget.blur()
-              }
-            }}
-          />
-        )}
-      </div>
-      <span class="cat-spent num">{fmt(spent, base, { bare: true })}</span>
-      <span class="cat-avail">
-        <span class={`avail ${tone}`}>{fmt(c.available, base)}</span>
-      </span>
-      <div class="cat-gauge">
-        <Gauge used={spent} total={budget} />
-      </div>
+      <input
+        class="casg"
+        type="text"
+        inputMode="decimal"
+        data-no-drag
+        aria-label={`Assigned to ${cat.name}`}
+        value={draft ?? fmt(c.assigned, base, { bare: true })}
+        onFocus={(e) => {
+          setDraftVal(c.assigned ? String(c.assigned / 100) : '')
+          const el = e.currentTarget
+          requestAnimationFrame(() => el.select())
+        }}
+        onInput={(e) => setDraftVal(e.currentTarget.value)}
+        onBlur={(e) => commitAssign(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          const all = [...document.querySelectorAll<HTMLInputElement>('.casg')]
+          const i = all.indexOf(e.currentTarget)
+          if (e.key === 'Enter' || e.key === 'ArrowDown') {
+            e.preventDefault()
+            if (all[i + 1]) all[i + 1].focus()
+            else e.currentTarget.blur()
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            all[i - 1]?.focus()
+          } else if (e.key === 'Escape') {
+            setDraftVal(null)
+            e.currentTarget.value = fmt(c.assigned, base, { bare: true })
+            e.currentTarget.blur()
+          }
+        }}
+      />
+      <span class="cspent num">{fmt(spent, base, { bare: true })}</span>
+      <button class={`avail num ${tone}`} data-no-drag onClick={props.onOpen} aria-label={`${cat.name}: ${fmt(c.available, base)} available. Open`}>
+        {fmt(c.available, base)}
+      </button>
     </div>
   )
 }
 
-/**
- * The start-of-month routine from the spreadsheet, made into four checkable steps:
- * count the money, log income, fund targets, look back at last month.
- */
-function useRitual(today: string, needs: number, rta: number) {
+/** The start-of-month routine from the spreadsheet: count, log income, fund, look back. */
+function Ritual(props: { today: string; onCount: () => void; onReflect: (m: string) => void }) {
   const ix = useIndex()
+  const { today } = props
   const month = monthOf(today)
   const prev = addMonths(month, -1)
   const key = `mio-ritual-${month}`
@@ -189,113 +378,81 @@ function useRitual(today: string, needs: number, rta: number) {
       return false
     }
   })
-  const base = ix.settings.base
+  const view = useMemo(() => monthView(ix, month, month), [ix, month])
   const count = lastCount()
   const counted = !!count && monthOf(count.date) === month
   const incomeNow = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === month)
-  const incomeBefore = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === prev)
-  // Suggest last month's income that hasn't shown up yet this month (same note).
   const seen = new Set(incomeNow.map((t) => (t.note ?? '').toLowerCase()))
-  const suggestions = incomeBefore.filter((t) => !seen.has((t.note ?? '').toLowerCase())).slice(0, 3)
-  const hasData = ix.months.some((m) => m < month)
+  const suggestions = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === prev && !seen.has((t.note ?? '').toLowerCase())).slice(0, 4)
+  const hasHistory = ix.months.some((m) => m < month)
   const reflected = !!ix.db.notes[prev]?.text?.trim()
-  const funded = needs === 0 || rta <= 0
-  const doneAll = counted && incomeNow.length > 0 && funded && (reflected || !hasData)
-  const visible = !(hidden || dayOfMonth(today) > 12 || doneAll || !live(ix.db.accounts).length)
-  const hide = () => {
-    try {
-      localStorage.setItem(key, '1')
-    } catch {
-      /* private mode */
-    }
-    setHidden(true)
-  }
-  return { visible, hide, base, count, counted, incomeNow, suggestions, hasData, reflected, funded, prev }
-}
+  const funded = view.need === 0 || view.readyToAssign <= 0
+  const allDone = counted && incomeNow.length > 0 && funded && (reflected || !hasHistory)
+  if (hidden || allDone || !live(ix.db.accounts).length) return null
 
-function Ritual(props: {
-  r: ReturnType<typeof useRitual>
-  today: string
-  onCount: () => void
-  onReflect: (m: string) => void
-  onFund: () => void
-  needs: number
-}) {
-  const { today } = props
-  const { base, count, counted, incomeNow, suggestions, hasData, reflected, funded, prev } = props.r
   return (
     <section class="ritual">
-      <div class="ritual-head">
-        <span class="label">New month</span>
-        <button class="link" style={{ fontSize: '13px' }} onClick={props.r.hide}>
-          Hide
-        </button>
-      </div>
       <ol>
         <li class={counted ? 'done' : ''}>
-          <span class="ritual-text">
-            Count your money
-            <small>{counted ? `Counted ${fmt(count!.total, base)}` : 'Type the real balance of each account'}</small>
-          </span>
+          <span class="step">✓</span>
+          <span class="ritual-text">Count your money</span>
           {!counted && (
-            <button class="btn mini" onClick={props.onCount}>
+            <button class="pill sm" onClick={props.onCount}>
               Count
             </button>
           )}
         </li>
         <li class={incomeNow.length ? 'done' : ''}>
-          <span class="ritual-text">
-            Log this month's income
-            <small>
-              {incomeNow.length
-                ? `${fmt(incomeNow.reduce((s, t) => s + t.base, 0), base)} so far`
-                : suggestions.length
-                  ? 'Same as last month?'
-                  : 'Use “+ Income” on Today'}
-            </small>
-          </span>
+          <span class="step">✓</span>
+          <span class="ritual-text">Log your income</span>
         </li>
-        {suggestions.map((t) => (
-          <li key={t.id} class="sub">
-            <span class="ritual-text">
-              {t.note || 'Income'} <span class="num faint">{fmt(t.amt, t.cur)}</span>
-            </span>
-            <button
-              class="btn ghost mini"
-              onClick={() => {
-                addTxn({ date: today, cat: RTA, amt: t.amt, cur: t.cur, note: t.note })
-                toast(`${fmt(t.amt, t.cur)} logged`)
-              }}
-            >
-              Log
-            </button>
-          </li>
-        ))}
+        {suggestions.length > 0 && (
+          <div class="pills">
+            {suggestions.map((t) => (
+              <button
+                key={t.id}
+                class="pill sm"
+                onClick={() => {
+                  undoable(`${fmt(t.amt, t.cur)} income`, () => addTxn({ date: today, cat: RTA, amt: t.amt, cur: t.cur, note: t.note }))
+                  play('income')
+                  toast(`+${fmt(t.amt, t.cur)} ready to assign`, { undo: true })
+                }}
+              >
+                {t.note || 'Income'} <small>{fmt(t.amt, t.cur)}</small>
+              </button>
+            ))}
+          </div>
+        )}
         <li class={funded ? 'done' : ''}>
-          <span class="ritual-text">
-            Fund your targets
-            <small>{funded ? 'Done' : `${fmt(props.needs, base)} still needed`}</small>
-          </span>
-          {!funded && (
-            <button class="btn mini" onClick={props.onFund}>
-              Fund
-            </button>
-          )}
+          <span class="step">✓</span>
+          <span class="ritual-text">Fund your targets</span>
         </li>
-        {hasData && (
+        {hasHistory && (
           <li class={reflected ? 'done' : ''}>
-            <span class="ritual-text">
-              Look back at {monthName(prev)}
-              <small>{reflected ? 'Noted' : 'What went wrong, what went right'}</small>
-            </span>
+            <span class="step">✓</span>
+            <span class="ritual-text">Look back at {monthName(prev)}</span>
             {!reflected && (
-              <button class="btn ghost mini" onClick={() => props.onReflect(prev)}>
+              <button class="pill sm" onClick={() => props.onReflect(prev)}>
                 Write
               </button>
             )}
           </li>
         )}
       </ol>
+      <button
+        class="link"
+        style={{ fontSize: '13px', color: 'var(--ink-3)' }}
+        onClick={() => {
+          try {
+            localStorage.setItem(key, '1')
+          } catch {
+            /* private mode */
+          }
+          setHidden(true)
+        }}
+      >
+        Hide for this month
+      </button>
     </section>
   )
 }

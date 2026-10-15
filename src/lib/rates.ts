@@ -5,7 +5,7 @@ const SOURCES = [
   (base: string) => `https://latest.currency-api.pages.dev/v1/currencies/${base}.min.json`,
 ]
 
-const FRESH_FOR = 6 * 60 * 60 * 1000
+const FRESH_FOR = 12 * 60 * 60 * 1000
 
 /** Currencies the budget actually deals with. */
 export function currenciesInUse(): string[] {

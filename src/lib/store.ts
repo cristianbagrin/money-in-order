@@ -87,6 +87,102 @@ export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
 
 type Patch = { [K in CollectionName]?: DB[K][string][] }
 
+// ---------------------------------------------------------------- undo
+//
+// Wrap a user action in undoable(): every record it touches is remembered as it was before,
+// and undo() writes those versions back (as fresh edits, so undo syncs like anything else).
+
+interface Recording {
+  label: string
+  /** "collection|id" -> the record before the action (null = it didn't exist) */
+  prev: Map<string, Rec | null>
+  restore?: () => void
+}
+
+export interface UndoEntry {
+  label: string
+  at: number
+  prev: Map<string, Rec | null>
+  restore?: () => void
+}
+
+let recording: Recording | null = null
+const undoStack: UndoEntry[] = []
+const redoStack: UndoEntry[] = []
+const undoListeners = new Set<Listener>()
+
+export function onUndoChange(fn: Listener): () => void {
+  undoListeners.add(fn)
+  return () => undoListeners.delete(fn)
+}
+
+function undoChanged() {
+  for (const fn of undoListeners) fn()
+}
+
+/** Run fn as one undoable step. restore() runs after an undo (e.g. to put the typed amount back). */
+export function undoable<T>(label: string, fn: () => T, restore?: () => void): T {
+  if (recording) return fn()
+  const rec: Recording = { label, prev: new Map(), restore }
+  recording = rec
+  try {
+    return fn()
+  } finally {
+    recording = null
+    if (rec.prev.size) {
+      undoStack.push({ label, at: Date.now(), prev: rec.prev, restore })
+      if (undoStack.length > 50) undoStack.shift()
+      redoStack.length = 0
+      undoChanged()
+    }
+  }
+}
+
+export function lastUndo(): UndoEntry | null {
+  return undoStack[undoStack.length - 1] ?? null
+}
+
+/** Write back the remembered versions; returns what the reverse step needs. */
+function applyPrev(prev: Map<string, Rec | null>): Map<string, Rec | null> {
+  const back = new Map<string, Rec | null>()
+  const patch: Record<string, Rec[]> = {}
+  for (const [key, old] of prev) {
+    const [name, id] = splitKey(key)
+    const cur = (db[name as CollectionName] as Record<ID, Rec>)[id] ?? null
+    back.set(key, cur)
+    let next: Rec | null = null
+    if (old) next = { ...old }
+    else if (cur) next = { ...cur, d: 1 }
+    if (next) (patch[name] ??= []).push(next)
+  }
+  commit(patch as Patch)
+  return back
+}
+
+function splitKey(key: string): [string, string] {
+  const i = key.indexOf('|')
+  return [key.slice(0, i), key.slice(i + 1)]
+}
+
+export function undo(): UndoEntry | null {
+  const e = undoStack.pop()
+  if (!e) return null
+  const back = applyPrev(e.prev)
+  redoStack.push({ label: e.label, at: Date.now(), prev: back })
+  e.restore?.()
+  undoChanged()
+  return e
+}
+
+export function redo(): UndoEntry | null {
+  const e = redoStack.pop()
+  if (!e) return null
+  const back = applyPrev(e.prev)
+  undoStack.push({ label: e.label, at: Date.now(), prev: back })
+  undoChanged()
+  return e
+}
+
 /** Write records. Each gets a fresh timestamp. */
 export function commit(patch: Patch) {
   const next = { ...db } as unknown as Record<string, Record<ID, Rec>>
@@ -94,7 +190,13 @@ export function commit(patch: Patch) {
     const recs = patch[name]
     if (!recs?.length) continue
     const coll = { ...next[name] }
-    for (const r of recs) coll[r.id] = { ...r, u: stamp() }
+    for (const r of recs) {
+      if (recording) {
+        const key = `${name}|${r.id}`
+        if (!recording.prev.has(key)) recording.prev.set(key, coll[r.id] ?? null)
+      }
+      coll[r.id] = { ...r, u: stamp() }
+    }
     next[name] = coll
   }
   db = next as unknown as DB
@@ -114,6 +216,35 @@ export function settings(): Settings {
 
 export function updateSettings(patch: Partial<Settings>) {
   commit({ meta: [{ ...DEFAULT_SETTINGS, ...settings(), ...patch, id: 'settings' } as Settings] })
+}
+
+/**
+ * Re-express the whole budget in another currency (e.g. after moving countries).
+ * Every stored base amount is converted at today's rate; amounts as entered stay untouched.
+ */
+export function changeBase(next: string): boolean {
+  const s = settings()
+  if (next === s.base) return true
+  const r = s.rates[next]
+  if (!r) return false
+  const f = (v: number) => Math.round(v / r)
+  const txns = Object.values(db.txns).map((t) => ({ ...t, base: t.cur === next ? t.amt : f(t.base) }))
+  const assigns = Object.values(db.assigns).map((a) => ({ ...a, amt: f(a.amt) }))
+  const counts = Object.values(db.counts).map((c) => ({ ...c, total: f(c.total), expected: f(c.expected) }))
+  const cats = Object.values(db.cats)
+    .filter((c) => c.target)
+    .map((c) => ({ ...c, target: { ...c.target!, amount: f(c.target!.amount) } }))
+  const rates: Rates = { [s.base]: Math.round((1 / r) * 10000) / 10000 }
+  for (const [c, v] of Object.entries(s.rates)) if (c !== next) rates[c] = Math.round((v / r) * 10000) / 10000
+  const extraCurrencies = [...new Set([s.base, ...s.extraCurrencies.filter((c) => c !== next)])]
+  commit({
+    txns,
+    assigns,
+    counts,
+    cats,
+    meta: [{ ...s, base: next, rates, extraCurrencies, pinned: {} }],
+  })
+  return true
 }
 
 export function toBase(amt: number, from: string, rates: Rates = settings().rates): number {
@@ -263,6 +394,41 @@ export function categoryHasHistory(id: ID): boolean {
 export function deleteCategory(id: ID) {
   const c = db.cats[id]
   if (c) commit({ cats: [tomb(c)] })
+}
+
+/** Put a category into a group at a position (drag and drop). */
+export function placeCategory(id: ID, group: ID, index: number) {
+  const c = db.cats[id]
+  if (!c) return
+  const siblings = Object.values(db.cats)
+    .filter((x) => !x.d && x.group === group && x.id !== id)
+    .sort((a, b) => a.order - b.order)
+  siblings.splice(Math.max(0, Math.min(index, siblings.length)), 0, { ...c, group })
+  const changed = siblings.map((s, k) => ({ ...s, order: k })).filter((s) => {
+    const o = db.cats[s.id]
+    return o.order !== s.order || o.group !== s.group
+  })
+  if (changed.length) commit({ cats: changed })
+}
+
+function placeIn<T extends Rec & { order: number }>(coll: Record<ID, T>, id: ID, index: number): T[] {
+  const list = Object.values(coll)
+    .filter((x) => !x.d && x.id !== id)
+    .sort((a, b) => a.order - b.order)
+  const item = coll[id]
+  if (!item) return []
+  list.splice(Math.max(0, Math.min(index, list.length)), 0, item)
+  return list.map((x, k) => ({ ...x, order: k })).filter((x) => coll[x.id].order !== x.order)
+}
+
+export function placeGroup(id: ID, index: number) {
+  const changed = placeIn(db.groups, id, index)
+  if (changed.length) commit({ groups: changed })
+}
+
+export function placeAccount(id: ID, index: number) {
+  const changed = placeIn(db.accounts, id, index)
+  if (changed.length) commit({ accounts: changed })
 }
 
 export function reorderCategory(id: ID, dir: -1 | 1) {

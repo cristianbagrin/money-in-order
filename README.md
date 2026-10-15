@@ -12,15 +12,17 @@ devices in sync with end-to-end encryption.
 
 | Screen | What it's for |
 | --- | --- |
-| **Today** | The register. Your daily allowance (what's left in daily categories ÷ days left), today's entries, and a keypad. Chips show what each category will have *after* this purchase. |
-| **Plan** | Ready to assign, categories with assigned / spent / available, one-tap *Fund targets*, *Cover* for overspending, and the start-of-month routine. |
-| **Ledger** | Every transaction, searchable and editable. |
-| **Review** | Income, spent, savings rate against your target, plan vs. spent, 6-month trend, monthly notes, and **Copy for Claude**: a self-explaining Markdown summary to paste into Claude. |
+| **Today** | What's left for today, and the register: type the amount, tap where it went (every category, plus Income). Each bubble shows what the category will have *after* this purchase. Phones get a keypad; on a laptop you just type, arrow to a category and press Enter. |
+| **Plan** | Ready to assign, and every category with an Assigned field (type sums like `6000+500`, ↑/↓ to move), Spent and Available. Click a name or note to edit it, hold and drag to reorder, tap Available for details (Cover overspending, assign suggestions, target). |
+| **History** | Every transaction, searchable, filterable by category; edit with the same pills as everywhere else. |
+| **Review** | What this month means in plain words, this month vs. your plan, the last six months, weeks, category trends, your notes, and **Copy for Claude**. |
+
+Everything important can be undone for a few seconds (and with ⌘Z on a laptop). Sounds can be switched off in Settings.
 
 ### The rules the math follows
 
 - Money is one pool, kept in your **budget currency** (e.g. TWD). Anything entered in another currency
-  is converted at the day's rate (fetched automatically; you can pin a rate).
+  is converted at the day's rate (fetched automatically, at most twice a day). You can switch the budget currency any time; everything converts.
 - `Ready to assign = everything that came in − everything assigned` (money assigned to future months is held aside).
 - A category's `available = last month's available + assigned + activity`. Leftovers roll over; overspending rolls over as a negative until you cover it.
 - **Targets:** *Monthly* (set aside X every month), *Top up* (bring the category up to X), *Goal* (reach X, optionally by a month, spread evenly).

@@ -1,0 +1,296 @@
+/* Calendar + DatePill. Colours come from the app tokens; fallbacks only keep the module standalone. */
+
+.cal {
+  --cal-col: 42px; /* column width */
+  --cal-row: 40px; /* row height = touch target */
+  --cal-dot: 36px; /* the visible circle */
+  width: max-content;
+  max-width: 100%;
+  color: var(--ink, #15242c);
+  font-family: var(--sans, system-ui, sans-serif);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ---- header */
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 44px;
+  padding: 0 0 4px 9px;
+}
+.cal-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variation-settings: var(--vs-print);
+}
+.cal-title-in {
+  display: inline-block;
+}
+.cal-title-in:not([data-dir='0']) {
+  animation: cal-fade 0.22s ease-out;
+}
+.cal-year {
+  font-weight: 450;
+  color: var(--ink-3, #8e989c);
+}
+.cal-nav {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.cal-arrow {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg, #f6f6f3);
+  color: var(--pen, #1d58a8);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    opacity 0.15s,
+    transform 0.18s cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+.cal-arrow:active:not(:disabled) {
+  transform: scale(0.86);
+}
+.cal-arrow:disabled {
+  color: var(--ink-3, #8e989c);
+  opacity: 0.4;
+  cursor: default;
+}
+.cal-arrow:focus-visible {
+  outline: 2px solid var(--pen, #1d58a8);
+  outline-offset: 2px;
+}
+
+/* ---- grid */
+
+.cal-week,
+.cal-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, var(--cal-col)));
+}
+.cal-week > div {
+  display: grid;
+  place-items: center;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3, #8e989c);
+  font-variation-settings: var(--vs-column);
+}
+
+/* Clips the sliding month; the 4px margin keeps focus rings on the edge days visible. */
+.cal-clip {
+  overflow: hidden;
+  margin: -4px;
+  padding: 4px;
+  touch-action: pan-y;
+}
+.cal-rows[data-dir='1'] {
+  animation: cal-next 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.cal-rows[data-dir='-1'] {
+  animation: cal-prev 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cal-day {
+  display: grid;
+  place-items: center;
+  height: var(--cal-row);
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.cal-day > span {
+  display: grid;
+  place-items: center;
+  width: min(var(--cal-dot), 100%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 450;
+  font-variation-settings: var(--vs-column);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    transform 0.2s cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+.cal-day.is-out > span {
+  color: var(--ink-3, #8e989c);
+}
+.cal-day.is-today > span {
+  color: var(--pen, #1d58a8);
+  font-weight: 650;
+  box-shadow: inset 0 0 0 1.5px var(--pen, #1d58a8);
+}
+.cal-day:focus-visible {
+  outline: none;
+}
+.cal-day:focus-visible > span {
+  background: var(--pen-wash, #e5edf8);
+  outline: 2px solid var(--pen, #1d58a8);
+  outline-offset: 2px;
+}
+.cal-day[aria-selected='true'] > span {
+  background: var(--pen, #1d58a8);
+  color: var(--on-pen, #fff);
+  font-weight: 650;
+  box-shadow: none;
+}
+.cal-day.is-off {
+  cursor: default;
+}
+.cal-day.is-off > span {
+  opacity: 0.32;
+}
+.cal-day.is-pop > span {
+  animation: cal-pop 0.34s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+@media (hover: hover) {
+  .cal-arrow:hover:not(:disabled) {
+    background: var(--pen-wash, #e5edf8);
+  }
+  .cal-day:not(.is-off):not([aria-selected='true']):hover > span {
+    background: var(--pen-wash, #e5edf8);
+  }
+}
+.cal-day:not(.is-off):active > span {
+  transform: scale(0.86);
+}
+
+@media (pointer: coarse) {
+  .cal {
+    --cal-col: 44px;
+    --cal-row: 42px;
+    --cal-dot: 38px;
+  }
+  .cal-day > span {
+    font-size: 15px;
+  }
+}
+
+@keyframes cal-next {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes cal-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+@keyframes cal-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes cal-pop {
+  from {
+    transform: scale(0.6);
+  }
+}
+
+/* ---------------------------------------------------------------- date pill + popover */
+
+.dp-layer {
+  display: contents;
+}
+.datepill[aria-expanded='true'][aria-pressed='false'] {
+  background: var(--pen-wash, #e5edf8);
+  border-color: var(--pen, #1d58a8);
+  color: var(--pen, #1d58a8);
+}
+
+.dp-pop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+}
+.dp-pop[popover] {
+  right: auto;
+  bottom: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  overflow: visible;
+}
+.dp-card {
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  box-shadow:
+    0 12px 40px rgba(21, 36, 44, 0.18),
+    0 0 0 1px rgba(21, 36, 44, 0.05);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  animation: dp-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.12) both;
+}
+.dp-card:focus,
+.dp-card:focus-visible {
+  outline: none;
+}
+.dp-card.is-out {
+  pointer-events: none;
+  animation: dp-out 0.14s ease-in forwards;
+}
+.dp-card.is-out.is-picked {
+  animation-delay: 0.12s; /* let the picked day land before the card goes */
+}
+.dp-quick {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 6px;
+}
+
+@keyframes dp-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--dp-dy, -6px)) scale(0.9);
+  }
+}
+@keyframes dp-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-rows,
+  .cal-title-in,
+  .cal-day > span,
+  .cal-arrow,
+  .dp-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}

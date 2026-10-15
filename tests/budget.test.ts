@@ -212,3 +212,87 @@ describe('sync merge', () => {
     expect(hasNews(a, ab)).toBe(true)
   })
 })
+
+describe('undo', () => {
+  it('undoes a logged transaction and restores the register', () => {
+    const living = catByName('Living')
+    let restored = ''
+    S.undoable('Logged', () => S.addTxn({ date: '2026-10-05', cat: living.id, amt: -12000, cur: 'TWD' }), () => (restored = '120'))
+    expect(Object.values(S.getDB().txns).filter((t) => !t.d)).toHaveLength(1)
+    const e = S.undo()
+    expect(e?.label).toBe('Logged')
+    expect(restored).toBe('120')
+    expect(Object.values(S.getDB().txns).filter((t) => !t.d)).toHaveLength(0)
+    S.redo()
+    expect(Object.values(S.getDB().txns).filter((t) => !t.d)).toHaveLength(1)
+  })
+
+  it('groups several writes into one step and restores edits and deletions', () => {
+    const living = catByName('Living')
+    const other = catByName('Other')
+    S.setAssigned(OCT, living.id, 500000)
+    S.undoable('Move', () => S.moveMoney(OCT, living.id, other.id, 100000))
+    expect(S.assignedOf(OCT, living.id)).toBe(400000)
+    expect(S.assignedOf(OCT, other.id)).toBe(100000)
+    S.undo()
+    expect(S.assignedOf(OCT, living.id)).toBe(500000)
+    expect(S.assignedOf(OCT, other.id)).toBe(0)
+
+    const t = S.addTxn({ date: '2026-10-05', cat: living.id, amt: -100, cur: 'TWD', note: 'x' })
+    S.undoable('Deleted', () => S.deleteTxn(t.id))
+    expect(S.getDB().txns[t.id].d).toBe(1)
+    S.undo()
+    expect(S.getDB().txns[t.id].d).toBeUndefined()
+    expect(S.getDB().txns[t.id].note).toBe('x')
+  })
+
+  it('places categories across groups by drag and drop', () => {
+    const groups = Object.values(S.getDB().groups).sort((a, b) => a.order - b.order)
+    const living = catByName('Living')
+    S.placeCategory(living.id, groups[2].id, 1)
+    const g3 = Object.values(S.getDB().cats)
+      .filter((c) => c.group === groups[2].id)
+      .sort((a, b) => a.order - b.order)
+      .map((c) => c.name)
+    expect(g3).toEqual(['Purchases', 'Living', 'Trips', 'Other'])
+    S.placeGroup(groups[3].id, 0)
+    const order = Object.values(S.getDB().groups).sort((a, b) => a.order - b.order).map((g) => g.name)
+    expect(order[0]).toBe('Future')
+  })
+})
+
+describe('evalAmount', () => {
+  it('does simple sums', async () => {
+    const { evalAmount } = await import('../src/lib/money')
+    expect(evalAmount('6000')).toBe(600000)
+    expect(evalAmount('6000+500')).toBe(650000)
+    expect(evalAmount('6,000 - 1,000')).toBe(500000)
+    expect(evalAmount('1200*3')).toBe(360000)
+    expect(evalAmount('100/4')).toBe(2500)
+    expect(evalAmount('10+2*3')).toBe(1600)
+    expect(evalAmount('-50')).toBe(-5000)
+    expect(evalAmount('12.5')).toBe(1250)
+    expect(evalAmount('abc')).toBe(null)
+    expect(evalAmount('5+')).toBe(null)
+  })
+})
+
+describe('changing the budget currency', () => {
+  it('converts every stored amount and keeps the math consistent', () => {
+    const living = catByName('Living')
+    S.saveCategory({ ...living, target: { kind: 'refill', amount: 600000 } })
+    S.addTxn({ date: '2026-10-01', cat: RTA, amt: 82900, cur: 'PLN' }) // 829 zł = NT$6,872.41
+    S.setAssigned(OCT, living.id, 600000)
+    S.addTxn({ date: '2026-10-02', cat: living.id, amt: -10000, cur: 'TWD' })
+    expect(S.changeBase('PLN')).toBe(true)
+    const st = S.settings()
+    expect(st.base).toBe('PLN')
+    expect(st.extraCurrencies).toContain('TWD')
+    expect(st.rates.TWD).toBeCloseTo(1 / 8.29, 3)
+    const v = monthView(S.getIndex(), OCT, OCT)
+    expect(v.income).toBe(82900) // entered in PLN, exact
+    expect(v.byId.get(living.id)!.assigned).toBe(Math.round(600000 / 8.29))
+    expect(v.readyToAssign + v.available).toBe(expectedTotal(S.getIndex()))
+    expect(S.getDB().cats[living.id].target?.amount).toBe(Math.round(600000 / 8.29))
+  })
+})

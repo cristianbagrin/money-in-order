@@ -32,7 +32,33 @@ export const CURRENCIES: Record<string, CurrencyInfo> = {
   RON: { code: 'RON', symbol: 'lei', suffix: true, decimals: 2 },
   MDL: { code: 'MDL', symbol: 'L', suffix: true, decimals: 2 },
   UAH: { code: 'UAH', symbol: '₴', decimals: 2 },
+  NZD: { code: 'NZD', symbol: 'NZ$', decimals: 2 },
+  MXN: { code: 'MXN', symbol: 'MX$', decimals: 2 },
+  BRL: { code: 'BRL', symbol: 'R$', decimals: 2 },
+  ARS: { code: 'ARS', symbol: 'AR$', decimals: 2 },
+  CLP: { code: 'CLP', symbol: 'CLP$', decimals: 0 },
+  COP: { code: 'COP', symbol: 'COL$', decimals: 0 },
+  PEN: { code: 'PEN', symbol: 'S/', decimals: 2 },
+  INR: { code: 'INR', symbol: '₹', decimals: 2 },
+  IDR: { code: 'IDR', symbol: 'Rp', decimals: 0 },
+  MYR: { code: 'MYR', symbol: 'RM', decimals: 2 },
+  PHP: { code: 'PHP', symbol: '₱', decimals: 2 },
+  VND: { code: 'VND', symbol: '₫', suffix: true, decimals: 0 },
+  AED: { code: 'AED', symbol: 'AED', suffix: true, decimals: 2 },
+  SAR: { code: 'SAR', symbol: 'SAR', suffix: true, decimals: 2 },
+  ILS: { code: 'ILS', symbol: '₪', decimals: 2 },
+  TRY: { code: 'TRY', symbol: '₺', decimals: 2 },
+  ZAR: { code: 'ZAR', symbol: 'R', decimals: 2 },
+  EGP: { code: 'EGP', symbol: 'E£', decimals: 2 },
+  BGN: { code: 'BGN', symbol: 'лв', suffix: true, decimals: 2 },
+  RSD: { code: 'RSD', symbol: 'дин', suffix: true, decimals: 0 },
+  GEL: { code: 'GEL', symbol: '₾', suffix: true, decimals: 2 },
+  ISK: { code: 'ISK', symbol: 'kr', suffix: true, decimals: 0 },
+  KZT: { code: 'KZT', symbol: '₸', suffix: true, decimals: 2 },
 }
+
+/** Shown first when picking currencies; the rest sit behind "More". */
+export const COMMON_CURRENCIES = ['TWD', 'EUR', 'PLN', 'USD', 'GBP', 'CHF', 'MDL', 'RON', 'UAH', 'JPY']
 
 export function cur(code: string): CurrencyInfo {
   return CURRENCIES[code] ?? { code, symbol: code, suffix: true, decimals: 2 }
@@ -103,4 +129,56 @@ export function keypadToMinor(s: string): number {
   if (!s) return 0
   const [w, f = ''] = s.split('.')
   return Number(w || '0') * 100 + Number((f + '00').slice(0, 2))
+}
+
+/**
+ * Evaluate what someone typed into an amount field, allowing simple sums like "6000+500" or "1200*3".
+ * Returns minor units, or null if it isn't a number.
+ */
+export function evalAmount(input: string): number | null {
+  const s = input.replace(/[\s ]/g, '').replace(/[×x]/gi, '*').replace(/[÷]/g, '/').replace(/−/g, '-')
+  if (!s) return null
+  if (!/[+*/]|.-/.test(s)) return parseAmount(s)
+  const parts = s.match(/(\d[\d.,]*|[+\-*/])/g)
+  if (!parts || parts.join('') !== s.replace(/[^\d.,+\-*/]/g, '')) return null
+  // numbers in minor units, then apply * and / before + and -
+  const nums: number[] = []
+  const ops: string[] = []
+  let sign = 1
+  let expectNum = true
+  for (const p of parts) {
+    if (expectNum) {
+      if (p === '-') {
+        sign = -sign
+        continue
+      }
+      const v = parseAmount(p)
+      if (v === null) return null
+      nums.push(sign * v)
+      sign = 1
+      expectNum = false
+    } else {
+      if (!'+-*/'.includes(p)) return null
+      ops.push(p)
+      expectNum = true
+    }
+  }
+  if (expectNum) return null
+  const terms: number[] = [nums[0]]
+  const addOps: string[] = []
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i]
+    const n = nums[i + 1]
+    if (op === '*') terms[terms.length - 1] = Math.round((terms[terms.length - 1] * n) / 100)
+    else if (op === '/') {
+      if (n === 0) return null
+      terms[terms.length - 1] = Math.round((terms[terms.length - 1] / n) * 100)
+    } else {
+      terms.push(n)
+      addOps.push(op)
+    }
+  }
+  let total = terms[0]
+  for (let i = 0; i < addOps.length; i++) total += addOps[i] === '+' ? terms[i + 1] : -terms[i + 1]
+  return total
 }

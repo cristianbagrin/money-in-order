@@ -1,175 +1,310 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { daily, monthView } from '../lib/budget'
-import { dayOfMonth, daysInMonth, longDate, monthOf } from '../lib/dates'
-import { fmt } from '../lib/money'
+import { dayOfMonth, daysInMonth, monthOf } from '../lib/dates'
+import { cur, fmt, keypadToMinor, parseAmount } from '../lib/money'
+import { currenciesInUse } from '../lib/rates'
+import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type ID } from '../lib/types'
-import { useIndex } from '../ui/hooks'
-import { Sheet } from '../ui/kit'
-import { Register } from './Register'
-import { TxnRow } from './TxnSheet'
-import type { Txn } from '../lib/types'
+import { DatePill } from '../ui/calendar'
+import { useIndex, useMedia } from '../ui/hooks'
+import { Keypad, NoteField, toast } from '../ui/kit'
+import { flash, useCountUp } from '../ui/motion'
+import { haptic, play } from '../ui/sound'
 
-export function Today(props: {
-  today: string
-  wide: boolean
-  header: preact.ComponentChildren
-  onCover: (cat: ID) => void
-  onEdit: (t: Txn) => void
-  onPlan: () => void
-}) {
+// The draft lives outside the component so it survives switching tabs, and undo can put it back.
+interface Draft {
+  digits: string
+  currency: string | null
+  note: string
+  date: string | null
+}
+let draft: Draft = { digits: '', currency: null, note: '', date: null }
+const draftListeners = new Set<() => void>()
+function setDraft(next: Partial<Draft>) {
+  draft = { ...draft, ...next }
+  for (const fn of draftListeners) fn()
+}
+function useDraft(): Draft {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const fn = () => force((n) => n + 1)
+    draftListeners.add(fn)
+    return () => {
+      draftListeners.delete(fn)
+    }
+  }, [])
+  return draft
+}
+
+export function Today(props: { today: string; onPlan: () => void }) {
   const ix = useIndex()
   const { today } = props
   const base = ix.settings.base
   const month = monthOf(today)
   const view = useMemo(() => monthView(ix, month, month), [ix, month])
   const d = useMemo(() => daily(ix, view, today), [ix, view, today])
-  const todays = ix.txns.filter((t) => t.date === today && !t.kind)
-  const spentToday = -todays.filter((t) => t.cat !== RTA).reduce((s, t) => s + t.base, 0)
-  const [listOpen, setListOpen] = useState(false)
+  const touch = useMedia('(pointer: coarse)')
 
-  const dim = daysInMonth(month)
-  const dom = dayOfMonth(today)
-
-  const hero = (
-    <section class="hero">
-      {d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0 ? (
-        <>
-          <div class="hero-num" style={{ fontSize: 'clamp(38px, 11vw, 56px)' }}>
-            Plan first
-          </div>
-          <div class="hero-cap">
-            Give {d.cats.map((c) => c.name).join(' + ')} money for the month and your daily allowance shows up here.
-            {view.readyToAssign > 0 && (
-              <>
-                {' '}
-                <b class="num">{fmt(view.readyToAssign, base)}</b> is waiting.
-              </>
-            )}
-          </div>
-          <button class="btn" style={{ marginTop: '14px' }} onClick={props.onPlan}>
-            Open the plan
-          </button>
-        </>
-      ) : d ? (
-        <>
-          <div class={`hero-num${d.leftToday < 0 ? ' neg' : ''}`}>
-            <span class={`marked${d.leftToday < 0 ? ' neg' : ''}`}>{fmt(Math.abs(d.leftToday), base)}</span>
-          </div>
-          <div class="hero-cap">
-            {d.available < 0 && d.allowance === 0 ? (
-              <>
-                <b>over</b> for the month in {d.cats.map((c) => c.name).join(' + ')}.{' '}
-                <button class="link" style={{ padding: 0 }} onClick={() => props.onCover(d.cats[0].id)}>
-                  Cover it
-                </button>
-              </>
-            ) : d.leftToday < 0 ? (
-              <>
-                <b>over</b> today's share
-              </>
-            ) : d.spentToday > 0 ? (
-              <>
-                left for today, of <b class="num">{fmt(d.allowance, base)}</b>
-              </>
-            ) : (
-              <>left to spend today</>
-            )}
-          </div>
-          <div class="days" aria-hidden="true">
-            <div class="days-ticks">
-              {Array.from({ length: dim }, (_, i) => (
-                <i key={i} class={i + 1 < dom ? 'past' : i + 1 === dom ? 'now' : (i + 1) % 7 === 0 ? 'week' : ''} />
-              ))}
-            </div>
-          </div>
-          <div class="hero-meta">
-            <span>
-              <b class="num">{fmt(d.available, base)}</b> in {d.cats.map((c) => c.name).join(' + ')} · {d.daysLeft} {d.daysLeft === 1 ? 'day' : 'days'}
-            </span>
-            {d.tomorrow !== null && (
-              <span>
-                tomorrow <b class="num">{fmt(d.tomorrow, base)}</b>
-              </span>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          <div class="hero-num">
-            <span class="marked">{fmt(spentToday, base)}</span>
-          </div>
-          <div class="hero-cap">spent today · turn on “daily allowance” for a category to see what's left per day</div>
-        </>
-      )}
-    </section>
-  )
-
-  const list = (
-    <div>
-      {todays.length ? (
-        todays.map((t) => <TxnRow key={t.id} t={t} onClick={() => props.onEdit(t)} />)
-      ) : (
-        <p class="empty">Nothing logged today.</p>
-      )}
-    </div>
-  )
-
-  if (props.wide) {
-    return (
-      <div class="split">
-        <div>
-          {props.header}
-          {hero}
-          {view.overspent.length > 0 && <Overspent view={view} base={base} onCover={props.onCover} />}
-          <div class="section">
-            <span class="label">
-              Today · {longDate(today)}
-              {spentToday > 0 && ` · ${fmt(spentToday, base)}`}
-            </span>
-            {list}
-          </div>
-        </div>
-        <aside>
-          <Register today={today} onCover={props.onCover} />
-        </aside>
-      </div>
-    )
-  }
+  const planFirst = d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0
+  const monthOver = d && d.available < 0 && d.allowance === 0
+  const heroValue = d ? (monthOver ? d.available : d.leftToday) : 0
+  const shown = useCountUp(heroValue)
 
   return (
     <div class="today">
-      {props.header}
-      {hero}
-      <div class="today-list">
-        {todays.length > 0 && (
-          <button class="dayhead line-btn" onClick={() => setListOpen(true)}>
-            <span class="label">Logged today</span>
-            <span class="label num">{fmt(-spentToday, base)}</span>
-          </button>
+      <section class="hero">
+        {!d ? null : planFirst ? (
+          <>
+            <div class="hero-num" style={{ fontSize: 'clamp(36px, 10vw, 52px)' }}>
+              Plan first
+            </div>
+            <div class="hero-cap">Give {d.cats.map((c) => c.name).join(' + ')} money for the month to see what's left each day.</div>
+            <button class="btn plan-first" onClick={props.onPlan}>
+              Open the plan
+            </button>
+          </>
+        ) : (
+          <>
+            <div class={`hero-num${heroValue < 0 ? ' neg' : ''}`}>
+              <span class={`marked${heroValue < 0 ? ' neg' : ''}`}>{fmt(Math.abs(shown), base)}</span>
+            </div>
+            <div class="hero-cap">{monthOver ? `over for the month in ${d.cats.map((c) => c.name).join(' + ')}` : heroValue < 0 ? 'over today' : 'left for today'}</div>
+          </>
         )}
-        {todays.map((t) => (
-          <TxnRow key={t.id} t={t} compact onClick={() => props.onEdit(t)} />
-        ))}
-      </div>
-      <Register today={today} onCover={props.onCover} />
-      <Sheet open={listOpen} onClose={() => setListOpen(false)} title={`Today · ${longDate(today)}`}>
-        {list}
-      </Sheet>
+        <Ruler today={today} />
+      </section>
+      <Register today={today} touch={touch} />
     </div>
   )
 }
 
-function Overspent(props: { view: ReturnType<typeof monthView>; base: string; onCover: (cat: ID) => void }) {
-  const first = props.view.overspent[0]
-  const more = props.view.overspent.length - 1
+function Ruler(props: { today: string }) {
+  const month = monthOf(props.today)
+  const dim = daysInMonth(month)
+  const dom = dayOfMonth(props.today)
+  const [y, m, dd] = props.today.split('-').map(Number)
+  const wd = new Date(y, m - 1, dd).toLocaleDateString('en-US', { weekday: 'short' })
+  const pos = dim > 1 ? ((dom - 1) / (dim - 1)) * 100 : 0
   return (
-    <button class="todaylist-toggle" style={{ color: 'var(--red)', borderTop: 0 }} onClick={() => props.onCover(first.cat.id)}>
-      <span>
-        <b>{first.cat.name}</b> is {fmt(-first.available, props.base)} over{more > 0 ? ` (+${more} more)` : ''}
+    <div class="ruler" aria-label={`Day ${dom} of ${dim}`}>
+      <div class="ruler-ticks" aria-hidden="true">
+        {Array.from({ length: dim }, (_, i) => (
+          <i key={i} class={i + 1 < dom ? 'past' : i + 1 === dom ? 'now' : ''} />
+        ))}
+      </div>
+      <span class="ruler-label" style={{ left: `clamp(16px, ${pos}%, calc(100% - 16px))` }}>
+        {wd} {dom}
       </span>
-      <span class="link" style={{ color: 'var(--red)' }}>
-        Cover
-      </span>
-    </button>
+    </div>
   )
+}
+
+/** Type the amount, tap where it went. On phones a keypad; on laptops the keyboard. */
+export function Register(props: { today: string; touch: boolean }) {
+  const ix = useIndex()
+  const { today, touch } = props
+  const base = ix.settings.base
+  const dr = useDraft()
+  const currency = dr.currency ?? base
+  const date = dr.date ?? today
+  const c = cur(currency)
+  const amount = touch ? keypadToMinor(dr.digits) : Math.abs(parseAmount(dr.digits) ?? 0)
+  const amountBase = currency === base ? amount : toBase(amount, currency)
+  const currencies = currenciesInUse()
+  const amountRef = useRef<HTMLInputElement>(null)
+  const amountBox = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  const month = monthOf(date)
+  const view = useMemo(() => monthView(ix, month, monthOf(today)), [ix, month, today])
+  const dd = useMemo(() => (date === today ? daily(ix, view, today) : null), [ix, view, today, date])
+  const cats = view.cats.filter((cm) => !cm.cat.archived)
+
+  // Past notes for autocomplete, and which category a known note usually belongs to.
+  const memory = useMemo(() => {
+    const byNote = new Map<string, ID>()
+    for (const t of ix.txns) {
+      if (!t.note || t.kind) continue
+      const k = t.note.trim().toLowerCase()
+      if (!byNote.has(k)) byNote.set(k, t.cat)
+    }
+    return byNote
+  }, [ix])
+  const notesList = useMemo(() => [...new Set(ix.txns.filter((t) => t.note && !t.kind).map((t) => t.note!))].slice(0, 80), [ix])
+  const suggested = dr.note.trim() ? memory.get(dr.note.trim().toLowerCase()) ?? null : null
+
+  function left(id: ID): { text: string; over: boolean } {
+    const cm = view.byId.get(id)
+    if (cm?.cat.daily && dd) {
+      const l = dd.leftToday - amountBase
+      return { text: `${fmt(l, base)} today`, over: l < 0 }
+    }
+    const l = (cm?.available ?? 0) - amountBase
+    return { text: fmt(l, base), over: l < 0 }
+  }
+
+  function log(cat: ID, el?: Element | null) {
+    if (!amount) {
+      play('error')
+      flash(amountBox.current, 'shake')
+      if (!touch) amountRef.current?.focus()
+      return
+    }
+    const before = { ...draft }
+    const income = cat === RTA
+    const name = income ? 'Income' : ix.catById.get(cat)?.name ?? ''
+    const label = `${fmt(amount, currency)} ${income ? 'income' : `· ${name}`}`
+    undoable(
+      label,
+      () => addTxn({ date, cat, amt: income ? amount : -amount, cur: currency, note: dr.note.trim() || undefined }),
+      () => setDraft(before),
+    )
+    play(income ? 'income' : 'log')
+    haptic('medium')
+    flash(el ?? null, 'pulse-once')
+    setDraft({ digits: '', note: '', date: null, currency: null })
+    if (!touch) amountRef.current?.focus()
+
+    // Say what it means, not just what happened.
+    if (income) return toast(`+${fmt(amount, currency)} ready to assign`, { undo: true })
+    const fresh = getIndex()
+    const after = monthView(fresh, month, monthOf(today))
+    const cm = after.byId.get(cat)
+    const isDaily = ix.catById.get(cat)?.daily
+    const ddAfter = date === today && isDaily ? daily(fresh, after, today) : null
+    if (ddAfter) {
+      toast(
+        ddAfter.leftToday >= 0
+          ? `${name} · ${fmt(ddAfter.leftToday, base)} left today`
+          : `${fmt(-ddAfter.leftToday, base)} over today · tomorrow ${fmt(ddAfter.tomorrow ?? 0, base)}`,
+        { undo: true },
+      )
+    } else if (cm && cm.available < 0) {
+      toast(`${name} is ${fmt(-cm.available, base)} over`, { undo: true })
+    } else {
+      toast(`${name} · ${fmt(cm?.available ?? 0, base)} left`, { undo: true })
+    }
+  }
+
+  // Laptop: typing digits anywhere goes to the amount; arrows walk the bubbles; Enter logs.
+  useEffect(() => {
+    if (touch) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (document.querySelector('dialog[open]')) return
+      const el = document.activeElement as HTMLElement | null
+      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+      if (!typing && /^[0-9.,]$/.test(e.key)) {
+        amountRef.current?.focus()
+        return
+      }
+      if (e.key === 'Escape' && el === amountRef.current) {
+        setDraft({ digits: '' })
+        return
+      }
+      const bubbles = [...(gridRef.current?.querySelectorAll<HTMLButtonElement>('.bubble') ?? [])]
+      const i = bubbles.indexOf(el as HTMLButtonElement)
+      if (i < 0) return
+      const cols = getComputedStyle(gridRef.current!).gridTemplateColumns.split(' ').length
+      const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key]
+      if (step) {
+        e.preventDefault()
+        const j = i + step
+        if (j < 0) amountRef.current?.focus()
+        else bubbles[Math.min(j, bubbles.length - 1)]?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [touch])
+
+  const display = dr.digits ? (c.suffix ? `${fmtDigits(dr.digits)} ${c.symbol}` : `${c.symbol}${fmtDigits(dr.digits)}`) : c.suffix ? `0 ${c.symbol}` : `${c.symbol}0`
+
+  return (
+    <div class="register">
+      <div class="amountline" ref={amountBox}>
+        {touch ? (
+          <div class={`amount-val${dr.digits ? '' : ' empty'}`} aria-live="polite">
+            {display}
+          </div>
+        ) : (
+          <input
+            ref={amountRef}
+            class="amount-input"
+            type="text"
+            inputMode="decimal"
+            aria-label="Amount"
+            placeholder={c.suffix ? `0 ${c.symbol}` : `${c.symbol}0`}
+            value={dr.digits}
+            autoFocus
+            onInput={(e) => setDraft({ digits: e.currentTarget.value.replace(/[^\d.,]/g, '') })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                if (suggested) log(suggested)
+                else gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
+              }
+            }}
+          />
+        )}
+        {currencies.length > 1 && (
+          <button
+            class={`pill${currency !== base ? ' picked' : ''}`}
+            aria-label={`Currency ${currency}. Tap to change`}
+            onClick={() => {
+              play('toggle')
+              setDraft({ currency: currencies[(currencies.indexOf(currency) + 1) % currencies.length] })
+            }}
+          >
+            {currency}
+          </button>
+        )}
+        <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
+      </div>
+      {currency !== base && amount > 0 && <div class="conv">≈ {fmt(amountBase, base)}</div>}
+      <NoteField
+        value={dr.note}
+        list="mio-notes"
+        onInput={(v) => setDraft({ note: v })}
+        onEnter={() => {
+          if (suggested && amount) log(suggested)
+        }}
+      />
+      <datalist id="mio-notes">
+        {notesList.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <div class="bubbles" ref={gridRef}>
+        {cats.map((cm) => {
+          const l = left(cm.cat.id)
+          return (
+            <button
+              key={cm.cat.id}
+              class={`bubble${l.over ? ' over' : ''}${suggested === cm.cat.id ? ' suggest' : ''}`}
+              onClick={(e) => log(cm.cat.id, e.currentTarget)}
+            >
+              <b>{cm.cat.name}</b>
+              <span>{l.text}</span>
+            </button>
+          )
+        })}
+        <button class="bubble income" onClick={(e) => log(RTA, e.currentTarget)}>
+          <b>Income</b>
+          <span>{amount ? `+${fmt(amount, currency)}` : 'to plan'}</span>
+        </button>
+      </div>
+      {touch && <Keypad value={dr.digits} onChange={(v) => setDraft({ digits: v })} decimals={c.decimals} />}
+    </div>
+  )
+}
+
+function fmtDigits(s: string): string {
+  const [w, f] = s.split('.')
+  const whole = Number(w || '0').toLocaleString('en-US')
+  return f !== undefined ? `${whole}.${f}` : whole
 }

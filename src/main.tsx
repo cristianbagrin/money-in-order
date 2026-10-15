@@ -1,4 +1,3 @@
-import '@fontsource-variable/recursive/full.css'
 import './styles.css'
 import { render } from 'preact'
 import { get, set } from 'idb-keyval'

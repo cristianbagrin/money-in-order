@@ -1,134 +1,122 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { fmt } from '../lib/money'
-
-// ---------------------------------------------------------------- money
-
-export function Money(props: { v: number; cur: string; sign?: boolean; tone?: boolean; class?: string }) {
-  const tone = props.tone ? (props.v < 0 ? ' neg' : props.v > 0 ? ' pos' : ' zero') : ''
-  return <span class={`num${tone}${props.class ? ' ' + props.class : ''}`}>{fmt(props.v, props.cur, { sign: props.sign })}</span>
-}
-
-// ---------------------------------------------------------------- sheet
-
-/** Bottom sheet on phones, centered panel on wide screens. Uses the native dialog element. */
-export function Sheet(props: { open: boolean; onClose: () => void; title?: string; children: ComponentChildren; wide?: boolean }) {
-  const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    const d = ref.current
-    if (!d) return
-    if (props.open && !d.open) d.showModal()
-    if (!props.open && d.open) d.close()
-  }, [props.open])
-  if (!props.open) return null
-  return (
-    <dialog
-      ref={ref}
-      class={`sheet${props.wide ? ' wide' : ''}`}
-      onCancel={(e) => {
-        e.preventDefault()
-        props.onClose()
-      }}
-      onClick={(e) => {
-        if (e.target === ref.current) props.onClose()
-      }}
-    >
-      <div class="sheet-body">
-        <header class="sheet-head">
-          <h2>{props.title}</h2>
-          <button class="link" onClick={props.onClose}>
-            Done
-          </button>
-        </header>
-        {props.children}
-      </div>
-    </dialog>
-  )
-}
+import { undo } from '../lib/store'
+import { haptic, play } from './sound'
 
 // ---------------------------------------------------------------- toast
 
 interface ToastMsg {
   id: number
   text: string
+  undo?: boolean
   action?: { label: string; run: () => void }
 }
 
 let pushToast: ((t: Omit<ToastMsg, 'id'>) => void) | null = null
 
-export function toast(text: string, action?: ToastMsg['action']) {
-  pushToast?.({ text, action })
+/** Show a short message. With undo: true it offers to take back the last action for 5 seconds. */
+export function toast(text: string, opts: { undo?: boolean; action?: ToastMsg['action'] } = {}) {
+  pushToast?.({ text, ...opts })
+}
+
+export function runUndo() {
+  const e = undo()
+  if (!e) return
+  play('undo')
+  toast(`Undone: ${e.label}`)
 }
 
 export function Toasts() {
   const [msg, setMsg] = useState<ToastMsg | null>(null)
+  const [leaving, setLeaving] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     pushToast = (t) => {
       clearTimeout(timer.current)
+      setLeaving(false)
       setMsg({ ...t, id: Date.now() })
-      timer.current = setTimeout(() => setMsg(null), t.action ? 5000 : 2600)
+      timer.current = setTimeout(
+        () => {
+          setLeaving(true)
+          timer.current = setTimeout(() => setMsg(null), 200)
+        },
+        t.undo || t.action ? 5000 : 2400,
+      )
     }
     return () => {
       pushToast = null
     }
   }, [])
   if (!msg) return null
+  const close = () => {
+    clearTimeout(timer.current)
+    setMsg(null)
+  }
   return (
-    <div class="toast" role="status" key={msg.id}>
+    <div class={`toast${leaving ? ' out' : ''}`} role="status" key={msg.id}>
       <span>{msg.text}</span>
       {msg.action && (
         <button
           class="toast-act"
           onClick={() => {
             msg.action!.run()
-            setMsg(null)
+            close()
           }}
         >
           {msg.action.label}
+        </button>
+      )}
+      {msg.undo && (
+        <button
+          class="toast-act"
+          onClick={() => {
+            close()
+            runUndo()
+          }}
+        >
+          Undo
         </button>
       )}
     </div>
   )
 }
 
-// ---------------------------------------------------------------- keypad
+// ---------------------------------------------------------------- keypad (phones only)
 
-export function Keypad(props: { value: string; onChange: (v: string) => void; decimals: number; onDone?: () => void; doneLabel?: string }) {
+export function Keypad(props: { value: string; onChange: (v: string) => void; decimals: number }) {
   const press = (k: string) => {
     let v = props.value
     if (k === 'back') v = v.slice(0, -1)
     else if (k === '.') {
-      if (props.decimals === 0 || v.includes('.')) return
+      if (v.includes('.')) return
       v = (v || '0') + '.'
+    } else if (k === '00') {
+      if (!v || v.length >= 8) return
+      v += '00'
     } else {
       if (v.includes('.') && v.split('.')[1].length >= 2) return
       if (v === '0') v = ''
       if (v.replace('.', '').length >= 9) return
       v += k
     }
+    play('key')
+    haptic('light')
     props.onChange(v)
   }
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', props.decimals ? '.' : '00', '0', 'back']
-  const hit = (k: string) => {
-    if (k === '00') {
-      if (!props.value || props.value.length >= 8) return
-      props.onChange(props.value + '00')
-    } else press(k)
-  }
   return (
     <div class="keypad" role="group" aria-label="Amount keypad">
       {keys.map((k) => (
         <button
           key={k}
-          class={`key${k === 'back' ? ' key-back' : ''}`}
+          class="key"
           // Pointer-down feels instant on a phone; click (detail 0) keeps keyboard users covered.
           onPointerDown={(e) => {
             e.preventDefault()
-            hit(k)
+            press(k)
           }}
           onClick={(e) => {
-            if (e.detail === 0) hit(k)
+            if (e.detail === 0) press(k)
           }}
           onContextMenu={(e) => {
             e.preventDefault()
@@ -140,6 +128,90 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
         </button>
       ))}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------- amount field with clear button
+
+/** A text field for money: selects everything on focus, and has an × to clear and type fresh. */
+export function AmountField(props: {
+  value: string
+  onInput: (v: string) => void
+  onCommit?: (v: string) => void
+  class?: string
+  autoFocus?: boolean
+  label: string
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (props.autoFocus) ref.current?.focus()
+  }, [])
+  return (
+    <div class={`amountfield ${props.class ?? ''}`}>
+      <input
+        ref={ref}
+        type="text"
+        inputMode="decimal"
+        aria-label={props.label}
+        value={props.value}
+        onFocus={(e) => {
+          const el = e.currentTarget
+          requestAnimationFrame(() => el.select())
+        }}
+        onInput={(e) => props.onInput(e.currentTarget.value)}
+        onBlur={(e) => props.onCommit?.(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
+      />
+      {props.value && (
+        <button
+          class="iconbtn clear"
+          aria-label="Clear"
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            props.onInput('')
+            ref.current?.focus()
+          }}
+        >
+          <IconClear />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** A note field with a pencil instead of placeholder text. */
+export function NoteField(props: { value: string; onInput: (v: string) => void; onCommit?: (v: string) => void; onEnter?: () => void; list?: string }) {
+  return (
+    <label class="note">
+      <IconPencil />
+      <input
+        type="text"
+        aria-label="Note"
+        value={props.value}
+        list={props.list}
+        enterKeyHint="done"
+        autocomplete="off"
+        onInput={(e) => props.onInput(e.currentTarget.value)}
+        onBlur={(e) => props.onCommit?.(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur()
+            props.onEnter?.()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
+export function Section(props: { title?: string; children: ComponentChildren }) {
+  return (
+    <section class="section">
+      {props.title && <h2>{props.title}</h2>}
+      {props.children}
+    </section>
   )
 }
 
@@ -172,29 +244,39 @@ export function IconSearch() {
   )
 }
 
-/** Small progress rule: how much of the money for the month is used. */
-export function Gauge(props: { used: number; total: number; pace?: number }) {
-  const { used, total } = props
-  const over = used > total
-  const frac = total > 0 ? Math.min(1, used / total) : used > 0 ? 1 : 0
+export function IconClear() {
   return (
-    <div class={`gauge${over ? ' over' : ''}`} aria-hidden="true">
-      <div class="gauge-fill" style={{ width: `${frac * 100}%` }} />
-      {props.pace !== undefined && <div class="gauge-pace" style={{ left: `${props.pace * 100}%` }} />}
-    </div>
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="9" fill="var(--rule-strong)" />
+      <path d="M7 7l6 6M13 7l-6 6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
   )
 }
 
-export function Field(props: { label: string; children: ComponentChildren; hint?: string }) {
+export function IconPencil() {
   return (
-    <label class="field">
-      <span class="field-label">{props.label}</span>
-      {props.children}
-      {props.hint && <span class="field-hint">{props.hint}</span>}
-    </label>
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+      <path d="M10.5 2.5l3 3L5.5 13.5 2 14l.5-3.5z" />
+    </svg>
   )
 }
 
-export function money(v: number, c: string) {
-  return fmt(v, c)
+export function IconPlus() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  )
+}
+
+export function IconGear() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+      <circle cx="10" cy="10" r="2.6" />
+      <path
+        d="M10 1.8v2.4M10 15.8v2.4M1.8 10h2.4M15.8 10h2.4M4.2 4.2l1.7 1.7M14.1 14.1l1.7 1.7M4.2 15.8l1.7-1.7M14.1 5.9l1.7-1.7"
+        stroke-linecap="round"
+      />
+    </svg>
+  )
 }

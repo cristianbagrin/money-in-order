@@ -1,13 +1,12 @@
 import { useState } from 'preact/hooks'
-import { CURRENCIES, parseAmount } from '../lib/money'
+import { evalAmount } from '../lib/money'
 import { refreshRates } from '../lib/rates'
-import { addAccount, recordCount, seedCategories, settings, today, updateSettings } from '../lib/store'
+import { addAccount, getDB, recordCount, seedCategories, settings, today, updateSettings } from '../lib/store'
 import { enableSync, normalizeCode } from '../lib/sync'
-import { getDB } from '../lib/store'
 import { RTA } from '../lib/types'
-import { Field, toast } from '../ui/kit'
-
-const COMMON = ['TWD', 'EUR', 'PLN', 'USD', 'GBP', 'CHF', 'JPY', 'CZK']
+import { CurrencyPicker } from '../ui/currency'
+import { IconPlus, toast } from '../ui/kit'
+import { play } from '../ui/sound'
 
 interface DraftAccount {
   name: string
@@ -17,8 +16,8 @@ interface DraftAccount {
 
 export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
   const [step, setStep] = useState<'welcome' | 'setup' | 'join'>(props.joinCode ? 'join' : 'welcome')
-  const [base, setBase] = useState('TWD')
-  const [extra, setExtra] = useState<string[]>(['EUR', 'PLN'])
+  const [main, setMain] = useState('TWD')
+  const [selected, setSelected] = useState<string[]>(['TWD', 'EUR', 'PLN'])
   const [accounts, setAccounts] = useState<DraftAccount[]>([
     { name: 'Cash', cur: 'TWD', bal: '' },
     { name: 'Revolut', cur: 'PLN', bal: '' },
@@ -39,25 +38,25 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
           <li>
             <span>
               <b>Give every bit of money a job</b>
-              <span>Count what you really have, then plan it down to zero.</span>
+              <span>Count what you have, then plan it down to zero.</span>
             </span>
           </li>
           <li>
             <span>
               <b>Log it the moment you spend</b>
-              <span>Type the amount, tap the category. See what's left for today.</span>
+              <span>Type the amount, tap the category.</span>
             </span>
           </li>
           <li>
             <span>
               <b>Roll with it</b>
-              <span>Overspent? Move money from somewhere else. The plan stays honest.</span>
+              <span>Overspent? Move money from somewhere else.</span>
             </span>
           </li>
           <li>
             <span>
               <b>Fund the big things monthly</b>
-              <span>Trips, a new phone, yearly bills: a little every month, no surprises.</span>
+              <span>Trips, a new phone, yearly bills: a little every month.</span>
             </span>
           </li>
         </ol>
@@ -65,7 +64,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
           <button class="btn block" onClick={() => setStep('setup')}>
             Set up my budget
           </button>
-          <button class="btn ghost block" onClick={() => setStep('join')}>
+          <button class="btn soft block" onClick={() => setStep('join')}>
             I already use it on another device
           </button>
         </div>
@@ -77,10 +76,17 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
     return (
       <div class="welcome">
         <h1 style={{ fontSize: '34px' }}>Join your other device</h1>
-        <p class="lede">On the device you already use, open Settings → Sync between devices and copy the code. Type or paste it here.</p>
-        <Field label="Sync code">
-          <input type="text" class="num" value={code} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocapitalize="characters" onInput={(e) => setCode(e.currentTarget.value)} />
-        </Field>
+        <p class="lede">Settings → Sync on your other device shows the code.</p>
+        <input
+          type="text"
+          class="num"
+          style={{ marginTop: '24px' }}
+          aria-label="Sync code"
+          value={code}
+          placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+          autocapitalize="characters"
+          onInput={(e) => setCode(e.currentTarget.value)}
+        />
         <div class="foot">
           <button
             class="btn block"
@@ -92,14 +98,18 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
               await enableSync(c)
               setBusy(false)
               if (getDB().meta.settings?.ready) {
+                play('success')
                 history.replaceState(null, '', '#/today')
                 props.onDone()
-              } else toast('Nothing found for that code yet. Check it, or sync once on the other device.')
+              } else {
+                play('error')
+                toast('Nothing found for that code yet')
+              }
             }}
           >
             {busy ? 'Connecting…' : 'Join'}
           </button>
-          <button class="btn ghost block" onClick={() => setStep('welcome')}>
+          <button class="btn soft block" onClick={() => setStep('welcome')}>
             Back
           </button>
         </div>
@@ -107,23 +117,24 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
     )
   }
 
-  const currencies = [base, ...extra.filter((c) => c !== base)]
   const ready = accounts.some((a) => a.name.trim())
+  const curs = [main, ...selected.filter((c) => c !== main)]
 
   async function finish() {
     setBusy(true)
-    updateSettings({ base, extraCurrencies: extra.filter((c) => c !== base) })
+    updateSettings({ base: main, extraCurrencies: selected.filter((c) => c !== main) })
     await refreshRates(true)
     seedCategories()
     const bal: Record<string, number> = {}
     for (const a of accounts) {
       if (!a.name.trim()) continue
-      const acct = addAccount(a.name.trim(), a.cur)
-      bal[acct.id] = parseAmount(a.bal) ?? 0
+      const acct = addAccount(a.name.trim(), curs.includes(a.cur) ? a.cur : main)
+      bal[acct.id] = evalAmount(a.bal) ?? 0
     }
     recordCount({ date: today(), bal, rates: settings().rates, diffTo: RTA })
     updateSettings({ ready: 1 })
     setBusy(false)
+    play('success')
     history.replaceState(null, '', '#/plan')
     props.onDone()
   }
@@ -131,64 +142,61 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
   return (
     <div class="welcome" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 28px)' }}>
       <h1 style={{ fontSize: '34px' }}>Count your money</h1>
-      <p class="lede">Every account, every wallet. This is what you'll plan with.</p>
 
-      <Field label="I plan in">
-        <select value={base} onChange={(e) => setBase(e.currentTarget.value)}>
-          {Object.keys(CURRENCIES).map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </select>
-      </Field>
-      <span class="field-label">I also hold or spend</span>
-      <div class="chips" style={{ paddingTop: '8px' }}>
-        {COMMON.filter((c) => c !== base).map((c) => (
-          <button key={c} class={`pill${extra.includes(c) ? ' on' : ''}`} onClick={() => setExtra(extra.includes(c) ? extra.filter((x) => x !== c) : [...extra, c])}>
-            {c}
-          </button>
-        ))}
+      <div style={{ marginTop: '22px' }}>
+        <CurrencyPicker
+          selected={selected}
+          main={main}
+          onChange={(sel, m) => {
+            setSelected(sel)
+            setMain(m)
+          }}
+        />
+        <p class="hint">Tap the currencies you use. Double-tap the one you plan in.</p>
       </div>
 
-      <span class="field-label" style={{ marginTop: '12px' }}>
-        Accounts and their balance right now
-      </span>
-      <ul class="lines">
+      <div style={{ marginTop: '18px' }}>
         {accounts.map((a, i) => (
-          <li key={i}>
+          <div class="acct-row" key={i}>
             <input
               type="text"
-              class="grow"
-              placeholder="Name"
+              aria-label="Account name"
               value={a.name}
               onInput={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, name: e.currentTarget.value } : x)))}
             />
-            <select style={{ width: '84px' }} value={a.cur} onChange={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, cur: e.currentTarget.value } : x)))}>
-              {currencies.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+            <button
+              class="pill sm"
+              aria-label={`Currency ${a.cur}. Tap to change`}
+              onClick={() => {
+                play('toggle')
+                const next = curs[(curs.indexOf(a.cur) + 1) % curs.length] ?? main
+                setAccounts(accounts.map((x, k) => (k === i ? { ...x, cur: next } : x)))
+              }}
+            >
+              {curs.includes(a.cur) ? a.cur : main}
+            </button>
             <input
               type="text"
               inputMode="decimal"
               class="num"
+              aria-label={`${a.name || 'Account'} balance`}
               placeholder="0"
-              style={{ width: '30%', textAlign: 'right' }}
+              style={{ textAlign: 'right' }}
               value={a.bal}
+              onFocus={(e) => e.currentTarget.select()}
               onInput={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, bal: e.currentTarget.value } : x)))}
             />
-          </li>
+          </div>
         ))}
-      </ul>
-      <button class="link" style={{ alignSelf: 'flex-start' }} onClick={() => setAccounts([...accounts, { name: '', cur: base, bal: '' }])}>
-        + Another account
-      </button>
-      <div class="foot" style={{ marginTop: '28px' }}>
+        <button class="pill ghost" style={{ marginTop: '12px' }} onClick={() => setAccounts([...accounts, { name: '', cur: main, bal: '' }])}>
+          <IconPlus /> Account
+        </button>
+      </div>
+
+      <div class="foot">
         <button class="btn block" disabled={!ready || busy} onClick={finish}>
           {busy ? 'Setting up…' : 'Start planning'}
         </button>
-        <p class="field-hint" style={{ textAlign: 'center' }}>
-          Categories from your spreadsheet are ready to go. Rename or add any later.
-        </p>
       </div>
     </div>
   )

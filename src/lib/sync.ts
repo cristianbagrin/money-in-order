@@ -193,7 +193,7 @@ function wire() {
   window.addEventListener('offline', () => cfg && setState('offline'))
   setInterval(() => {
     if (cfg && document.visibilityState === 'visible') void syncNow()
-  }, 45_000)
+  }, 60_000)
 }
 
 export async function initSync() {
