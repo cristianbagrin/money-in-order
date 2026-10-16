@@ -120,9 +120,13 @@ export function App() {
         setMonth={setPlanMonth}
         onCategory={(id) => {
           setCatMonth(planMonth)
+          play('open')
           setCatSheet(id)
         }}
-        onCount={() => setCounting(true)}
+        onCount={() => {
+          play('open')
+          setCounting(true)
+        }}
         onReflect={(m) => {
           setReviewMonth(m)
           go('review')
@@ -130,7 +134,18 @@ export function App() {
         onSettings={() => go('settings')}
       />
     )
-  else if (route === 'history') page = <History today={today} filter={historyFilter} setFilter={setHistoryFilter} onEdit={setTxn} />
+  else if (route === 'history')
+    page = (
+      <History
+        today={today}
+        filter={historyFilter}
+        setFilter={setHistoryFilter}
+        onEdit={(t) => {
+          play('open')
+          setTxn(t)
+        }}
+      />
+    )
   else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} />
   else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onBack={() => go('plan')} />
   else page = <Today today={today} onPlan={() => go('plan')} />
