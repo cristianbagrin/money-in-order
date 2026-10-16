@@ -140,7 +140,25 @@ export function keypadToMinor(s: string): number {
  * Evaluate what someone typed into an amount field, allowing simple sums like "6000+500" or "1200*3".
  * Returns minor units, or null if it isn't a number.
  */
-export function evalAmount(input: string): number | null {
+/** Round to what the currency can hold: TWD, JPY and friends have no cents. */
+export function roundFor(code: string | undefined, minor: number): number {
+  if (!code || cur(code).decimals > 0) return minor
+  return Math.round(minor / 100) * 100
+}
+
+// What people paste around a number: currency symbols and codes ("NT$1,000", "€ 12,50", "300 PLN").
+const MONEY_MARKS = /NT\$|[A-Z]{1,3}\$|[$€£¥₩₹₪₺₴₱₫฿]|zł|Kč|Ft|kr|lei|\b[A-Z]{3}\b/g
+
+/**
+ * A typed amount, sums allowed ("6000+500", "1200*3"), in minor units. With a currency code the
+ * result is rounded to what that currency can hold.
+ */
+export function evalAmount(input: string, code?: string): number | null {
+  const v = evalRaw(input.replace(MONEY_MARKS, ''))
+  return v === null ? null : roundFor(code, v)
+}
+
+function evalRaw(input: string): number | null {
   const s = input.replace(/[\s ]/g, '').replace(/[×x]/gi, '*').replace(/[÷]/g, '/').replace(/−/g, '-')
   if (!s || /[^\d.,+\-*/]/.test(s)) return null
   if (!/[+*/]|.-/.test(s)) return parseAmount(s)

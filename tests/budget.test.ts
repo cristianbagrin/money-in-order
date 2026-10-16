@@ -265,6 +265,13 @@ describe('evalAmount', () => {
   it('does simple sums', async () => {
     const { evalAmount } = await import('../src/lib/money')
     expect(evalAmount('6000')).toBe(600000)
+    expect(evalAmount('NT$1,000')).toBe(100000)
+    expect(evalAmount('€ 12,50')).toBe(1250)
+    expect(evalAmount('300 PLN')).toBe(30000)
+    expect(evalAmount('1,5', 'TWD')).toBe(200)
+    expect(evalAmount('12.5', 'TWD')).toBe(1300)
+    expect(evalAmount('12.5', 'EUR')).toBe(1250)
+    expect(evalAmount('1e5')).toBe(null)
     expect(evalAmount('6000+500')).toBe(650000)
     expect(evalAmount('6,000 - 1,000')).toBe(500000)
     expect(evalAmount('1200*3')).toBe(360000)

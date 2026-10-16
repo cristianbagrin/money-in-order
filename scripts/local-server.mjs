@@ -7,10 +7,12 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const blobsDir = process.argv[2] ?? '.local-blobs'
-const blobs = new BlobsServer({ directory: blobsDir, port: 8971, token: 'tok' })
+const PORT = Number(process.env.PORT ?? 4174)
+const BLOBS_PORT = Number(process.env.BLOBS_PORT ?? 8971)
+const blobs = new BlobsServer({ directory: blobsDir, port: BLOBS_PORT, token: 'tok' })
 await blobs.start()
 globalThis.netlifyBlobsContext = Buffer.from(
-  JSON.stringify({ edgeURL: 'http://localhost:8971', uncachedEdgeURL: 'http://localhost:8971', token: 'tok', siteID: 'site' }),
+  JSON.stringify({ edgeURL: `http://localhost:${BLOBS_PORT}`, uncachedEdgeURL: `http://localhost:${BLOBS_PORT}`, token: 'tok', siteID: 'site' }),
 ).toString('base64')
 const { default: handler } = await import('../netlify/functions/vault.mts')
 const dist = path.resolve('dist')
@@ -45,4 +47,4 @@ http
       res.end()
     }
   })
-  .listen(4174, () => console.log('dev server on 4174'))
+  .listen(PORT, () => console.log(`dev server on ${PORT}`))
