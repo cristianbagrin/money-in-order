@@ -111,6 +111,7 @@ function createController(gone: (byUser: boolean) => void) {
   let locked = false
   let drag: Drag | null = null
   let quietUntil = 0
+  let openedAt = 0
   let lastKb = 0
   let stopWaiting: (() => void) | null = null
 
@@ -169,7 +170,9 @@ function createController(gone: (byUser: boolean) => void) {
     d.removeAttribute('data-drag')
     clearInline()
     if (!d.open) {
-      quietUntil = 0
+      // The second tap of a double tap that opened the sheet must not land on what slid in under it.
+      openedAt = performance.now()
+      quietUntil = openedAt + 380
       d.removeAttribute('data-state')
       // Unless the content asks for [autofocus], start focus on the panel itself rather than the
       // first control, so opening a sheet never pops the phone keyboard by surprise.
@@ -448,7 +451,14 @@ function createController(gone: (byUser: boolean) => void) {
     }
   }
 
-  return { attach, show, hide: (user: boolean) => hide(user) }
+  return {
+    attach,
+    show,
+    hide: (user: boolean) => hide(user),
+    backdrop: () => {
+      if (performance.now() - openedAt > 380) hide(true)
+    },
+  }
 }
 
 // ---------------------------------------------------------------- component
@@ -505,7 +515,7 @@ export function Sheet(props: {
 
   if (!rendered) return null
   const { title, actions, children } = shown.current
-  const dismiss = () => c.hide(true)
+  const dismiss = () => c.backdrop()
 
   return (
     <dialog ref={dRef} class={props.wide ? 'sheet wide' : 'sheet'} aria-labelledby={title ? titleId : undefined}>

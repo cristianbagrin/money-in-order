@@ -216,7 +216,7 @@
 .dp-layer {
   display: contents;
 }
-.datepill[aria-expanded='true'][aria-pressed='false'] {
+.datepill[aria-expanded='true']:not(.picked) {
   background: var(--pen-wash, #e5edf8);
   border-color: var(--pen, #1d58a8);
   color: var(--pen, #1d58a8);

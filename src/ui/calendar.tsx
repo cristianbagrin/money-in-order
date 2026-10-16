@@ -317,8 +317,7 @@ export function DatePill(props: { value: string; today: string; onChange: (date:
       <button
         ref={pill}
         type="button"
-        class={`pill datepill${props.class ? ' ' + props.class : ''}`}
-        aria-pressed={props.value !== props.today ? 'true' : 'false'}
+        class={`pill datepill${props.value !== props.today ? ' picked' : ''}${props.class ? ' ' + props.class : ''}`}
         aria-haspopup="dialog"
         aria-expanded={state === 'open' ? 'true' : 'false'}
         aria-label={`Date: ${label}`}

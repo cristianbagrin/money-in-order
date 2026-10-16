@@ -10,8 +10,9 @@ export function CurrencyPicker(props: { selected: string[]; main: string; onChan
   const { selected, main } = props
   const [more, setMore] = useState(false)
   const last = useRef<{ code: string; t: number } | null>(null)
-  const all = Object.keys(CURRENCIES)
-  const visible = more ? all : [...new Set([...COMMON_CURRENCIES, ...selected, main])]
+  // The common ones always come first, in the same order, so pills never jump around under a finger.
+  const first = [...new Set([...COMMON_CURRENCIES, ...selected, main])]
+  const visible = more ? [...first, ...Object.keys(CURRENCIES).filter((c) => !first.includes(c))] : first
 
   function tap(code: string) {
     const now = Date.now()
@@ -42,11 +43,9 @@ export function CurrencyPicker(props: { selected: string[]; main: string; onChan
           {code}
         </button>
       ))}
-      {!more && (
-        <button class="pill ghost" onClick={() => setMore(true)}>
-          More
-        </button>
-      )}
+      <button class="pill ghost" onClick={() => setMore(!more)}>
+        {more ? 'Less' : 'More'}
+      </button>
     </div>
   )
 }

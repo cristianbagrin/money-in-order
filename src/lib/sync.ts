@@ -2,7 +2,7 @@
 
 import { get, set } from 'idb-keyval'
 import { hasNews, merge } from './merge'
-import { getDB, onLocalChange, replaceDB } from './store'
+import { clearUndo, getDB, onLocalChange, replaceDB } from './store'
 import type { DB } from './types'
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // no 0/O/1/I/L
@@ -214,6 +214,30 @@ export async function enableSync(code: string) {
   wire()
   setState('idle')
   await syncNow()
+}
+
+/**
+ * Join a budget from another device. If the code has data, this device takes that budget as it is
+ * (its own data is replaced, so two budgets never get mixed into duplicates).
+ */
+export async function joinSync(code: string): Promise<'joined' | 'missing' | 'error'> {
+  try {
+    const k = await derive(code)
+    const res = await fetch(`/api/vault/${k.id}`, { cache: 'no-store' })
+    if (res.status === 404) return 'missing'
+    if (!res.ok) return 'error'
+    const remote = await open(await res.text(), k.key)
+    replaceDB(remote)
+    clearUndo()
+    cfg = { code, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now() }
+    keys = k
+    await saveCfg()
+    wire()
+    setState('idle')
+    return 'joined'
+  } catch {
+    return 'error'
+  }
 }
 
 export async function disableSync() {

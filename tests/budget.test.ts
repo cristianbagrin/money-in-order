@@ -94,8 +94,8 @@ describe('budget math', () => {
     S.addTxn({ date: '2026-10-01', cat: RTA, amt: 1000000, cur: 'TWD' })
     S.setAssigned(NOV, trips.id, 400000)
     expect(monthView(S.getIndex(), OCT, OCT).readyToAssign).toBe(600000)
-    // Looking back at a past month shows what it was then.
-    expect(monthView(S.getIndex(), OCT, '2026-12').readyToAssign).toBe(1000000)
+    // Looking back at a past month shows the one number that is true now.
+    expect(monthView(S.getIndex(), OCT, '2026-12').readyToAssign).toBe(600000)
   })
 
   it('moves money between categories', () => {
@@ -294,5 +294,17 @@ describe('changing the budget currency', () => {
     expect(v.byId.get(living.id)!.assigned).toBe(Math.round(600000 / 8.29))
     expect(v.readyToAssign + v.available).toBe(expectedTotal(S.getIndex()))
     expect(S.getDB().cats[living.id].target?.amount).toBe(Math.round(600000 / 8.29))
+  })
+})
+
+describe('amount input safety', () => {
+  it('rejects typos and absurd amounts', async () => {
+    const { evalAmount, parseAmount } = await import('../src/lib/money')
+    expect(evalAmount('1e5')).toBe(null)
+    expect(parseAmount('1e5')).toBe(null)
+    expect(evalAmount('12abc')).toBe(null)
+    expect(evalAmount('99999999999999999')).toBe(null)
+    expect(evalAmount('1,000,000')).toBe(100000000)
+    expect(evalAmount(' 250 ')).toBe(25000)
   })
 })

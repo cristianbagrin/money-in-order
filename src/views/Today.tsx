@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { daily, monthView } from '../lib/budget'
 import { dayOfMonth, daysInMonth, monthOf } from '../lib/dates'
 import { cur, fmt, keypadToMinor, parseAmount } from '../lib/money'
-import { currenciesInUse } from '../lib/rates'
+import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type ID } from '../lib/types'
 import { DatePill } from '../ui/calendar'
@@ -18,11 +18,32 @@ interface Draft {
   note: string
   date: string | null
 }
-let draft: Draft = { digits: '', currency: null, note: '', date: null }
+const DRAFT_KEY = 'mio-draft'
+function loadDraft(): Draft {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Draft | null
+    if (d && typeof d.digits === 'string') return d
+  } catch {
+    /* storage unavailable */
+  }
+  return { digits: '', currency: null, note: '', date: null }
+}
+let draft: Draft = loadDraft()
 const draftListeners = new Set<() => void>()
 function setDraft(next: Partial<Draft>) {
   draft = { ...draft, ...next }
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+  } catch {
+    /* storage unavailable */
+  }
   for (const fn of draftListeners) fn()
+}
+
+/** Big numbers shrink instead of spilling out or being cut off. */
+function fitSize(text: string, base: number, room: number): string {
+  const n = text.length
+  return n <= room ? `${base}px` : `${Math.max(20, Math.floor((base * room) / n))}px`
 }
 function useDraft(): Draft {
   const [, force] = useState(0)
@@ -47,28 +68,40 @@ export function Today(props: { today: string; onPlan: () => void }) {
 
   const planFirst = d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0
   const monthOver = d && d.available < 0 && d.allowance === 0
-  const heroValue = d ? (monthOver ? d.available : d.leftToday) : 0
+  // Without a daily category, the key number is what's left to spend this month.
+  const monthLeft = d ? 0 : view.cats.filter((c) => !c.cat.saving && !c.cat.archived).reduce((s, c) => s + c.available, 0)
+  const heroValue = d ? (monthOver ? d.available : d.leftToday) : monthLeft
   const shown = useCountUp(heroValue)
+  const heroText = fmt(Math.abs(shown), base)
 
   return (
     <div class="today">
       <section class="hero">
-        {!d ? null : planFirst ? (
+        {planFirst ? (
           <>
             <div class="hero-num" style={{ fontSize: 'clamp(36px, 10vw, 52px)' }}>
               Plan first
             </div>
-            <div class="hero-cap">Give {d.cats.map((c) => c.name).join(' + ')} money for the month to see what's left each day.</div>
             <button class="btn plan-first" onClick={props.onPlan}>
               Open the plan
             </button>
           </>
         ) : (
           <>
-            <div class={`hero-num${heroValue < 0 ? ' neg' : ''}`}>
-              <span class={`marked${heroValue < 0 ? ' neg' : ''}`}>{fmt(Math.abs(shown), base)}</span>
+            <div class={`hero-num${heroValue < 0 ? ' neg' : ''}`} style={{ fontSize: heroText.length > 8 ? fitSize(heroText, 72, 8) : undefined }}>
+              <span class={`marked${heroValue < 0 ? ' neg' : ''}`}>{heroText}</span>
             </div>
-            <div class="hero-cap">{monthOver ? `over for the month in ${d.cats.map((c) => c.name).join(' + ')}` : heroValue < 0 ? 'over today' : 'left for today'}</div>
+            <div class="hero-cap">
+              {!d
+                ? heroValue < 0
+                  ? 'over this month'
+                  : 'left to spend this month'
+                : monthOver
+                  ? `over for the month in ${d.cats.map((c) => c.name).join(' + ')}`
+                  : heroValue < 0
+                    ? 'over today'
+                    : 'left for today'}
+            </div>
           </>
         )}
         <Ruler today={today} />
@@ -110,7 +143,7 @@ export function Register(props: { today: string; touch: boolean }) {
   const c = cur(currency)
   const amount = touch ? keypadToMinor(dr.digits) : Math.abs(parseAmount(dr.digits) ?? 0)
   const amountBase = currency === base ? amount : toBase(amount, currency)
-  const currencies = currenciesInUse()
+  const currencies = currenciesInUse().filter(hasRate)
   const amountRef = useRef<HTMLInputElement>(null)
   const amountBox = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -135,12 +168,14 @@ export function Register(props: { today: string; touch: boolean }) {
 
   function left(id: ID): { text: string; over: boolean } {
     const cm = view.byId.get(id)
-    if (cm?.cat.daily && dd) {
+    if (cm?.cat.daily && dd && !(dd.allowance === 0 && cm.available <= 0)) {
       const l = dd.leftToday - amountBase
       return { text: `${fmt(l, base)} today`, over: l < 0 }
     }
     const l = (cm?.available ?? 0) - amountBase
-    return { text: fmt(l, base), over: l < 0 }
+    // Only warn where it matters: categories that hold money for spending.
+    const watched = !!cm && !cm.cat.saving && (cm.carry + cm.assigned > 0 || cm.available < 0)
+    return { text: fmt(l, base), over: l < 0 && watched }
   }
 
   function log(cat: ID, el?: Element | null) {
@@ -172,7 +207,9 @@ export function Register(props: { today: string; touch: boolean }) {
     const cm = after.byId.get(cat)
     const isDaily = ix.catById.get(cat)?.daily
     const ddAfter = date === today && isDaily ? daily(fresh, after, today) : null
-    if (ddAfter) {
+    if (ddAfter && cm && ddAfter.allowance === 0 && cm.available < 0) {
+      toast(`${name} is ${fmt(-cm.available, base)} over for the month`, { undo: true })
+    } else if (ddAfter) {
       toast(
         ddAfter.leftToday >= 0
           ? `${name} · ${fmt(ddAfter.leftToday, base)} left today`
@@ -224,7 +261,7 @@ export function Register(props: { today: string; touch: boolean }) {
     <div class="register">
       <div class="amountline" ref={amountBox}>
         {touch ? (
-          <div class={`amount-val${dr.digits ? '' : ' empty'}`} aria-live="polite">
+          <div class={`amount-val${dr.digits ? '' : ' is-empty'}`} aria-live="polite" style={{ fontSize: fitSize(display, 40, 9) }}>
             {display}
           </div>
         ) : (
@@ -257,7 +294,9 @@ export function Register(props: { today: string; touch: boolean }) {
             aria-label={`Currency ${currency}. Tap to change`}
             onClick={() => {
               play('toggle')
-              setDraft({ currency: currencies[(currencies.indexOf(currency) + 1) % currencies.length] })
+              const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
+              // A currency without cents can't keep typed cents.
+              setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.split('.')[0] : dr.digits })
             }}
           >
             {currency}
@@ -293,7 +332,7 @@ export function Register(props: { today: string; touch: boolean }) {
             </button>
           )
         })}
-        <button class="bubble income" onClick={(e) => log(RTA, e.currentTarget)}>
+        <button class={`bubble income${suggested === RTA ? ' suggest' : ''}`} onClick={(e) => log(RTA, e.currentTarget)}>
           <b>Income</b>
           <span>{amount ? `+${fmt(amount, currency)}` : 'to plan'}</span>
         </button>

@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks'
 import { evalAmount } from '../lib/money'
-import { refreshRates } from '../lib/rates'
+import { hasRate, refreshRates } from '../lib/rates'
 import { addAccount, getDB, recordCount, seedCategories, settings, today, updateSettings } from '../lib/store'
-import { enableSync, normalizeCode } from '../lib/sync'
+import { joinSync, normalizeCode } from '../lib/sync'
 import { RTA } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
 import { IconPlus, toast } from '../ui/kit'
@@ -95,15 +95,15 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
               const c = normalizeCode(code)
               if (!c) return
               setBusy(true)
-              await enableSync(c)
+              const r = await joinSync(c)
               setBusy(false)
-              if (getDB().meta.settings?.ready) {
+              if (r === 'joined' && getDB().meta.settings?.ready) {
                 play('success')
                 history.replaceState(null, '', '#/today')
                 props.onDone()
               } else {
                 play('error')
-                toast('Nothing found for that code yet')
+                toast(r === 'error' ? 'Couldn’t reach the server' : 'Nothing found for that code')
               }
             }}
           >
@@ -124,6 +124,15 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
     setBusy(true)
     updateSettings({ base: main, extraCurrencies: selected.filter((c) => c !== main) })
     await refreshRates(true)
+    // Never count foreign money 1:1: without a rate, stop and say so.
+    const used = accounts.filter((a) => a.name.trim()).map((a) => (curs.includes(a.cur) ? a.cur : main))
+    const missing = [...new Set(used)].filter((c) => !hasRate(c))
+    if (missing.length) {
+      setBusy(false)
+      play('error')
+      toast(`Couldn’t get exchange rates for ${missing.join(', ')}. Check your connection.`)
+      return
+    }
     seedCategories()
     const bal: Record<string, number> = {}
     for (const a of accounts) {
@@ -131,7 +140,8 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
       const acct = addAccount(a.name.trim(), curs.includes(a.cur) ? a.cur : main)
       bal[acct.id] = evalAmount(a.bal) ?? 0
     }
-    recordCount({ date: today(), bal, rates: settings().rates, diffTo: RTA })
+    // With no balances typed yet, the first real count becomes the starting balance.
+    if (Object.values(bal).some((v) => v !== 0)) recordCount({ date: today(), bal, rates: settings().rates, diffTo: RTA })
     updateSettings({ ready: 1 })
     setBusy(false)
     play('success')

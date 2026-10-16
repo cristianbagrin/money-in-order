@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'preact/hooks'
-import { evalAmount, fmt } from '../lib/money'
-import { currenciesInUse } from '../lib/rates'
+import { cur, evalAmount, fmt } from '../lib/money'
+
+/** How an amount appears in the editor: no grouping, and no cents for currencies without them. */
+function amountText(amt: number, code: string): string {
+  const v = Math.abs(amt) / 100
+  return cur(code).decimals ? String(Math.round(v * 100) / 100) : String(Math.round(v))
+}
+import { currenciesInUse, hasRate } from '../lib/rates'
 import { deleteTxn, undoable, updateTxn, type NewTxn } from '../lib/store'
 import { RTA, type Txn } from '../lib/types'
 import { DatePill } from '../ui/calendar'
@@ -15,7 +21,7 @@ const KIND_LABEL: Record<NonNullable<Txn['kind']>, string> = {
   fx: 'Exchange rates',
 }
 
-export function TxnRow(props: { t: Txn; onClick: () => void; selected?: boolean }) {
+export function TxnRow(props: { t: Txn; onClick: () => void; selected?: boolean; plain?: boolean }) {
   const ix = useIndex()
   const { t } = props
   const base = ix.settings.base
@@ -27,7 +33,7 @@ export function TxnRow(props: { t: Txn; onClick: () => void; selected?: boolean 
     <button class={`txn${props.selected ? ' sel' : ''}`} onClick={props.onClick} data-txn={t.id}>
       <div class="txn-main">
         <div class="txn-title">{title}</div>
-        {title !== catName && <div class="txn-sub">{catName}</div>}
+        {title !== catName && !props.plain && <div class="txn-sub">{catName}</div>}
       </div>
       <div class="txn-amt">
         <span class={`num${positive ? ' pos' : ''}`}>{fmt(t.base, base, { sign: positive })}</span>
@@ -46,18 +52,19 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
 
   useEffect(() => {
     if (!t) return
-    setAmount(String(Math.abs(t.amt) / 100))
+    setAmount(amountText(t.amt, t.cur))
     setNote(t.note ?? '')
   }, [t?.id])
 
   if (!t || t.d) return <Sheet open={false} onClose={props.onClose} children={null} />
   const tx = t
-  const currencies = [...new Set([...currenciesInUse(), tx.cur])]
+  const currencies = [...new Set([...currenciesInUse().filter(hasRate), tx.cur])]
   const cats = ix.cats.filter((c) => !c.archived || c.id === tx.cat)
   const refund = tx.cat !== RTA && tx.amt > 0
 
   function change(patch: Partial<NewTxn>, label = 'Edited') {
     undoable(label, () => updateTxn(tx.id, patch))
+    toast(label, { undo: true })
   }
 
   function setCategory(cat: string) {
@@ -70,24 +77,28 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
   }
 
   function commitAmount(raw: string) {
+    // Untouched: never rewrite (the shown text may be rounded).
+    if (raw.trim() === amountText(tx.amt, tx.cur)) return
     const v = evalAmount(raw)
     if (v === null || v === 0) {
-      setAmount(String(Math.abs(tx.amt) / 100))
+      setAmount(amountText(tx.amt, tx.cur))
       return
     }
-    const signed = tx.cat === RTA || refund ? Math.abs(v) : -Math.abs(v)
+    // Keep the entry's own direction (income in, spending out, corrections either way).
+    const signed = (tx.amt < 0 ? -1 : 1) * Math.abs(v)
+    setAmount(amountText(signed, tx.cur))
     if (signed !== tx.amt) change({ amt: signed }, 'Changed amount')
   }
 
   return (
-    <Sheet open onClose={props.onClose} title={tx.cat === RTA ? 'Income' : refund ? 'Refund' : 'Spending'}>
+    <Sheet open onClose={props.onClose} title={tx.kind ? KIND_LABEL[tx.kind] : tx.cat === RTA ? 'Income' : refund ? 'Refund' : 'Spending'}>
       <AmountField label="Amount" value={amount} onInput={setAmount} onCommit={commitAmount} />
       <div class="row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
         {currencies.length > 1 &&
           currencies.map((c) => (
             <button
               key={c}
-              class="pill sm"
+              class="pill soft"
               aria-pressed={tx.cur === c}
               onClick={() => {
                 if (c === tx.cur) return

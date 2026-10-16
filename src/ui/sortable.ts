@@ -610,6 +610,12 @@ class Sorter {
       top = Math.max(r.top, 0)
       bottom = Math.min(r.bottom, window.innerHeight)
     }
+    // A fixed bar at the bottom (the phone tab bar) hides that edge: scroll before the finger reaches it.
+    const bar = document.querySelector('.tabbar')
+    if (bar) {
+      const br = bar.getBoundingClientRect()
+      if (br.height && getComputedStyle(bar).position === 'fixed') bottom = Math.min(bottom, br.top)
+    }
     // Only scroll while the list itself continues past that edge.
     const rr = this.root.getBoundingClientRect()
     let v = 0

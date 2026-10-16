@@ -104,6 +104,7 @@ export function App() {
 
   const go = (r: Route) => {
     if (r !== route) play('tap')
+    if (route === 'history' && r !== 'history') setHistoryFilter('all')
     location.hash = `#/${r}`
     setRoute(r)
     window.scrollTo(0, 0)
@@ -154,7 +155,7 @@ export function App() {
     <div class="app">
       <div class="statusbar" />
       <Rail route={route} go={go} today={today} />
-      <main class="main" key={route}>
+      <main class={`main${route === 'today' ? ' main-today' : ''}`} key={route}>
         {page}
       </main>
       <TabBar route={route} go={go} today={today} />

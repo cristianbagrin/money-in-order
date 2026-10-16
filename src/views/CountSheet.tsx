@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { evalAmount, fmt } from '../lib/money'
-import { refreshRates } from '../lib/rates'
+import { hasRate, refreshRates } from '../lib/rates'
 import { lastCount, previewCount, recordCount, undoable } from '../lib/store'
 import { live, RTA, type ID } from '../lib/types'
 import { useIndex } from '../ui/hooks'
@@ -32,7 +32,10 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
     for (const a of accounts) out[a.id] = evalAmount(vals[a.id] ?? '') ?? 0
     return out
   }, [vals, accounts.length])
-  const filled = accounts.length > 0 && accounts.every((a) => (vals[a.id] ?? '').trim() !== '')
+  const invalid = (id: ID) => (vals[id] ?? '').trim() !== '' && evalAmount(vals[id]) === null
+  const noRate = accounts.filter((a) => !hasRate(a.cur)).map((a) => a.cur)
+  const filled =
+    accounts.length > 0 && accounts.every((a) => (vals[a.id] ?? '').trim() !== '' && !invalid(a.id)) && !noRate.length
   const r = previewCount({ date: props.today, bal, rates: ix.settings.rates })
   const gap = r.diff + r.fx
 
@@ -53,15 +56,16 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
             <b style={{ fontWeight: 600 }}>{a.name}</b>
             {prev?.bal[a.id] !== undefined && (
               <span class="faint num" style={{ display: 'block', fontSize: '12px' }}>
-                last {fmt(prev.bal[a.id], a.cur)}
+                last {fmt(prev.bal[a.id], prev.curs?.[a.id] ?? a.cur)}
               </span>
             )}
           </span>
           <input
             type="text"
             inputMode="decimal"
-            class="num"
+            class={`num${invalid(a.id) ? ' bad' : ''}`}
             aria-label={`${a.name} balance in ${a.cur}`}
+            aria-invalid={invalid(a.id)}
             style={{ width: '46%', textAlign: 'right' }}
             placeholder={a.cur}
             value={vals[a.id] ?? ''}
@@ -80,13 +84,19 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
             <span>{r.first ? 'Your money' : 'Counted'}</span>
             <b class="num">{fmt(r.total, base)}</b>
           </div>
-          {!r.first && (
+          {!r.first && gap === 0 && <p class="muted" style={{ fontSize: '14px', margin: '6px 0 0' }}>Matches your plan</p>}
+          {!r.first && r.fx !== 0 && (
             <div class="row" style={{ justifyContent: 'space-between', fontSize: '14px', marginTop: '6px' }}>
-              <span class="muted">{gap === 0 ? 'Matches your plan' : gap < 0 ? 'Missing from your plan' : 'More than your plan'}</span>
-              <span class={`num ${gap < 0 ? 'neg' : gap > 0 ? 'pos' : 'faint'}`}>{fmt(gap, base, { sign: true })}</span>
+              <span class="muted">Exchange rates</span>
+              <span class={`num ${r.fx < 0 ? 'neg' : 'pos'}`}>{fmt(r.fx, base, { sign: true })}</span>
             </div>
           )}
-          {!r.first && r.fx !== 0 && <p class="hint">{fmt(r.fx, base, { sign: true })} of that is exchange rates.</p>}
+          {!r.first && r.diff !== 0 && (
+            <div class="row" style={{ justifyContent: 'space-between', fontSize: '14px', marginTop: '6px' }}>
+              <span class="muted">{r.diff < 0 ? 'Missing' : 'Extra'}</span>
+              <span class={`num ${r.diff < 0 ? 'neg' : 'pos'}`}>{fmt(r.diff, base, { sign: true })}</span>
+            </div>
+          )}
           {!r.first && r.diff !== 0 && (
             <>
               <p class="section-title" style={{ marginTop: '18px' }}>
@@ -123,6 +133,7 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
           )}
         </div>
       )}
+      {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again.</p>}
       <button class="btn block green" style={{ marginTop: '20px' }} disabled={!filled} onClick={save}>
         Save
       </button>

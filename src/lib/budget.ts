@@ -160,20 +160,18 @@ export function targetNeed(cat: Category, carry: number, assigned: number, month
  */
 export function monthView(ix: Index, month: Month, current: Month): MonthView {
   const carry = new Map<ID, number>()
+  // Ready to assign is one number that is true now: past months show today's figure,
+  // and money given to any month (past or future) is no longer available to give again.
+  const upTo = month > current ? month : current
   let inflowThrough = 0
-  let assignedThrough = 0
-  let assignedAfter = 0
+  let assignedAll = 0
   for (const m of ix.months) {
     if (m < month) {
       for (const [id, v] of ix.asg.get(m) ?? []) carry.set(id, (carry.get(id) ?? 0) + v)
       for (const [id, v] of ix.act.get(m) ?? []) carry.set(id, (carry.get(id) ?? 0) + v)
     }
-    if (m <= month) {
-      inflowThrough += ix.inflow.get(m) ?? 0
-      assignedThrough += sumMap(ix.asg.get(m))
-    } else {
-      assignedAfter += sumMap(ix.asg.get(m))
-    }
+    if (m <= upTo) inflowThrough += ix.inflow.get(m) ?? 0
+    assignedAll += sumMap(ix.asg.get(m))
   }
   const asg = ix.asg.get(month)
   const act = ix.act.get(month)
@@ -184,7 +182,7 @@ export function monthView(ix: Index, month: Month, current: Month): MonthView {
     const assigned = asg?.get(cat.id) ?? 0
     const activity = act?.get(cat.id) ?? 0
     const available = c + assigned + activity
-    if (cat.archived && !c && !assigned && !activity) continue
+    if (cat.archived && available === 0 && !activity) continue
     const { need, goal } = cat.archived ? { need: 0, goal: 0 } : targetNeed(cat, c, assigned, month)
     const cm: CatMonth = { cat, carry: c, assigned, activity, available, need, goal }
     cats.push(cm)
@@ -212,7 +210,7 @@ export function monthView(ix: Index, month: Month, current: Month): MonthView {
     cats,
     byId,
     groups,
-    readyToAssign: inflowThrough - assignedThrough - (month >= current ? assignedAfter : 0),
+    readyToAssign: inflowThrough - assignedAll,
     income,
     inflow: ix.inflow.get(month) ?? 0,
     spent,

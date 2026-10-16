@@ -91,8 +91,13 @@ export function fmt(minor: number, code: string, opts: FormatOpts = {}): string 
   return c.suffix ? `${signStr}${num} ${c.symbol}` : `${signStr}${c.symbol}${num}`
 }
 
+/** Biggest amount anyone means to type: 9,999,999,999.99 */
+export const MAX_MINOR = 999_999_999_999
+
 /** Parse a user-typed amount ("1,250.5", "1250,50") into minor units. */
 export function parseAmount(s: string): number | null {
+  // Letters mean a typo, not a number ("1e5" must not quietly become 15).
+  if (/[a-z]/i.test(s.replace(/^\s*[A-Z]{3}\s*|\s*[A-Z]{3}\s*$/g, ''))) return null
   const t = s.replace(/[\s ]/g, '').replace(/[^\d.,\-−]/g, '')
   if (!t) return null
   const neg = /^[-−]/.test(t)
@@ -109,7 +114,7 @@ export function parseAmount(s: string): number | null {
   }
   if (!/^\d*$/.test(whole)) return null
   const v = Number(whole || '0') * 100 + Number(frac)
-  if (!Number.isFinite(v)) return null
+  if (!Number.isFinite(v) || v > MAX_MINOR) return null
   return neg ? -v : v
 }
 
@@ -137,7 +142,7 @@ export function keypadToMinor(s: string): number {
  */
 export function evalAmount(input: string): number | null {
   const s = input.replace(/[\s ]/g, '').replace(/[×x]/gi, '*').replace(/[÷]/g, '/').replace(/−/g, '-')
-  if (!s) return null
+  if (!s || /[^\d.,+\-*/]/.test(s)) return null
   if (!/[+*/]|.-/.test(s)) return parseAmount(s)
   const parts = s.match(/(\d[\d.,]*|[+\-*/])/g)
   if (!parts || parts.join('') !== s.replace(/[^\d.,+\-*/]/g, '')) return null
@@ -180,5 +185,5 @@ export function evalAmount(input: string): number | null {
   }
   let total = terms[0]
   for (let i = 0; i < addOps.length; i++) total += addOps[i] === '+' ? terms[i + 1] : -terms[i + 1]
-  return total
+  return Number.isFinite(total) && Math.abs(total) <= MAX_MINOR ? total : null
 }

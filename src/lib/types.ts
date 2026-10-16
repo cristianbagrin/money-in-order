@@ -72,6 +72,8 @@ export interface Account extends Rec {
 export interface Count extends Rec {
   date: Day
   bal: Record<ID, number>
+  /** each account's currency at the time of the count */
+  curs?: Record<ID, string>
   rates: Rates
   /** counted total in base currency */
   total: number

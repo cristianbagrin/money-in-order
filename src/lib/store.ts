@@ -228,14 +228,15 @@ export function changeBase(next: string): boolean {
   const r = s.rates[next]
   if (!r) return false
   const f = (v: number) => Math.round(v / r)
-  const txns = Object.values(db.txns).map((t) => ({ ...t, base: t.cur === next ? t.amt : f(t.base) }))
+  // Convert every stored amount at the same rate, so the plan's balances don't shift.
+  const txns = Object.values(db.txns).map((t) => ({ ...t, base: f(t.base) }))
   const assigns = Object.values(db.assigns).map((a) => ({ ...a, amt: f(a.amt) }))
   const counts = Object.values(db.counts).map((c) => ({ ...c, total: f(c.total), expected: f(c.expected) }))
   const cats = Object.values(db.cats)
     .filter((c) => c.target)
     .map((c) => ({ ...c, target: { ...c.target!, amount: f(c.target!.amount) } }))
-  const rates: Rates = { [s.base]: Math.round((1 / r) * 10000) / 10000 }
-  for (const [c, v] of Object.entries(s.rates)) if (c !== next) rates[c] = Math.round((v / r) * 10000) / 10000
+  const rates: Rates = { [s.base]: Number((1 / r).toPrecision(10)) }
+  for (const [c, v] of Object.entries(s.rates)) if (c !== next) rates[c] = Number((v / r).toPrecision(10))
   const extraCurrencies = [...new Set([s.base, ...s.extraCurrencies.filter((c) => c !== next)])]
   commit({
     txns,
@@ -513,7 +514,8 @@ export function previewCount(input: Omit<CountInput, 'diffTo'>): CountResult {
     for (const a of accounts) {
       if (a.cur === s.base) continue
       const b = prev.bal[a.id]
-      if (!b) continue
+      // Only the same money in the same currency can drift with rates; a changed currency is just a difference.
+      if (!b || (prev.curs?.[a.id] ?? a.cur) !== a.cur) continue
       fx += convert(b, a.cur, s.base, input.rates, s.base) - convert(b, a.cur, s.base, prev.rates, s.base)
     }
   }
@@ -538,14 +540,39 @@ export function recordCount(input: CountInput): CountResult {
   if (r.first) {
     if (r.diff) txns.push(mk(r.diff, RTA, 'start', 'Starting balance'))
   } else {
-    if (r.fx) txns.push(mk(r.fx, RTA, 'fx', 'Exchange rates moved'))
-    if (r.diff) txns.push(mk(r.diff, input.diffTo, 'adj', r.diff < 0 ? 'Unlogged spending (found when counting)' : 'Extra money found when counting'))
+    if (r.fx) txns.push(mk(r.fx, RTA, 'fx', 'Exchange rates'))
+    if (r.diff) txns.push(mk(r.diff, input.diffTo, 'adj', r.diff < 0 ? 'Unlogged spending' : 'Found money'))
   }
+  const curs: Record<ID, string> = {}
+  for (const a of Object.values(db.accounts)) if (!a.d) curs[a.id] = a.cur
   commit({
-    counts: [{ id: uid(), u: 0, date: input.date, bal: input.bal, rates: input.rates, total: r.total, expected: r.expected }],
+    counts: [{ id: uid(), u: 0, date: input.date, bal: input.bal, curs, rates: input.rates, total: r.total, expected: r.expected }],
     txns,
   })
   return r
+}
+
+/**
+ * Put the data back exactly as it was in a backup: its records win over anything newer here,
+ * and records that weren't in the backup are removed. Synced devices follow.
+ */
+export function restoreBackup(backup: DB) {
+  const patch: Record<string, Rec[]> = {}
+  for (const name of COLLECTIONS) {
+    const from = (backup[name] ?? {}) as Record<ID, Rec>
+    const here = db[name] as Record<ID, Rec>
+    const recs: Rec[] = Object.values(from).map((r) => ({ ...r }))
+    for (const r of Object.values(here)) if (!from[r.id] && !r.d) recs.push({ ...r, d: 1 })
+    if (recs.length) patch[name] = recs
+  }
+  commit(patch as Patch)
+}
+
+/** Forget undo history (after the whole budget was replaced from elsewhere). */
+export function clearUndo() {
+  undoStack.length = 0
+  redoStack.length = 0
+  undoChanged()
 }
 
 export function lastCount() {

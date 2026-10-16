@@ -21,15 +21,24 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
+    const digits = needle.replace(/[,\s]/g, '')
+    const isNum = /^\d+(\.\d*)?$/.test(digits)
     return ix.txns.filter((t) => {
       if (filter === 'income' && t.cat !== RTA) return false
       if (filter !== 'all' && filter !== 'income' && t.cat !== filter) return false
       if (!needle) return true
       const cat = t.cat === RTA ? 'income' : ix.catById.get(t.cat)?.name ?? ''
-      const amt = (Math.abs(t.amt) / 100).toString()
-      return (t.note ?? '').toLowerCase().includes(needle) || cat.toLowerCase().includes(needle) || amt.startsWith(needle)
+      if ((t.note ?? '').toLowerCase().includes(needle) || cat.toLowerCase().includes(needle)) return true
+      // Match the amount as shown (base currency) or as entered, with or without thousands separators.
+      return isNum && [t.amt, t.base].some((v) => String(Math.abs(v) / 100).startsWith(digits) || String(Math.round(Math.abs(v) / 100)).startsWith(digits))
     })
   }, [ix, q, filter])
+
+  // Keep the active filter in view (it may sit far to the right in the pill row).
+  const pillsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    pillsRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [filter])
 
   const shown = rows.slice(0, limit)
 
@@ -75,7 +84,8 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   }
   const used = ix.cats.filter((c) => !c.archived)
   const filtered = q || filter !== 'all'
-  const total = filtered ? rows.reduce((s, t) => (t.kind ? s : s + t.base), 0) : 0
+  const total = filtered ? rows.reduce((s, t) => s + t.base, 0) : 0
+  if (!ix.txns.length) return <p class="empty">Nothing yet.</p>
 
   return (
     <div>
@@ -83,7 +93,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         <IconSearch />
         <input ref={searchRef} type="search" aria-label="Search" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
       </label>
-      <div class="pills scroll filters">
+      <div class="pills scroll filters" ref={pillsRef}>
         <button class="pill sm" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
           All
         </button>
@@ -96,7 +106,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
           </button>
         ))}
       </div>
-      {filtered && (
+      {filtered && rows.length > 0 && (
         <p class="faint" style={{ fontSize: '13px', margin: '12px 0 0' }}>
           {rows.length} · <span class="num">{fmt(total, base, { sign: total > 0 })}</span>
         </p>
@@ -108,11 +118,11 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
             {d.total !== 0 && <span class="num faint">{fmt(d.total, base)}</span>}
           </div>
           {d.items.map((t) => (
-            <TxnRow key={t.id} t={t} selected={shown[sel]?.id === t.id} onClick={() => props.onEdit(t)} />
+            <TxnRow key={t.id} t={t} plain={filter !== 'all'} selected={shown[sel]?.id === t.id} onClick={() => props.onEdit(t)} />
           ))}
         </div>
       ))}
-      {!rows.length && <p class="empty">{ix.txns.length ? 'Nothing matches.' : 'Nothing yet.'}</p>}
+      {!rows.length && <p class="empty">Nothing matches.</p>}
       {rows.length > limit && (
         <button class="btn soft block" style={{ marginTop: '16px' }} onClick={() => setLimit(limit + PAGE)}>
           Show more

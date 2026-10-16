@@ -47,6 +47,9 @@ export function Plan(props: {
   const [editingGroup, setEditingGroup] = useState<ID | null>(null)
 
   const prevHasPlan = (ix.asg.get(addMonths(month, -1))?.size ?? 0) > 0
+  let lastMonthTotal = 0
+  for (const [id, v] of ix.asg.get(addMonths(month, -1)) ?? []) if (v > 0 && !ix.catById.get(id)?.archived) lastMonthTotal += v
+  const [addingGroup, setAddingGroup] = useState(false)
   const showRitual = month === current && dayOfMonth(today) <= 12
 
   useSortable(listRef, {
@@ -143,7 +146,7 @@ export function Plan(props: {
                   toast('Last month’s plan copied', { undo: true })
                 }}
               >
-                Repeat last month
+                Repeat last month <small>{fmt(lastMonthTotal, base)}</small>
               </button>
             )}
           </div>
@@ -172,7 +175,11 @@ export function Plan(props: {
                       setEditingGroup(null)
                       if (v === null) return
                       if (!v.trim()) {
-                        if (!g.cats.length) undoable('Deleted group', () => deleteGroup(g.group.id))
+                        if (!g.cats.length) {
+                          undoable(`Deleted ${g.group.name}`, () => deleteGroup(g.group.id))
+                          play('delete')
+                          toast(`${g.group.name} deleted`, { undo: true })
+                        }
                         return
                       }
                       if (v.trim() !== g.group.name) saveGroup({ ...g.group, name: v.trim() } as Group)
@@ -204,15 +211,27 @@ export function Plan(props: {
       </div>
 
       <div class="newgroup">
-        <button
-          class="pill ghost"
-          onClick={() => {
-            const g = addGroup('New group')
-            setEditingGroup(g.id)
-          }}
-        >
-          <IconPlus /> Group
-        </button>
+        {addingGroup ? (
+          <div class="grp-head">
+            <div class="grp-name">
+              <InlineInput
+                value=""
+                label="New group name"
+                onDone={(v) => {
+                  setAddingGroup(false)
+                  if (v?.trim()) {
+                    undoable('Added group', () => addGroup(v.trim()))
+                    play('tap')
+                  }
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <button class="pill ghost" onClick={() => setAddingGroup(true)}>
+            <IconPlus /> Group
+          </button>
+        )}
       </div>
     </div>
   )
@@ -265,15 +284,12 @@ function CatRow(props: {
   const used = budget > 0 ? Math.min(100, (Math.max(0, spent) / budget) * 100) : spent > 0 ? 100 : 0
   const [draft, setDraftVal] = useState<string | null>(null)
 
-  function saveName(v: string | null) {
-    props.setEditing(null)
-    if (v === null) {
-      if (!cat.name) deleteCategory(cat.id)
-      return
-    }
-    const name = v.trim()
-    if (!name) {
-      if (!cat.name) deleteCategory(cat.id)
+  function saveName(v: string | null, keepEditing = false) {
+    if (!keepEditing) props.setEditing(null)
+    const name = (v ?? '').trim()
+    if (v === null || !name) {
+      // An unnamed new category disappears, a moment later so the tap that left it still lands where aimed.
+      if (!cat.name) setTimeout(() => deleteCategory(cat.id), 260)
       return
     }
     if (name !== cat.name) undoable('Renamed category', () => saveCategory({ ...cat, name }))
@@ -303,21 +319,31 @@ function CatRow(props: {
       <div class="cname">
         <div class="cname-line">
           {props.editing === 'name' ? (
-            <InlineInput value={cat.name} label="Category name" placeholder="Name" onDone={saveName} />
+            <InlineInput value={cat.name} label="Category name" onDone={(v) => saveName(v)} />
           ) : (
             <span class="cname-text" onClick={() => props.setEditing('name')}>
               {cat.name || '—'}
             </span>
           )}
           {!cat.note && props.editing !== 'note' && (
-            <span class="cnote-add" onClick={() => props.setEditing('note')}>
+            <span
+              class="cnote-add"
+              onPointerDown={(e) => {
+                // Keep the name field from blurring first (that would re-render this away before the tap lands).
+                e.preventDefault()
+                const input = (e.currentTarget.parentElement?.querySelector('input') as HTMLInputElement | null) ?? null
+                if (input) saveName(input.value, true)
+                props.setEditing('note')
+              }}
+              onClick={() => props.setEditing('note')}
+            >
               Add note
             </span>
           )}
         </div>
         {props.editing === 'note' ? (
           <div class="cnote">
-            <InlineInput value={cat.note ?? ''} label="Note" placeholder="Note" onDone={saveNote} />
+            <InlineInput value={cat.note ?? ''} label="Note" onDone={saveNote} />
           </div>
         ) : cat.note ? (
           <div class="cnote" onClick={() => props.setEditing('note')}>
@@ -335,7 +361,7 @@ function CatRow(props: {
         onFocus={(e) => {
           setDraftVal(c.assigned ? String(c.assigned / 100) : '')
           const el = e.currentTarget
-          requestAnimationFrame(() => el.select())
+          requestAnimationFrame(() => document.activeElement === el && el.select())
         }}
         onInput={(e) => setDraftVal(e.currentTarget.value)}
         onBlur={(e) => commitAssign(e.currentTarget.value)}

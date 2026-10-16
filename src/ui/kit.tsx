@@ -84,14 +84,19 @@ export function Toasts() {
 // ---------------------------------------------------------------- keypad (phones only)
 
 export function Keypad(props: { value: string; onChange: (v: string) => void; decimals: number }) {
+  const value = useRef(props.value)
+  value.current = props.value
+  const lastPointer = useRef(0)
+  const hold = useRef<ReturnType<typeof setTimeout>>(undefined)
+
   const press = (k: string) => {
-    let v = props.value
+    let v = value.current
     if (k === 'back') v = v.slice(0, -1)
     else if (k === '.') {
       if (v.includes('.')) return
       v = (v || '0') + '.'
     } else if (k === '00') {
-      if (!v || v.length >= 8) return
+      if (!v || v.includes('.') || v.length >= 8) return
       v += '00'
     } else {
       if (v.includes('.') && v.split('.')[1].length >= 2) return
@@ -101,8 +106,10 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
     }
     play('key')
     haptic('light')
+    value.current = v
     props.onChange(v)
   }
+  const endHold = () => clearTimeout(hold.current)
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', props.decimals ? '.' : '00', '0', 'back']
   return (
     <div class="keypad" role="group" aria-label="Amount keypad">
@@ -110,19 +117,33 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
         <button
           key={k}
           class="key"
-          // Pointer-down feels instant on a phone; click (detail 0) keeps keyboard users covered.
+          // Pointer-down feels instant on a phone. The click that follows a touch is ignored;
+          // a click with no pointer before it comes from the keyboard.
           onPointerDown={(e) => {
             e.preventDefault()
+            lastPointer.current = Date.now()
+            press(k)
+            if (k === 'back') {
+              endHold()
+              // Hold ⌫ to clear everything (iOS never fires contextmenu, so time it ourselves).
+              hold.current = setTimeout(() => {
+                if (!value.current) return
+                value.current = ''
+                props.onChange('')
+                play('delete')
+                haptic('medium')
+              }, 480)
+            }
+          }}
+          onPointerUp={endHold}
+          onPointerLeave={endHold}
+          onPointerCancel={endHold}
+          onClick={() => {
+            if (Date.now() - lastPointer.current < 1000) return
             press(k)
           }}
-          onClick={(e) => {
-            if (e.detail === 0) press(k)
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            if (k === 'back') props.onChange('')
-          }}
-          aria-label={k === 'back' ? 'Delete' : k}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-label={k === 'back' ? 'Delete (hold to clear)' : k}
         >
           {k === 'back' ? <IconBack /> : k}
         </button>
@@ -156,7 +177,7 @@ export function AmountField(props: {
         value={props.value}
         onFocus={(e) => {
           const el = e.currentTarget
-          requestAnimationFrame(() => el.select())
+          requestAnimationFrame(() => document.activeElement === el && el.select())
         }}
         onInput={(e) => props.onInput(e.currentTarget.value)}
         onBlur={(e) => props.onCommit?.(e.currentTarget.value)}

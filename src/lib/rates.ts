@@ -7,6 +7,12 @@ const SOURCES = [
 
 const FRESH_FOR = 12 * 60 * 60 * 1000
 
+/** True when amounts in this currency can be converted into the budget currency. */
+export function hasRate(code: string): boolean {
+  const s = settings()
+  return code === s.base || (s.rates[code] ?? 0) > 0
+}
+
 /** Currencies the budget actually deals with. */
 export function currenciesInUse(): string[] {
   const s = settings()
@@ -22,7 +28,7 @@ export async function refreshRates(force = false): Promise<boolean> {
   const base = s.base.toLowerCase()
   for (const src of SOURCES) {
     try {
-      const res = await fetch(src(base), { cache: 'no-store' })
+      const res = await fetch(src(base), { cache: 'no-store', signal: AbortSignal.timeout(6000) })
       if (!res.ok) continue
       const json = (await res.json()) as Record<string, Record<string, number>>
       const table = json[base]
@@ -32,7 +38,8 @@ export async function refreshRates(force = false): Promise<boolean> {
         if (s.pinned?.[c]) continue
         const perBase = table[c.toLowerCase()]
         // table says: 1 base = perBase units of c. We store: 1 unit of c = x base.
-        if (perBase) rates[c] = Math.round((1 / perBase) * 10000) / 10000
+        // Full precision: rounding would turn weak currencies (VND, IDR, KRW) into 0.
+        if (perBase > 0) rates[c] = Number((1 / perBase).toPrecision(10))
       }
       updateSettings({ rates, ratesAt: Date.now() })
       return true
