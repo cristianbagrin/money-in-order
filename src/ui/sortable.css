@@ -1,0 +1,64 @@
+/* Hold-and-drag reordering (src/ui/sortable.ts). */
+
+/* The item in hand: a card lifted off the page. The 6px surface ring gives it breathing room
+   without touching layout. Transform is driven inline while dragging. */
+.sort-lifted {
+  position: relative;
+  z-index: 30;
+  background: var(--surface, #fff) !important;
+  border-radius: var(--radius, 12px);
+  box-shadow:
+    0 0 0 6px var(--surface, #fff),
+    0 2px 6px 6px rgba(21, 36, 44, 0.05),
+    0 18px 36px -4px rgba(21, 36, 44, 0.2);
+  transform: scale(1.02);
+  will-change: transform;
+}
+
+/* A lifted group reads as one card, not white with grey row bands. */
+.sort-lifted [data-sort-id] {
+  background: transparent;
+}
+
+/* Settling into place: the card melts back into the list. */
+.sort-lifted.sort-dropping {
+  background: transparent !important;
+  box-shadow:
+    0 0 0 6px rgba(255, 255, 255, 0),
+    0 2px 6px 6px rgba(21, 36, 44, 0),
+    0 18px 36px -4px rgba(21, 36, 44, 0);
+}
+
+/* The opening where the item will land. */
+.sort-gap {
+  display: block;
+  flex: none;
+  box-sizing: border-box;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  list-style: none;
+  grid-column: 1 / -1;
+  pointer-events: none;
+}
+
+/* No hover states or stray targets under the moving item. */
+.sort-active * {
+  pointer-events: none;
+}
+
+body.is-sorting,
+body.is-sorting * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-lifted {
+    transform: none;
+  }
+}

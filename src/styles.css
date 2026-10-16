@@ -298,7 +298,7 @@ h3 {
   border-color: var(--pen);
   color: var(--pen);
 }
-.pill.main {
+.pill.solid {
   background: var(--pen);
   border-color: var(--pen);
   color: #fff;
@@ -502,18 +502,23 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   color: var(--ink-3);
+  border-bottom: 1px dashed var(--rule-strong);
+  transition: border-color 0.15s;
+}
+.note:focus-within {
+  border-bottom-color: var(--pen);
+  color: var(--pen);
 }
 .note input {
   border: 0;
-  border-bottom: 1px dashed var(--rule-strong);
   border-radius: 0;
   background: transparent;
   padding: 4px 0;
   min-height: 38px;
+  color: var(--ink);
 }
 .note input:focus {
   box-shadow: none;
-  border-bottom-color: var(--pen);
 }
 
 .section {
@@ -856,9 +861,14 @@ textarea:focus {
 .grp-add {
   width: 28px;
   height: 28px;
-  opacity: 0.6;
+  opacity: 0.35;
+  transition: opacity 0.15s;
 }
-.grp-add:hover {
+.grp:hover .grp-add {
+  opacity: 0.8;
+}
+.grp-add:hover,
+.grp-add:focus-visible {
   opacity: 1;
 }
 
@@ -1014,12 +1024,6 @@ textarea:focus {
   margin-top: 16px;
 }
 
-/* drag & drop */
-.sort-lifted {
-  background: var(--surface) !important;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(21, 36, 44, 0.16);
-}
 
 /* ---------------------------------------------------------------- category sheet */
 
@@ -1063,6 +1067,7 @@ textarea:focus {
 
 .searchbar {
   position: relative;
+  display: block;
 }
 .searchbar svg {
   position: absolute;

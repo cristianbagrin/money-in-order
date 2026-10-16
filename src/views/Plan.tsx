@@ -130,7 +130,7 @@ export function Plan(props: {
         {(view.need > 0 && rta > 0) || (view.assigned === 0 && prevHasPlan && rta > 0) ? (
           <div class="rta-actions">
             {view.need > 0 && rta > 0 && (
-              <button class="pill main" onClick={fund}>
+              <button class="pill solid" onClick={fund}>
                 Fund targets <small>{fmt(Math.min(view.need, rta), base)}</small>
               </button>
             )}

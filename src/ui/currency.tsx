@@ -34,7 +34,7 @@ export function CurrencyPicker(props: { selected: string[]; main: string; onChan
       {visible.map((code) => (
         <button
           key={code}
-          class={`pill${code === main ? ' main' : selected.includes(code) ? ' picked' : ''}`}
+          class={`pill${code === main ? ' solid' : selected.includes(code) ? ' picked' : ''}`}
           aria-pressed={code === main || selected.includes(code)}
           aria-label={`${code}${code === main ? ', the currency you plan in' : selected.includes(code) ? ', in use' : ''}`}
           onClick={() => tap(code)}

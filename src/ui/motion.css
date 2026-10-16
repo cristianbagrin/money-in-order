@@ -1,0 +1,169 @@
+/*
+ * One-shot motion utilities. Entrance classes and feedback classes fill separate animation
+ * slots, so flashing `.pulse-once` or `.shake` on an element that also carries an entrance
+ * class never replays the entrance when the flash ends.
+ */
+@property --mio-in {
+  syntax: '*';
+  inherits: false;
+}
+@property --mio-fx {
+  syntax: '*';
+  inherits: false;
+}
+
+.pop-in,
+.fade-up,
+.tick-up,
+.tick-down,
+.slide-in-right,
+.slide-in-left,
+.pulse-once,
+.shake {
+  animation: var(--mio-in, none), var(--mio-fx, none);
+}
+
+/* Transforms don't apply to plain inline boxes; zero specificity so any real display rule wins. */
+:where(span, a, b, strong, em, i, small, mark, output, data, time, abbr, bdi, sup, sub, label, q, cite, code, kbd, s, u, del, ins):where(
+    .pop-in,
+    .fade-up,
+    .tick-up,
+    .tick-down,
+    .slide-in-right,
+    .slide-in-left,
+    .pulse-once,
+    .shake,
+    .press
+  ) {
+  display: inline-block;
+}
+
+/* Entrances */
+.pop-in {
+  --mio-in: mio-pop-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+.fade-up {
+  --mio-in: mio-fade-up 220ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+.tick-up {
+  --mio-in: mio-tick-up 220ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+.tick-down {
+  --mio-in: mio-tick-down 220ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+.slide-in-right {
+  --mio-in: mio-slide-in-right 220ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+.slide-in-left {
+  --mio-in: mio-slide-in-left 220ms cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+
+/* Feedback */
+.pulse-once {
+  --mio-fx: mio-pulse 260ms linear;
+}
+.shake {
+  --mio-fx: mio-shake 360ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Pressed state. Uses `scale`, so it composes with transforms and the animations above.
+   The transition has zero specificity: an element with its own `transition` should list `scale 90ms`. */
+:where(.press) {
+  transition: scale 90ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.press:active:not(:disabled, [aria-disabled='true']) {
+  scale: 0.97;
+}
+
+@keyframes mio-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+@keyframes mio-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes mio-tick-up {
+  from {
+    opacity: 0;
+    transform: translateY(40%);
+  }
+}
+@keyframes mio-tick-down {
+  from {
+    opacity: 0;
+    transform: translateY(-40%);
+  }
+}
+@keyframes mio-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes mio-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+@keyframes mio-pulse {
+  0% {
+    transform: scale(1);
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.25, 1);
+  }
+  38% {
+    transform: scale(1.06);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes mio-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  12% {
+    transform: translateX(-6px);
+  }
+  27% {
+    transform: translateX(5px);
+  }
+  42% {
+    transform: translateX(-4px);
+  }
+  57% {
+    transform: translateX(3px);
+  }
+  72% {
+    transform: translateX(-2px);
+  }
+  87% {
+    transform: translateX(1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop-in,
+  .fade-up,
+  .tick-up,
+  .tick-down,
+  .slide-in-right,
+  .slide-in-left,
+  .pulse-once,
+  .shake {
+    animation: none;
+  }
+  :where(.press) {
+    transition: none;
+  }
+  .press:active:not(:disabled, [aria-disabled='true']) {
+    scale: none;
+  }
+}

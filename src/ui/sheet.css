@@ -1,0 +1,301 @@
+/* ---------------------------------------------------------------- sheet
+   The <dialog> is a transparent full-screen layer; .sheet-scrim and .sheet-panel inside it are what
+   you see. Poses are keyed off data-state on the dialog (unset/exit = away, open = shown).
+   Child combinators throughout, so a sheet opened inside another sheet never inherits its pose. */
+
+dialog.sheet {
+  --sheet-kb: 0px; /* keyboard height (set from JS on phones) */
+  --sheet-vh: 100dvh; /* visible height */
+  --sheet-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --sheet-in: 340ms;
+  --sheet-out: 260ms;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink, #15242c);
+  overflow: hidden;
+  overflow: clip; /* never scrollable, not even by focus or scrollIntoView */
+  outline: none;
+}
+dialog.sheet::backdrop {
+  background: transparent;
+}
+
+.sheet > .sheet-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(21, 36, 44, 0.32);
+  opacity: 0;
+  transition: opacity var(--sheet-in) ease;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.sheet[data-state='open'] > .sheet-scrim {
+  opacity: 1;
+}
+.sheet[data-state='exit'] > .sheet-scrim {
+  transition-duration: var(--sheet-out);
+}
+
+/* phone: bottom sheet */
+.sheet > .sheet-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--sheet-kb);
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: min(92dvh, calc(var(--sheet-vh) - 8px));
+  background: var(--surface, #fff);
+  border-radius: 16px 16px 0 0;
+  box-shadow:
+    0 -1px 0 rgba(21, 36, 44, 0.04),
+    0 -10px 40px rgba(21, 36, 44, 0.1);
+  transform: translate3d(0, calc(100% + var(--sheet-kb) + 48px), 0);
+  transform-origin: 50% 0;
+  transition: transform var(--sheet-in) var(--sheet-ease);
+  will-change: transform;
+  outline: none;
+}
+/* Paper below the sheet, so pulling it up never shows a gap. */
+.sheet > .sheet-panel::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 1px);
+  height: 200px;
+  background: inherit;
+}
+.sheet[data-state='open'] > .sheet-panel {
+  transform: none;
+}
+.sheet[data-state='exit'] > .sheet-panel {
+  transition-duration: var(--sheet-out);
+}
+/* A sheet with another sheet on top of it steps back. */
+@media (max-width: 959px) and (prefers-reduced-motion: no-preference) {
+  .sheet[data-under][data-state='open'] > .sheet-panel {
+    transform: translate3d(0, -10px, 0) scale(0.94);
+  }
+}
+.sheet[data-drag] > .sheet-panel,
+.sheet[data-drag] > .sheet-scrim {
+  transition: none;
+}
+
+.sheet-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border-radius: inherit;
+}
+
+.sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 20px 0;
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 0 transparent;
+  transition: box-shadow 0.2s;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sheet-panel[data-scrolled] > .sheet-scroll > .sheet-head {
+  box-shadow: 0 1px 0 var(--rule, #e7e7e2);
+}
+.sheet-grab {
+  display: block;
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 6px;
+  border-radius: 3px;
+  background: var(--rule-strong, #d0d0c8);
+}
+.sheet-head.bare {
+  padding-bottom: 6px;
+}
+.sheet-head.bare > .sheet-bar {
+  min-height: 0;
+  padding: 0;
+}
+.sheet-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding-bottom: 8px;
+}
+.sheet-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.sheet-x {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-right: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg, #f6f6f3);
+  color: var(--ink-2, #57646b);
+  transition:
+    background 0.15s,
+    color 0.15s,
+    transform 0.1s;
+}
+.sheet-x:hover {
+  background: var(--rule, #e7e7e2);
+  color: var(--ink, #15242c);
+}
+.sheet-x:active {
+  transform: scale(0.92);
+}
+/* Phones dismiss by swiping; the × stays for screen readers and appears for keyboard focus. */
+@media (max-width: 959px) {
+  .sheet-x:not(:focus-visible) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .sheet-x:focus-visible {
+    margin-right: 0;
+  }
+  .sheet-head.bare .sheet-x:focus-visible {
+    position: absolute;
+    top: 8px;
+    right: 14px;
+  }
+}
+
+.sheet-body {
+  padding: 0 20px calc(24px + env(safe-area-inset-bottom));
+}
+.sheet[data-kb] > .sheet-panel > .sheet-scroll > .sheet-body {
+  padding-bottom: 16px;
+}
+
+/* wide screens: centred panel */
+@media (min-width: 960px) {
+  dialog.sheet[open] {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    --sheet-in: 240ms;
+    --sheet-out: 160ms;
+  }
+  .sheet > .sheet-panel {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    max-width: 520px;
+    max-height: min(86dvh, 900px);
+    margin: 0;
+    border-radius: 16px;
+    box-shadow:
+      0 0 0 1px rgba(21, 36, 44, 0.04),
+      0 24px 72px rgba(21, 36, 44, 0.18),
+      0 2px 8px rgba(21, 36, 44, 0.06);
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.97);
+    transition:
+      opacity var(--sheet-in) ease,
+      transform var(--sheet-in) var(--sheet-ease);
+  }
+  .sheet.wide > .sheet-panel {
+    max-width: 720px;
+  }
+  .sheet[data-state='open'] > .sheet-panel {
+    opacity: 1;
+    transform: none;
+  }
+  .sheet[data-state='exit'] > .sheet-panel {
+    transform: translate3d(0, 6px, 0) scale(0.98);
+    transition-timing-function: ease, ease-in;
+  }
+  .sheet > .sheet-panel::after,
+  .sheet-grab {
+    display: none;
+  }
+  .sheet-head {
+    padding: 14px 14px 0 20px;
+    touch-action: auto;
+  }
+  .sheet-head.bare {
+    padding-top: 12px;
+    padding-right: 12px;
+  }
+  .sheet-head.bare > .sheet-bar {
+    display: flex;
+    min-height: 32px;
+    padding-bottom: 4px;
+  }
+  .sheet-bar {
+    min-height: 36px;
+    padding-bottom: 10px;
+  }
+  .sheet-body {
+    padding-bottom: 24px;
+  }
+}
+
+@media (min-width: 960px) and (pointer: coarse) {
+  .sheet-x {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* No travel, just a fade. (Beats the global reduced-motion rule, which would make it a snap.) */
+@media (prefers-reduced-motion: reduce) {
+  .sheet > .sheet-panel,
+  .sheet[data-state] > .sheet-panel {
+    transform: none;
+  }
+  .sheet:not([data-state='open']) > .sheet-panel {
+    opacity: 0;
+  }
+  .sheet > .sheet-panel,
+  .sheet > .sheet-scrim {
+    transition: opacity 200ms ease !important;
+  }
+  .sheet[data-drag] > .sheet-panel,
+  .sheet[data-drag] > .sheet-scrim {
+    transition: none !important;
+  }
+}
