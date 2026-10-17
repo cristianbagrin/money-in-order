@@ -60,6 +60,13 @@ export function Plan(props: {
   const [editingGroup, setEditingGroup] = useState<ID | null>(null)
   const [adding, setAdding] = useState<ID | null>(null)
 
+  // A row or group that disappears (undo, sync) can't stay in edit mode: that would keep drag switched off.
+  useEffect(() => {
+    if (editing && !view.cats.some((c) => c.cat.id === editing.id)) setEditing(null)
+    if (editingGroup && !view.groups.some((g) => g.group.id === editingGroup)) setEditingGroup(null)
+    if (adding && !view.groups.some((g) => g.group.id === adding)) setAdding(null)
+  }, [view, editing, editingGroup, adding])
+
   const prevHasPlan = (ix.asg.get(addMonths(month, -1))?.size ?? 0) > 0
   let lastMonthTotal = 0
   for (const [id, v] of ix.asg.get(addMonths(month, -1)) ?? []) if (v > 0 && !ix.catById.get(id)?.archived) lastMonthTotal += v
@@ -383,7 +390,11 @@ function CatRow(props: {
   // The stored amount changed (undo, sync, a quick-assign pill): never keep showing an old draft.
   useEffect(() => {
     if (edited.current) return
-    setDraftVal(document.activeElement === asgRef.current ? toDraft(c.assigned) : null)
+    const el = asgRef.current
+    const focused = document.activeElement === el
+    setDraftVal(focused ? toDraft(c.assigned) : null)
+    // A restored value in the box you are standing in is replaced by the next keystroke, as after a click.
+    if (focused) requestAnimationFrame(() => document.activeElement === el && el?.select())
   }, [c.assigned])
 
   function saveName(v: string | null, keepEditing = false) {

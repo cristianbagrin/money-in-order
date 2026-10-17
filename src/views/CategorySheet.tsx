@@ -231,8 +231,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
 
   return (
     <section class="section">
-      <h2>Target</h2>
-      <div class="pills cs-kinds">
+      <div class="pills cs-kinds" role="group" aria-label="Target">
         {KINDS.map(([k, label]) => (
           <Fragment key={k}>
             <button class="pill sm soft" aria-pressed={kind === k} onClick={() => setKind(k)}>
