@@ -1,10 +1,18 @@
 import { daily, expectedTotal, monthView, type Index, type MonthView } from './budget'
 import { addDays, addMonths, dayOfMonth, daysInMonth, monthName, monthOf } from './dates'
+import { plannedOf, savingsRate, totalPlanned } from './insights'
 import { fmt } from './money'
 import { live, RTA, type DB } from './types'
 
 function pct(x: number | null): string {
   return x === null ? '—' : `${Math.round(x * 100)}%`
+}
+
+/** The savings rate as Review shows it: none when more went to savings than came in. */
+function rateText(v: MonthView): string {
+  const r = savingsRate(v)
+  if (r !== null) return pct(r)
+  return v.saved > 0 && v.income > 0 ? 'more than income (paid from earlier money)' : '—'
 }
 
 function targetText(ix: Index, id: string, base: string): string {
@@ -41,7 +49,7 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   )
   const rateList = Object.entries(s.rates)
     .filter(([c]) => c !== base && s.extraCurrencies.includes(c))
-    .map(([c, r]) => `1 ${c} = ${r} ${base}`)
+    .map(([c, r]) => `1 ${c} = ${Number(r.toPrecision(4))} ${base}`)
   if (rateList.length) out.push(`Exchange rates: ${rateList.join(' · ')}.`)
   out.push('')
   out.push('How my budget works: zero-based, like YNAB. Every unit of money gets a job (a category). ')
@@ -87,7 +95,7 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
 
   // ------------------------------------------------ this month
   out.push(`## ${monthName(current, { year: true })} so far`)
-  out.push(`Income ${f(view.income)} · Spent ${f(view.spent)} · Saved ${f(view.saved)} (${pct(view.savingsRate)})`)
+  out.push(`Income ${f(view.income)} · Planned ${f(totalPlanned(view))} · Spent ${f(view.spent)} · Saved ${f(view.saved)} (${rateText(view)})`)
   out.push('')
   out.push('| Category | Group | Target | Rolled in | Assigned | Spent | Available | Note |')
   out.push('|---|---|---|---:|---:|---:|---:|---|')
@@ -109,21 +117,28 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   if (shown.length > 1) {
     const views: MonthView[] = shown.map((m) => monthView(ix, m, current))
     out.push(`## Month by month`)
-    out.push('| Month | Income | Spent | Saved | Savings rate | Overspent categories at month end |')
-    out.push('|---|---:|---:|---:|---:|---|')
+    out.push('| Month | Income | Planned | Spent | Saved | Savings rate | Overspent categories at month end |')
+    out.push('|---|---:|---:|---:|---:|---:|---|')
     for (const v of views) {
       const over = v.overspent.map((c) => `${c.cat.name} ${f(c.available)}`).join(', ') || 'none'
-      out.push(`| ${v.month}${v.month === current ? ' (so far)' : ''} | ${f(v.income)} | ${f(v.spent)} | ${f(v.saved)} | ${pct(v.savingsRate)} | ${esc(over)} |`)
+      out.push(
+        `| ${v.month}${v.month === current ? ' (so far)' : ''} | ${f(v.income)} | ${f(totalPlanned(v))} | ${f(v.spent)} | ${f(v.saved)} | ${rateText(v)} | ${esc(over)} |`,
+      )
     }
     out.push('')
     out.push('### Planned vs spent per category')
+    out.push(
+      'Planned = what the category had for that month\'s own spending (rolled in + assigned). Money kept toward a goal ' +
+        'or a buffer counts only as far as it was spent; money that cleared earlier overspending is not counted.',
+    )
+    out.push('')
     out.push(`| Category | ${shown.map((m) => `${m} planned / spent`).join(' | ')} |`)
     out.push(`|---|${shown.map(() => '---:').join('|')}|`)
     for (const cat of ix.cats) {
       if (cat.archived) continue
       const cells = views.map((v) => {
         const c = v.byId.get(cat.id)
-        return c ? `${f(c.assigned)} / ${f(-c.activity)}` : '—'
+        return c ? `${f(plannedOf(c))} / ${f(-c.activity)}` : '—'
       })
       out.push(`| ${esc(cat.name)} | ${cells.join(' | ')} |`)
     }
@@ -139,7 +154,7 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   if (big.length) {
     out.push('## Biggest expenses, last 60 days')
     for (const t of big) {
-      const orig = t.cur !== base ? ` (${fmt(t.amt, t.cur)})` : ''
+      const orig = t.cur !== base ? ` (${fmt(-t.amt, t.cur)})` : ''
       out.push(`- ${t.date} · ${ix.catById.get(t.cat)?.name ?? '?'} · ${f(-t.base)}${orig}${t.note ? ` · ${t.note}` : ''}`)
     }
     out.push('')

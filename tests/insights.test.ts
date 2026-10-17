@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { monthView } from '../src/lib/budget'
-import { burn, categoryTrends, insights, monthSeries, weeks } from '../src/lib/insights'
+import { daily, monthView } from '../src/lib/budget'
+import { burn, categoryTrends, insights, lastDays, monthSeries, weeks } from '../src/lib/insights'
 import * as S from '../src/lib/store'
-import { emptyDB, RTA, type Category } from '../src/lib/types'
+import { emptyDB, RTA, type Category, type Target } from '../src/lib/types'
 
 const JUL = '2026-07'
 const AUG = '2026-08'
@@ -24,6 +24,12 @@ function earn(date: string, major: number) {
 }
 function give(month: string, name: string, major: number) {
   S.setAssigned(month, cat(name).id, u(major))
+}
+function target(name: string, t: Target) {
+  S.saveCategory({ ...cat(name), target: t })
+}
+function notDaily(name: string) {
+  S.saveCategory({ ...cat(name), daily: undefined })
 }
 const ix = () => S.getIndex()
 
@@ -61,6 +67,36 @@ describe('monthSeries', () => {
     // November: Living carries 14,000 and gets 15,000 more, Purchases carries 8,000
     expect(nov.planned).toBe(u(29000 + 8000))
   })
+
+  it('leaves money kept toward a goal or buffer out of the plan, until it is spent', () => {
+    target('Trips', { kind: 'goal', amount: u(30000), by: '2027-01' })
+    target('Other', { kind: 'refill', amount: u(5000) })
+    target('Living', { kind: 'refill', amount: u(10000) }) // daily: meant to be spent
+    give(SEP, 'Trips', 5000)
+    give(SEP, 'Other', 5000)
+    give(SEP, 'Living', 10000)
+    spend('2026-09-04', 'Living', 8000)
+    spend('2026-09-05', 'Other', 1000)
+    expect(monthSeries(ix(), [SEP], OCT)[0].planned).toBe(u(10000 + 1000))
+    spend('2026-09-20', 'Trips', 2000)
+    expect(monthSeries(ix(), [SEP], OCT)[0].planned).toBe(u(10000 + 1000 + 2000))
+  })
+
+  it('does not count money that cleared earlier overspending as plan', () => {
+    spend('2026-08-05', 'Purchases', 3000) // nothing assigned: −3,000
+    give(SEP, 'Purchases', 8000) // 3,000 clears August, 5,000 for September
+    spend('2026-09-05', 'Purchases', 5000)
+    expect(monthSeries(ix(), [SEP], OCT)[0].planned).toBe(u(5000))
+  })
+
+  it('has no savings rate when savings were more than the income', () => {
+    S.addTxn({ date: '2026-09-01', cat: RTA, amt: u(100000), cur: 'TWD', kind: 'start' })
+    earn('2026-09-02', 20000)
+    give(SEP, 'Future me', 30000)
+    const [sep] = monthSeries(ix(), [SEP], OCT)
+    expect(sep.saved).toBe(u(30000))
+    expect(sep.savingsRate).toBeNull()
+  })
 })
 
 describe('burn', () => {
@@ -90,10 +126,12 @@ describe('burn', () => {
     expect(b.actual[29]).toBe(u(4500))
     expect(b.actual[29]).toBe(monthView(ix(), SEP, OCT).spent)
     expect(b.plan).toBe(u(15000))
+    expect(b.dailyPlan).toBe(u(10000)) // Living spreads over the month, Purchases can go on any day
+    expect(b.projected).toBeNull()
     expect(b.previous).toEqual([]) // August had nothing
   })
 
-  it('stops the current month at today and stretches last month to fit', () => {
+  it('stops the current month at today, projects everyday spending and stretches last month to fit', () => {
     const b = burn(ix(), OCT, TODAY)
     expect(b.days).toBe(31)
     expect(b.today).toBe(15)
@@ -102,7 +140,10 @@ describe('burn', () => {
     expect(b.actual.filter((v) => v !== null)).toHaveLength(15)
     // Living carries 9,000 and gets 12,000; Purchases carries 1,500
     expect(b.plan).toBe(u(21000 + 1500))
+    expect(b.dailyPlan).toBe(u(21000))
     expect(b.plan).toBe(monthSeries(ix(), [OCT], OCT)[0].planned)
+    // everything logged this month, plus Living's 1,000 in 15 days carried on for the 16 days left
+    expect(b.projected).toBe(u(6000) + Math.round((u(1000) / 15) * 16))
     expect(b.previous).toHaveLength(31)
     expect(b.previous[30]).toBe(u(4500))
     // September day 3 lands at October index ~2.1
@@ -111,11 +152,20 @@ describe('burn', () => {
     for (let i = 1; i < 9; i++) expect(b.previous[i]).toBeGreaterThanOrEqual(b.previous[i - 1])
   })
 
+  it('waits a few days before projecting, and needs a daily category to project', () => {
+    expect(burn(ix(), OCT, '2026-10-04').projected).toBeNull()
+    expect(burn(ix(), OCT, '2026-10-05').projected).not.toBeNull()
+    notDaily('Living')
+    expect(burn(ix(), OCT, TODAY).projected).toBeNull()
+    expect(burn(ix(), OCT, TODAY).dailyPlan).toBe(0)
+  })
+
   it('has no actual line for a month that has not started', () => {
     const b = burn(ix(), NOV, TODAY)
     expect(b.days).toBe(30)
     expect(b.today).toBe(0)
     expect(b.actual.every((v) => v === null)).toBe(true)
+    expect(b.projected).toBeNull()
     expect(b.previous[29]).toBe(u(6000)) // all of October, the future entry included
   })
 
@@ -134,7 +184,7 @@ describe('burn', () => {
 
 describe('categoryTrends', () => {
   it('is empty with no data', () => {
-    expect(categoryTrends(ix(), OCT, OCT)).toEqual([])
+    expect(categoryTrends(ix(), OCT, TODAY)).toEqual([])
   })
 
   it('tracks each spending category across months', () => {
@@ -152,15 +202,15 @@ describe('categoryTrends', () => {
     spend('2026-09-09', 'Trips', 800)
     S.saveCategory({ ...trips, archived: 1 })
 
-    const t = categoryTrends(ix(), OCT, OCT, 6)
+    const t = categoryTrends(ix(), OCT, '2026-10-31', 6)
     expect(t.map((x) => x.name)).toEqual(['Living', 'Phone', 'Purchases'])
     const living = t[0]
     // Data starts in July, so the window is Jul..Oct
     expect(living.series).toEqual([u(9000), u(11000), 0, u(6000)])
     expect(living.thisMonth).toBe(u(6000))
     expect(living.average).toBe(u(10000)) // July and August; September had no activity
-    // carried: 1,000 − 11,000 = −10,000, then +10,000 assigned
-    expect(living.planned).toBe(0)
+    // carried −10,000; the 10,000 assigned covers October's 6,000 first, and the debt stays uncovered
+    expect(living.planned).toBe(u(6000))
     expect(living.overMonths).toBe(1) // August only; October's debt was carried in, not new spending
     const purchases = t.find((x) => x.name === 'Purchases')!
     expect(purchases.overMonths).toBe(2)
@@ -170,10 +220,26 @@ describe('categoryTrends', () => {
     expect(phone.planned).toBe(u(600))
   })
 
+  it('compares the current month with the same point of earlier months', () => {
+    give(SEP, 'Living', 20000)
+    spend('2026-09-05', 'Living', 4000)
+    spend('2026-09-25', 'Living', 6000)
+    give(OCT, 'Living', 10000)
+    spend('2026-10-05', 'Living', 1000)
+    spend('2026-10-20', 'Living', 500) // logged ahead: not "so far"
+    const now = categoryTrends(ix(), OCT, TODAY, 6)[0]
+    expect(now.series).toEqual([u(4000), u(1000)]) // by September 15 and October 15
+    expect(now.average).toBe(u(4000))
+    // once October is over, whole months
+    const after = categoryTrends(ix(), OCT, '2026-11-02', 6)[0]
+    expect(after.series).toEqual([u(10000), u(1500)])
+    expect(after.average).toBe(u(10000))
+  })
+
   it('keeps the window to n months and starts at the first month with data', () => {
     for (const m of ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']) spend(`${m}-10`, 'Living', 100)
-    expect(categoryTrends(ix(), '2026-06', '2026-06', 3)[0].series).toEqual([u(100), u(100), u(100)])
-    expect(categoryTrends(ix(), '2026-02', '2026-06', 6)[0].series).toEqual([u(100), u(100)])
+    expect(categoryTrends(ix(), '2026-06', '2026-06-30', 3)[0].series).toEqual([u(100), u(100), u(100)])
+    expect(categoryTrends(ix(), '2026-02', '2026-06-30', 6)[0].series).toEqual([u(100), u(100)])
   })
 })
 
@@ -182,20 +248,27 @@ describe('weeks', () => {
     expect(weeks(ix(), TODAY)).toEqual([{ start: '2026-10-12', spent: 0 }])
   })
 
-  it('sums Monday-to-Sunday weeks up to today', () => {
+  it('sums everyday spending in Monday-to-Sunday weeks up to today', () => {
     spend('2026-08-01', 'Living', 1)
     spend('2026-10-11', 'Living', 50) // Sunday: last week
     spend('2026-10-12', 'Living', 100) // Monday
-    spend('2026-10-15', 'Purchases', 200)
+    spend('2026-10-15', 'Purchases', 200) // a one-off: not everyday spending
     spend('2026-10-16', 'Living', 999) // tomorrow
     spend('2026-10-13', 'Future me', 5000) // savings
     earn('2026-10-14', 40000)
     const w = weeks(ix(), TODAY, 8)
     expect(w).toHaveLength(8)
     expect(w[0].start).toBe('2026-08-24')
-    expect(w[7]).toEqual({ start: '2026-10-12', spent: u(300) })
+    expect(w[7]).toEqual({ start: '2026-10-12', spent: u(100) })
     expect(w[6]).toEqual({ start: '2026-10-05', spent: u(50) })
     for (let i = 1; i < 8; i++) expect(new Date(w[i].start).getTime() - new Date(w[i - 1].start).getTime()).toBe(7 * 86400000)
+  })
+
+  it('uses all spending when no category is daily', () => {
+    notDaily('Living')
+    spend('2026-10-12', 'Living', 100)
+    spend('2026-10-15', 'Purchases', 200)
+    expect(weeks(ix(), TODAY, 8)).toEqual([{ start: '2026-10-12', spent: u(300) }])
   })
 
   it('drops weeks before the first transaction and spans month ends', () => {
@@ -214,6 +287,34 @@ describe('weeks', () => {
   })
 })
 
+describe('lastDays', () => {
+  it('is empty without a daily category', () => {
+    notDaily('Living')
+    spend('2026-10-12', 'Living', 100)
+    expect(lastDays(ix(), TODAY)).toEqual([])
+  })
+
+  it('sums the daily categories per day up to today, from the first transaction', () => {
+    spend('2026-10-03', 'Living', 100)
+    spend('2026-10-10', 'Living', 200)
+    spend('2026-10-10', 'Living', 50)
+    spend('2026-10-10', 'Purchases', 999) // not everyday spending
+    spend('2026-10-16', 'Living', 70) // tomorrow
+    const d = lastDays(ix(), TODAY, 14)
+    expect(d).toHaveLength(13) // Oct 3..15; Oct 2 was before anything was logged
+    expect(d[0]).toEqual({ date: '2026-10-03', spent: u(100) })
+    expect(d.find((x) => x.date === '2026-10-10')!.spent).toBe(u(250))
+    expect(d[d.length - 1]).toEqual({ date: TODAY, spent: 0 })
+  })
+
+  it('keeps the last n days once there is enough history', () => {
+    spend('2026-08-01', 'Living', 1)
+    const d = lastDays(ix(), TODAY, 14)
+    expect(d).toHaveLength(14)
+    expect(d[0].date).toBe('2026-10-02')
+  })
+})
+
 describe('insights', () => {
   const check = (notes: { tone: string; text: string }[]) => {
     expect(notes.length).toBeLessThanOrEqual(4)
@@ -224,6 +325,10 @@ describe('insights', () => {
     }
     return notes.map((n) => n.text)
   }
+  /** each category is named at most once */
+  const once = (notes: { text: string }[], ...names: string[]) => {
+    for (const name of names) expect(notes.filter((n) => n.text.includes(name)).length).toBeLessThanOrEqual(1)
+  }
 
   it('says nothing without data, before the data starts, or for future months', () => {
     expect(insights(ix(), OCT, TODAY)).toEqual([])
@@ -232,59 +337,112 @@ describe('insights', () => {
     expect(insights(ix(), NOV, TODAY)).toEqual([])
   })
 
-  it('warns when daily spending is running ahead of plan', () => {
+  it('names the daily category running ahead of plan and the daily amount that keeps it on plan', () => {
     give(OCT, 'Living', 15000)
     spend('2026-10-03', 'Living', 6000)
     spend('2026-10-12', 'Living', 6000)
-    // 12,000 in 15 days -> 24,800 by the 31st, 9,800 over
+    // 12,000 in 15 days is 800 a day; the plan is 15,000 / 31 = 484; 3,000 left for 17 days
     const notes = insights(ix(), OCT, TODAY)
-    expect(check(notes)).toContain('At this pace you’ll go NT$9,800 over plan this month.')
-    expect(notes.find((n) => n.text.startsWith('At this pace'))!.tone).toBe('bad')
+    expect(check(notes)).toContain('Living averages NT$800 a day, over its NT$484 plan; keep it to NT$176 a day.')
+    expect(notes.find((n) => n.text.startsWith('Living'))!.tone).toBe('bad')
+    // the same daily amount Today shows
+    expect(daily(ix(), monthView(ix(), OCT, OCT), TODAY)!.allowance).toBe(u(176))
+    expect(notes.some((n) => /this month\.$/.test(n.text) && n.text.includes('over plan'))).toBe(false)
   })
 
-  it('says how far under plan daily spending will finish', () => {
+  it('says how much a day is left when daily spending is under plan', () => {
     give(OCT, 'Living', 15000)
     give(OCT, 'Phone', 600)
     spend('2026-10-02', 'Phone', 600)
     spend('2026-10-03', 'Living', 5000)
-    // 5,000 in 15 days -> 10,333; 4,667 under -> roughly 4,700
-    const notes = insights(ix(), OCT, TODAY)
-    const pace = notes.find((n) => n.text.startsWith('At this pace'))!
-    expect(pace).toEqual({ tone: 'good', text: 'At this pace you’ll end the month NT$4,700 under plan.' })
+    expect(insights(ix(), OCT, TODAY)).toContainEqual({
+      tone: 'good',
+      text: 'Living averages NT$333 a day, under its NT$484 plan, so NT$588 a day is left.',
+    })
   })
 
-  it('waits a week before projecting', () => {
+  it('gives the daily amount early in the month, and no "lower than usual" yet', () => {
+    give(SEP, 'Living', 10000)
+    spend('2026-09-01', 'Living', 3000)
+    spend('2026-09-02', 'Living', 3000)
     give(OCT, 'Living', 15000)
-    spend('2026-10-02', 'Living', 9000)
-    expect(insights(ix(), OCT, '2026-10-05').some((n) => n.text.startsWith('At this pace'))).toBe(false)
+    spend('2026-10-02', 'Living', 100)
+    for (const day of ['2026-10-02', '2026-10-04']) {
+      const texts = check(insights(ix(), OCT, day))
+      expect(texts.some((t) => /usual|lower than/.test(t))).toBe(false)
+    }
+    // 4,000 rolled in + 15,000 − 100, over the 28 days from the 4th
+    expect(insights(ix(), OCT, '2026-10-04')).toContainEqual({ tone: 'neutral', text: 'Living has NT$675 a day for the rest of October.' })
   })
 
-  it('puts categories that are over plan first, with their streak', () => {
+  it('says how a red category in Plan can be cleared, this month’s part named', () => {
+    earn('2026-10-01', 5000)
     give(SEP, 'Purchases', 1000)
     spend('2026-09-05', 'Purchases', 1500)
-    give(OCT, 'Purchases', 1500) // covers September's 500 and leaves 1,000
+    give(OCT, 'Purchases', 1500)
     spend('2026-10-05', 'Purchases', 2200)
+    // Plan shows −1,200: 500 from September, 700 this month
     const notes = insights(ix(), OCT, TODAY)
-    expect(notes[0]).toEqual({ tone: 'bad', text: 'Purchases is NT$1,200 over plan, 2 months in a row.' })
-    // not repeated as a "keeps going over" sentence
-    expect(notes.filter((n) => n.text.includes('Purchases'))).toHaveLength(1)
+    expect(notes[0]).toEqual({ tone: 'bad', text: 'Purchases is NT$1,200 short, NT$700 of it this month; cover it from Ready to assign.' })
+    once(notes, 'Purchases')
   })
 
   it('names several overspent categories together', () => {
     spend('2026-10-05', 'Purchases', 300)
     spend('2026-10-05', 'Trips', 200)
     spend('2026-10-05', 'Other', 100)
-    expect(insights(ix(), OCT, TODAY)[0].text).toBe('3 categories are NT$600 over plan, most in Purchases.')
+    expect(insights(ix(), OCT, TODAY)[0].text).toBe('3 categories are NT$600 over plan, most in Purchases; cover it from another category.')
+  })
+
+  it('names debt still uncovered from earlier months and what covers it', () => {
+    spend('2026-08-05', 'Purchases', 3000) // nothing assigned: −3,000
+    give(OCT, 'Purchases', 1000)
+    spend('2026-10-05', 'Purchases', 500)
+    earn('2026-10-01', 10000)
+    const notes = insights(ix(), OCT, TODAY)
+    expect(notes[0]).toEqual({ tone: 'bad', text: 'Purchases is still NT$2,500 short from earlier months; cover it from Ready to assign.' })
+    once(notes, 'Purchases')
+    // only part of it when Ready to assign runs short
+    S.setAssigned(OCT, cat('Purchases').id, u(9500))
+    spend('2026-10-06', 'Purchases', 8500)
+    expect(insights(ix(), OCT, TODAY)[0].text).toBe('Purchases is still NT$2,500 short from earlier months; Ready to assign covers NT$500 of it.')
+    // August reports August's own overspending, and nothing is said again for the months after
+    expect(insights(ix(), AUG, TODAY)).toContainEqual({ tone: 'bad', text: 'Purchases went NT$3,000 over plan.' })
+  })
+
+  it('reports each month’s own overspending, not debt carried in from before', () => {
+    give(AUG, 'Living', 6000)
+    spend('2026-08-05', 'Living', 6913)
+    give(AUG, 'Purchases', 12000)
+    spend('2026-08-06', 'Purchases', 15500)
+    give(SEP, 'Living', 8000)
+    spend('2026-09-05', 'Living', 8376)
+    give(SEP, 'Purchases', 12000)
+    spend('2026-09-06', 'Purchases', 15671)
+    const aug = check(insights(ix(), AUG, TODAY))
+    expect(aug).toContain('You spent NT$22,413, NT$4,413 more than planned, in Purchases and Living.')
+    const sep = check(insights(ix(), SEP, TODAY))
+    expect(sep).toContain('You spent NT$24,047, NT$4,047 more than planned, in Purchases and Living.') // 3,671 + 376
+    // and when other categories had money left, the overspending gets its own sentence
+    give(SEP, 'Phone', 1000)
+    expect(check(insights(ix(), SEP, TODAY))).toEqual(
+      expect.arrayContaining(['You spent NT$24,047, NT$3,047 more than planned.', 'Purchases and Living went NT$4,047 over plan.']),
+    )
   })
 
   it('points out a category that keeps going over', () => {
     spend('2026-08-05', 'Trips', 500)
-    give(SEP, 'Trips', 500) // covers August
-    spend('2026-09-05', 'Trips', 800) // over again
+    give(SEP, 'Trips', 500)
+    spend('2026-09-05', 'Trips', 800) // 300 more than September's 500
     give(OCT, 'Trips', 2000)
     spend('2026-10-05', 'Trips', 100)
     expect(check(insights(ix(), OCT, TODAY))).toContain('Trips went over plan in 2 of the last 3 months.')
-    expect(check(insights(ix(), SEP, TODAY))).toContain('Trips went NT$800 over plan, 2 months in a row.')
+    const sep = insights(ix(), SEP, TODAY)
+    expect(check(sep)).toContain('You spent NT$800, NT$300 more than planned, all in Trips, 2 months in a row.')
+    once(sep, 'Trips')
+    spend('2026-09-06', 'Living', 100)
+    give(SEP, 'Living', 500)
+    expect(check(insights(ix(), SEP, TODAY))).toContain('Trips went NT$300 over plan, 2 months in a row.')
   })
 
   it('compares the savings rate with the target', () => {
@@ -298,9 +456,20 @@ describe('insights', () => {
     expect(notes[0]).toEqual({ tone: 'bad', text: 'You saved 10% of your income. Your target is 20%.' })
   })
 
+  it('never reports saving more than 100% of income', () => {
+    S.addTxn({ date: '2026-09-01', cat: RTA, amt: u(100000), cur: 'TWD', kind: 'start' })
+    earn('2026-09-02', 20000)
+    give(SEP, 'Future me', 30000)
+    spend('2026-09-03', 'Living', 1000)
+    const notes = insights(ix(), SEP, TODAY)
+    expect(notes[0]).toEqual({ tone: 'good', text: 'You set aside NT$30,000 for savings, more than September’s income.' })
+    expect(notes.some((n) => /\d{3,}%/.test(n.text))).toBe(false)
+  })
+
   it('shows what is left to save in the current month', () => {
     earn('2026-10-01', 60000)
     give(OCT, 'Future me', 8000)
+    give(OCT, 'Living', 2000)
     spend('2026-10-03', 'Living', 1000)
     expect(check(insights(ix(), OCT, TODAY))).toContain('Saving 20% of this month’s income means NT$12,000; NT$4,000 to go.')
     give(OCT, 'Future me', 15000)
@@ -318,7 +487,15 @@ describe('insights', () => {
     expect(texts).toContain('You saved 20% of your income. Your target is 20%.')
   })
 
-  it('finds the category that moved most against its average', () => {
+  it('does not count goal money as spending held back', () => {
+    target('Trips', { kind: 'goal', amount: u(30000), by: '2027-01' })
+    give(SEP, 'Trips', 5000)
+    give(SEP, 'Living', 10000)
+    spend('2026-09-03', 'Living', 10000)
+    expect(check(insights(ix(), SEP, TODAY))).toContain('You spent NT$10,000, right on plan.')
+  })
+
+  it('finds a category that spent much less than its average', () => {
     for (const m of [JUL, AUG]) {
       give(m, 'Living', 20000)
       spend(`${m}-05`, 'Living', 10000)
@@ -326,32 +503,26 @@ describe('insights', () => {
       give(m, 'Purchases', 1000)
     }
     give(SEP, 'Living', 20000)
-    give(SEP, 'Purchases', 1000)
-    spend('2026-09-05', 'Living', 15000)
-    spend('2026-09-06', 'Purchases', 1000)
-    expect(check(insights(ix(), SEP, TODAY))).toContain('Living was 50% higher than your 2-month average.')
+    give(SEP, 'Purchases', 5000)
+    spend('2026-09-05', 'Living', 5000)
+    spend('2026-09-06', 'Purchases', 4000) // 4× usual, but planned and funded
+    const notes = insights(ix(), SEP, TODAY)
+    expect(check(notes)).toContain('Living was 50% lower than your 2-month average.')
+    expect(notes.some((n) => n.text.startsWith('Purchases'))).toBe(false)
   })
 
-  it('compares the current month by the same point in earlier months', () => {
-    give(SEP, 'Living', 20000)
-    spend('2026-09-05', 'Living', 4000)
-    spend('2026-09-25', 'Living', 6000)
-    give(OCT, 'Living', 10000)
-    spend('2026-10-05', 'Living', 1000)
-    // by Oct 15 September had spent 4,000 (by its day 15); October 1,000
-    expect(check(insights(ix(), OCT, TODAY))).toContain('Living is 75% lower than at this point in September.')
-  })
-
-  it('compares this week with the same days of last week', () => {
-    spend('2026-09-01', 'Living', 10)
-    spend('2026-10-05', 'Living', 2000) // last Monday
-    spend('2026-10-08', 'Living', 1000) // last Thursday
-    spend('2026-10-10', 'Living', 9000) // last Saturday: not yet comparable
-    spend('2026-10-13', 'Living', 2400)
-    const texts = check(insights(ix(), OCT, TODAY))
-    expect(texts).toContain('This week you’ve spent NT$2,400, NT$600 less than by this day last week.')
-    const sunday = check(insights(ix(), OCT, '2026-10-18'))
-    expect(sunday).toContain('This week you spent NT$2,400, NT$9,600 less than last week.')
+  it('does not flag a planned, funded purchase', () => {
+    for (const m of [JUL, AUG, SEP]) {
+      give(m, 'Purchases', 5000)
+      spend(`${m}-06`, 'Purchases', 5000)
+    }
+    give(OCT, 'Purchases', 50000)
+    spend('2026-10-06', 'Purchases', 50000)
+    for (const day of [TODAY, '2026-11-02']) {
+      const notes = insights(ix(), OCT, day)
+      expect(notes.filter((n) => n.text.includes('Purchases'))).toEqual([])
+      expect(notes.filter((n) => n.tone === 'bad')).toEqual([])
+    }
   })
 
   it('does not call a lumpy category low before the month is over', () => {
@@ -363,9 +534,33 @@ describe('insights', () => {
     expect(insights(ix(), OCT, '2026-11-02').some((n) => n.text === 'Purchases was 88% lower than your 3-month average.')).toBe(true)
   })
 
+  it('compares this week’s everyday spending with the same days of last week', () => {
+    give(SEP, 'Living', 100)
+    give(OCT, 'Living', 20000)
+    spend('2026-09-01', 'Living', 10)
+    spend('2026-10-05', 'Living', 2000) // last Monday
+    spend('2026-10-08', 'Living', 1000) // last Thursday
+    spend('2026-10-10', 'Living', 9000) // last Saturday: not yet comparable
+    spend('2026-10-13', 'Living', 2400)
+    spend('2026-10-14', 'Purchases', 5000) // a one-off: not everyday spending
+    give(OCT, 'Purchases', 5000)
+    const texts = check(insights(ix(), OCT, TODAY))
+    expect(texts).toContain('Everyday spending is NT$2,400 this week, NT$600 less than by this day last week.')
+    const sunday = check(insights(ix(), OCT, '2026-10-18'))
+    expect(sunday).toContain('Everyday spending was NT$2,400 this week, NT$9,600 less than last week.')
+  })
+
+  it('compares all spending week to week when no category is daily', () => {
+    notDaily('Living')
+    give(OCT, 'Living', 20000)
+    spend('2026-10-06', 'Living', 3000)
+    spend('2026-10-13', 'Living', 2400)
+    expect(check(insights(ix(), OCT, TODAY))).toContain('This week you’ve spent NT$2,400, NT$600 less than by this day last week.')
+  })
+
   it('skips the week sentence when nothing was spent this week', () => {
     spend('2026-10-06', 'Living', 1000)
-    expect(insights(ix(), OCT, TODAY).some((n) => n.text.startsWith('This week'))).toBe(false)
+    expect(insights(ix(), OCT, TODAY).some((n) => n.text.includes('this week'))).toBe(false)
   })
 
   it('ignores money moved into savings when reading spending', () => {
@@ -377,7 +572,7 @@ describe('insights', () => {
     expect(texts.join(' ')).not.toMatch(/Future me/)
   })
 
-  it('stays within four sentences on a busy month', () => {
+  it('stays within four sentences on a busy month, each category named once', () => {
     earn('2026-09-01', 60000)
     earn('2026-10-01', 60000)
     for (const m of [JUL, AUG, SEP]) {
@@ -394,7 +589,10 @@ describe('insights', () => {
     const notes = insights(ix(), OCT, TODAY)
     expect(notes).toHaveLength(4)
     check(notes)
-    expect(notes[0].tone).toBe('bad')
+    once(notes, 'Living', 'Purchases', 'Trips')
+    expect(notes[0]).toEqual({ tone: 'bad', text: 'Purchases is NT$4,000 over plan.' })
+    expect(notes[1]).toEqual({ tone: 'bad', text: 'Trips is still NT$3,000 short from earlier months; cover NT$7,000 from Ready to assign.' })
+    expect(notes[2].text).toBe('Living averages NT$1,000 a day, over its NT$581 plan; keep it to NT$176 a day.')
   })
 
   it('formats in the budget currency', () => {

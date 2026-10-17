@@ -51,6 +51,14 @@
 .ch-plan-label {
   fill: var(--ink-2, #57646b);
 }
+/* the month shown on the page */
+.ch-sel {
+  fill: var(--ink, #15242c);
+  font-weight: 650;
+}
+.ch-saved {
+  fill: var(--green, #0a7f5a);
+}
 /* a ring of surface behind text that sits on lines */
 .ch-halo {
   paint-order: stroke;
@@ -72,12 +80,16 @@
   shape-rendering: crispEdges;
 }
 .ch-plan {
-  stroke: var(--ink-3, #8e989c);
+  stroke: var(--ink-4, #8e989c);
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
+.ch-pace {
+  stroke: var(--ink-4, #8e989c);
+  stroke-width: 1;
+}
 .ch-guide {
-  stroke: var(--ink-3, #8e989c);
+  stroke: var(--ink-4, #8e989c);
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
@@ -103,10 +115,20 @@
 }
 .ch-prev {
   fill: none;
-  stroke: var(--ink-3, #8e989c);
+  stroke: var(--ink-4, #8e989c);
   stroke-width: 1.5;
   stroke-dasharray: 3 3;
   stroke-linecap: round;
+}
+.ch-proj {
+  fill: none;
+  stroke: var(--pen, #1d58a8);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
+}
+.ch-proj.over {
+  stroke: var(--red, #c4285f);
 }
 .ch-dot {
   fill: var(--pen, #1d58a8);
@@ -118,7 +140,15 @@
   fill: var(--red, #c4285f);
 }
 .ch-dot.prev {
-  fill: var(--ink-3, #8e989c);
+  fill: var(--ink-4, #8e989c);
+}
+.ch-dot.proj {
+  fill: var(--surface, #fff);
+  stroke: var(--pen, #1d58a8);
+  stroke-width: 1.5;
+}
+.ch-dot.proj.over {
+  stroke: var(--red, #c4285f);
 }
 
 .ch-bar {
@@ -134,6 +164,11 @@
 .ch-hatch-line {
   fill: var(--pen, #1d58a8);
   opacity: 0.7;
+}
+.ch-ghost {
+  fill: none;
+  stroke: var(--ink-4, #8e989c);
+  stroke-width: 1;
 }
 .ch-income {
   stroke: var(--green, #0a7f5a);
@@ -151,7 +186,7 @@
 }
 .ch-spark path {
   fill: none;
-  stroke: var(--ink-3, #8e989c);
+  stroke: var(--ink-4, #8e989c);
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -214,7 +249,7 @@
   width: 12px;
   height: 2px;
   border-radius: 1px;
-  background: var(--ink-3, #8e989c);
+  background: var(--ink-4, #8e989c);
 }
 .ch-key.pen {
   background: var(--pen, #1d58a8);
@@ -229,7 +264,29 @@
   height: 0;
   border-radius: 0;
   background: none;
-  border-top: 1.5px dashed var(--ink-3, #8e989c);
+  border-top: 1.5px dashed var(--ink-4, #8e989c);
+}
+.ch-key.dash.pen {
+  border-top-color: var(--pen, #1d58a8);
+}
+.ch-key.dash.red {
+  border-top-color: var(--red, #c4285f);
+}
+.ch-key.ghost {
+  width: 8px;
+  height: 10px;
+  border-radius: 2px 2px 0 0;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ink-4, #8e989c);
+}
+.ch-key.pct {
+  width: auto;
+  height: auto;
+  background: none;
+  font-style: normal;
+  font-weight: 650;
+  font-variation-settings: var(--vs-column, normal);
+  color: var(--green, #0a7f5a);
 }
 .ch-key.bar {
   width: 8px;
