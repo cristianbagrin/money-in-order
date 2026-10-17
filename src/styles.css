@@ -1407,7 +1407,7 @@ textarea:focus {
   }
 }
 .txn.sel {
-  background: var(--sunk);
+  background: var(--pen-wash);
 }
 .txn:active {
   background: var(--rule);

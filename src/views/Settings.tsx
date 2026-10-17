@@ -60,7 +60,7 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
           {[0.1, 0.15, 0.2, 0.25, 0.3, 0.4].map((v) => (
             <button
               key={v}
-              class="pill sm"
+              class="pill"
               aria-pressed={Math.abs(s.savingsTarget - v) < 0.001}
               onClick={() => {
                 play('toggle')
@@ -191,6 +191,8 @@ function Accounts(props: { onCount: () => void }) {
 function NewAccount(props: { currencies: string[]; onDone: () => void }) {
   const [name, setName] = useState('')
   const [cur, setCur] = useState(props.currencies[0])
+  const nameRef = useRef<HTMLInputElement>(null)
+  useEffect(() => nameRef.current?.focus(), [])
   const add = () => {
     if (!name.trim()) return
     undoable(`Added ${name.trim()}`, () => addAccount(name.trim(), cur))
@@ -202,7 +204,8 @@ function NewAccount(props: { currencies: string[]; onDone: () => void }) {
       <input
         type="text"
         aria-label="New account name"
-        autoFocus
+        spellcheck={false} autocorrect="off"
+        ref={nameRef}
         value={name}
         onInput={(e) => setName(e.currentTarget.value)}
         onKeyDown={(e) => {
@@ -261,6 +264,7 @@ function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => 
       <input
         type="text"
         aria-label="Account name"
+        spellcheck={false} autocorrect="off"
         defaultValue={a.name}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
@@ -355,6 +359,7 @@ function SyncBox() {
               type="text"
               class="grow num"
               aria-label="Sync code from your other device"
+              spellcheck={false} autocorrect="off"
               placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
               ref={codeInput}
               value={joinCode}

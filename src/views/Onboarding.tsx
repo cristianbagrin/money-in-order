@@ -82,6 +82,8 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
           class="num"
           style={{ marginTop: '24px' }}
           aria-label="Sync code"
+          spellcheck={false}
+          autocorrect="off"
           value={code}
           placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
           autocapitalize="characters"
@@ -171,6 +173,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
             <input
               type="text"
               aria-label="Account name"
+              spellcheck={false} autocorrect="off"
               value={a.name}
               onInput={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, name: e.currentTarget.value } : x)))}
             />

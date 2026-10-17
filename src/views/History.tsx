@@ -111,7 +111,10 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       const row = el?.classList.contains('txn') ? el : null
       const inSearch = el === searchRef.current
       const onPage = !el || el === document.body || el === document.documentElement || el.tagName === 'MAIN'
-      if (!row && !inSearch && !onPage) return
+      const arrow = e.key === 'ArrowDown' || e.key === 'ArrowUp'
+      // A clicked rail tab or filter pill keeps focus; arrows mean nothing to a button, so they still walk the rows.
+      const onButton = !!el && el.tagName === 'BUTTON' && arrow
+      if (!row && !inSearch && !onPage && !onButton) return
       const focusedIdx = row ? shown.findIndex((t) => t.id === row.dataset.txn) : -1
 
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -123,7 +126,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         if (inSearch) searchRef.current?.blur()
         const node = document.querySelector<HTMLElement>(`[data-txn="${shown[next].id}"]`)
         // Walking with focus on a row keeps the focus on the row you land on.
-        if (row) node?.focus({ preventScroll: true })
+        if (row || onButton) node?.focus({ preventScroll: true })
         node?.scrollIntoView({ block: 'nearest' })
       } else if (e.key === 'Enter' && !typing && !row) {
         // (On a focused row, Enter is the row's own click and opens that row.)
