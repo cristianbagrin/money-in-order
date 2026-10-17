@@ -304,6 +304,20 @@ describe('changing the budget currency', () => {
   })
 })
 
+describe('counting after a currency change', () => {
+  it('compares against the last count in the new currency, not the old one', () => {
+    const cash = S.addAccount('Cash', 'TWD')
+    const rev = S.addAccount('Revolut', 'PLN')
+    const bal = { [cash.id]: 1640000, [rev.id]: 340000 }
+    S.recordCount({ date: '2026-10-01', bal, rates: { PLN: 8.29 }, diffTo: RTA })
+    expect(S.changeBase('PLN')).toBe(true)
+    const r = S.previewCount({ date: '2026-10-02', bal, rates: S.settings().rates })
+    // the same money again: only rounding is left, not a TWD amount read as zloty
+    expect(Math.abs(r.fx)).toBeLessThan(5)
+    expect(Math.abs(r.diff)).toBeLessThan(5)
+  })
+})
+
 describe('amount input safety', () => {
   it('rejects typos and absurd amounts', async () => {
     const { evalAmount, parseAmount } = await import('../src/lib/money')

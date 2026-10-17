@@ -83,7 +83,7 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   }
   if (d) {
     out.push(
-      `- Daily spending (${d.cats.map((c) => c.name).join(', ')}): ${f(d.available)} left for ${d.daysLeft} days ` +
+      `- Daily spending (${d.cats.map((c) => c.name).join(', ')}): ${f(d.available + d.spentToday)} left at the start of today for ${d.daysLeft} days ` +
         `= ${f(d.allowance)}/day. Spent today: ${f(d.spentToday)}.`,
     )
   }

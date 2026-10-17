@@ -293,7 +293,13 @@ export function changeBase(next: string): boolean {
   // Convert every stored amount at the same rate, so the plan's balances don't shift.
   const txns = Object.values(db.txns).map((t) => ({ ...t, base: f(t.base) }))
   const assigns = Object.values(db.assigns).map((a) => ({ ...a, amt: f(a.amt) }))
-  const counts = Object.values(db.counts).map((c) => ({ ...c, total: f(c.total), expected: f(c.expected) }))
+  // A count's rates are restated too, or the next count would price old balances at the wrong scale.
+  const restate = (old: Rates): Rates => {
+    const out: Rates = { [s.base]: Number((1 / r).toPrecision(10)) }
+    for (const [c, v] of Object.entries(old)) if (c !== next && c !== s.base) out[c] = Number((v / r).toPrecision(10))
+    return out
+  }
+  const counts = Object.values(db.counts).map((c) => ({ ...c, total: f(c.total), expected: f(c.expected), rates: restate(c.rates) }))
   const cats = Object.values(db.cats)
     .filter((c) => c.target)
     .map((c) => ({ ...c, target: { ...c.target!, amount: f(c.target!.amount) } }))

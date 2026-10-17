@@ -20,6 +20,7 @@ function compact(minor: number): string {
   const v = Math.abs(minor) / 100
   const sign = minor < 0 ? '−' : ''
   const short = (x: number, unit: string) => sign + (x >= 100 || Number.isInteger(x) ? Math.round(x) : Math.round(x * 10) / 10) + unit
+  if (v >= 1e9) return short(v / 1e9, 'B')
   if (v >= 1e6) return short(v / 1e6, 'M')
   if (v >= 1e3) return short(v / 1e3, 'k')
   return sign + Math.round(v)

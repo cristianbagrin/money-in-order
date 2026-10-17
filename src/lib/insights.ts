@@ -520,15 +520,21 @@ export function insights(ix: Index, month: string, today: string): Insight[] {
   const versusPlan = (): Insight | null => {
     if (isCurrent || plan <= 0 || view.spent <= 0) return null
     const diff = view.spent - plan
-    if (!meaningful(diff, plan)) return { tone: 'good', text: `You spent ${money(view.spent)}, right on plan.` }
+    // "Right on plan" can't stand next to a category that went over: that sentence says it alone.
+    if (!meaningful(diff, plan)) return spendCats.some((c) => shortfall(c).own >= 100) ? null : { tone: 'good', text: `You spent ${money(view.spent)}, right on plan.` }
     if (diff < 0) return { tone: 'good', text: `You spent ${money(view.spent)}, ${money(-diff)} less than planned.` }
     // when the whole difference is one or two categories' overspending, name them here instead of saying it twice
     const over = spendCats.filter((c) => shortfall(c).own >= 100)
     const own = over.reduce((s, c) => s + shortfall(c).own, 0)
     let where = ''
-    if (over.length && over.length <= 2 && money(own) === money(diff)) {
+    if (over.length && money(own) === money(diff)) {
       over.sort((a, b) => shortfall(b).own - shortfall(a).own).forEach((c) => mentioned.add(c.cat.id))
-      where = over.length === 1 ? `, all in ${over[0].cat.name}${streak(over[0].cat.id)}` : `, in ${list(over.map((c) => c.cat.name))}`
+      where =
+        over.length === 1
+          ? `, all in ${over[0].cat.name}${streak(over[0].cat.id)}`
+          : over.length === 2
+            ? `, in ${list(over.map((c) => c.cat.name))}`
+            : `, across ${over.length} categories, most in ${over[0].cat.name}`
     }
     return { tone: 'bad', text: `You spent ${money(view.spent)}, ${money(diff)} more than planned${where}.` }
   }

@@ -270,7 +270,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
           <button class="pill sm soft" aria-pressed={!t.by} onClick={() => save({ kind: 'goal', amount: t.amount })}>
             Any time
           </button>
-          {Array.from({ length: 18 }, (_, i) => addMonths(month, i)).map((m) => (
+          {[...(t.by && t.by < month ? [t.by] : []), ...Array.from({ length: 18 }, (_, i) => addMonths(month, i))].map((m) => (
             <button key={m} class="pill sm soft" aria-pressed={t.by === m} onClick={() => save({ kind: 'goal', amount: t.amount, by: m })}>
               {monthName(m, { short: true })} {m.slice(0, 4)}
             </button>
