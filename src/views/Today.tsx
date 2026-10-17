@@ -70,6 +70,21 @@ export function Today(props: { today: string; onPlan: () => void }) {
   const d = useMemo(() => daily(ix, view, today), [ix, view, today])
   const touch = useMedia('(pointer: coarse)')
 
+  // Compact or roomy sizing follows the room Today really has, which the notch and home bar shrink.
+  const todayRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = todayRef.current
+    if (!el) return
+    const fit = () => {
+      const h = el.clientHeight
+      el.dataset.fit = h <= 710 ? 'tight' : h >= 732 ? 'roomy' : ''
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const planFirst = d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0 && view.readyToAssign > 0
   const monthOver = d && d.available < 0 && d.allowance === 0
   // Without a daily category, the key number is what's left to spend this month.
@@ -79,7 +94,7 @@ export function Today(props: { today: string; onPlan: () => void }) {
   const heroText = fmt(Math.abs(shown), base)
 
   return (
-    <div class="today">
+    <div class="today" ref={todayRef}>
       <section class="hero">
         {planFirst ? (
           <>
@@ -247,7 +262,7 @@ export function Register(props: { today: string; touch: boolean }) {
       toast(
         ddAfter.leftToday >= 0
           ? `${name} · ${fmt(ddAfter.leftToday, base)} left today`
-          : `${fmt(-ddAfter.leftToday, base)} over today · tomorrow ${fmt(ddAfter.tomorrow ?? 0, base)}`,
+          : `Over · ${fmt(ddAfter.tomorrow ?? 0, base)} tomorrow`,
         { undo: true },
       )
     } else if (cm && cm.available < 0) {

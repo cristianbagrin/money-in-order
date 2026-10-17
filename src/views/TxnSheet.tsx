@@ -1,5 +1,5 @@
 import { memo } from 'preact/compat'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { cur, evalAmount, fmt } from '../lib/money'
 
 /** How an amount appears in the editor: no grouping, and no cents for currencies without them. */
@@ -52,12 +52,17 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
   const [note, setNote] = useState('')
 
   // Show what is stored: when the sheet opens, and whenever the record changes underneath it (undo, sync).
-  // The field being typed in is left alone.
+  // A field with text typed into it (different from what the record last put there) is left alone;
+  // one that is merely focused takes the restored value, so leaving it can't re-apply the old text.
+  const stored = useRef({ Amount: '', Note: '' })
   useEffect(() => {
     if (!t) return
-    const typing = (label: string) => document.activeElement instanceof HTMLInputElement && document.activeElement.getAttribute('aria-label') === label
-    if (!typing('Amount')) setAmount(amountText(t.amt, t.cur))
-    if (!typing('Note')) setNote(t.note ?? '')
+    const focus = document.activeElement instanceof HTMLInputElement ? document.activeElement.getAttribute('aria-label') : null
+    const a = amountText(t.amt, t.cur)
+    const n = t.note ?? ''
+    if (!(focus === 'Amount' && amount !== stored.current.Amount)) setAmount(a)
+    if (!(focus === 'Note' && note !== stored.current.Note)) setNote(n)
+    stored.current = { Amount: a, Note: n }
   }, [t?.id, t?.amt, t?.cur, t?.note])
 
   if (!t || t.d) return <Sheet open={false} onClose={props.onClose} children={null} />

@@ -103,7 +103,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
                 props.onDone()
               } else {
                 play('error')
-                toast(r === 'error' ? 'Couldn’t reach the server' : 'Nothing found for that code')
+                toast(r === 'error' ? 'Couldn’t reach the server' : 'Nothing is stored under that code')
               }
             }}
           >

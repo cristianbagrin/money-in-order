@@ -677,7 +677,8 @@ textarea:focus {
   flex-direction: column;
   /* exactly the screen between the status bar and the tab bar: the amount and keypad never scroll away,
      the bubbles scroll inside their own area when there are many */
-  height: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
+  --today-h: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
+  height: var(--today-h);
 }
 .hero {
   flex: none;
@@ -1789,31 +1790,35 @@ textarea:focus {
   }
 }
 
-@media (max-width: 959px) and (max-height: 740px) {
-  .hero-num {
+/* Today sizes itself by the room it really has (the notch and home bar take some of the screen): see data-fit in Today.tsx */
+@media (max-width: 959px) {
+  .today[data-fit='tight'] .hero-num {
     font-size: 44px;
   }
-  .ruler {
+  .today[data-fit='tight'] .ruler {
     margin-top: 8px;
     height: 26px;
   }
-  .bubble {
+  .today[data-fit='tight'] .bubble {
     min-height: 40px;
     padding: 3px 11px;
   }
-  .bubbles {
+  .today[data-fit='tight'] .bubbles {
     gap: 6px;
   }
-  .key {
+  .today[data-fit='tight'] .key {
     height: 42px;
     font-size: 22px;
   }
-  .amountline {
+  .today[data-fit='tight'] .amountline {
     min-height: 44px;
   }
-  .register .note {
+  .today[data-fit='tight'] .register .note {
     margin-bottom: 6px;
   }
+}
+
+@media (max-width: 959px) and (max-height: 740px) {
   .welcome {
     padding-top: calc(env(safe-area-inset-top) + 20px);
   }
@@ -1829,12 +1834,12 @@ textarea:focus {
 }
 
 /* tall phones: spend the spare height on the hero's breathing room and roomier bubbles */
-@media (max-width: 959px) and (min-height: 800px) {
-  .hero {
-    margin-top: clamp(0px, calc((100dvh - 830px) / 2.5), 40px);
+@media (max-width: 959px) {
+  .today[data-fit='roomy'] .hero {
+    margin-top: clamp(0px, calc((var(--today-h) - 762px) / 2.5), 40px);
   }
-  .bubble {
-    min-height: clamp(46px, calc(46px + (100dvh - 860px) / 8), 56px);
+  .today[data-fit='roomy'] .bubble {
+    min-height: clamp(46px, calc(46px + (var(--today-h) - 792px) / 8), 56px);
   }
 }
 
