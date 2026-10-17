@@ -16,3 +16,11 @@ Personal zero-based budgeting PWA (Preact + Vite + TypeScript), hosted on Netlif
 - Same visual language everywhere: round pill pickers instead of selects and tables, one-tap choices, inline editing.
 - Phone first, but every feature must also work well with mouse and keyboard on a laptop.
 - Light, neutral background; key numbers get the yellow marker highlight.
+
+## Autonomous Execution & Token Efficiency Rules
+
+- **Zero sleep-polling loops**: never run `sleep N; cat /tmp/...` loops to check on background sub-agents. Wait for background tasks synchronously or via completion notifications so the main thread does not wake up repeatedly.
+- **Clean sub-agent isolation**: use parallel sub-agents when they speed up work, but always branch worktrees from current `HEAD`, assign strict non-overlapping file boundaries to prevent duplicate edits, and keep worktrees outside `tests/` (or exclude them in the test config) so `npm test` never runs duplicate suites.
+- **Hybrid model routing**: use Opus where deep reasoning matters (architecture, design and math audits, root-cause debugging) and route implementation fixers, flow tests, and git/deploy orchestration to Sonnet.
+- **Uninterrupted autonomous runs with git checkpoints**: do not pause to ask for human review between milestones unless genuinely blocked. Commit and push the working state after each completed milestone so progress is crash-safe.
+- **Signal-only test logs**: run the full test and typecheck suites after merging a batch, and suppress verbose passing output so only failures enter the context window.
