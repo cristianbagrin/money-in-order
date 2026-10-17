@@ -368,7 +368,7 @@ function Popover(props: {
   const { anchor, closing, today, max } = props
   const yesterday = addDays(today, -1)
 
-  // Position (fixed, clamped to the viewport, flipped above when there's no room below) before first paint.
+  // Position before first paint: anchored to the pill, kept inside the sheet it belongs to (or the main column).
   useLayoutEffect(() => {
     // Promote to the top layer where supported, so no ancestor's overflow, transform or stacking can clip or cover it.
     const el = box.current
@@ -380,6 +380,10 @@ function Popover(props: {
         el.removeAttribute('popover')
       }
     }
+    const panel = anchor.closest<HTMLElement>('.sheet-panel')
+    const dialog = anchor.closest<HTMLElement>('dialog')
+    const column = panel ? null : anchor.closest<HTMLElement>('.main')
+    let raf = 0
     const place = () => {
       const el = box.current
       const c = card.current
@@ -387,25 +391,47 @@ function Popover(props: {
       const a = anchor.getBoundingClientRect()
       const vw = document.documentElement.clientWidth || window.innerWidth
       const vh = window.innerHeight
+      // The room it may use: the sheet panel, or the content column, always within the screen.
+      const r = (panel ?? column)?.getBoundingClientRect()
+      const cs = column ? getComputedStyle(column) : null
+      // In the column the card lines up with the content edges; elsewhere it keeps a little air.
+      const side = column ? 0 : EDGE
+      const x0 = Math.max(0, r ? r.left + (cs ? parseFloat(cs.paddingLeft) || 0 : 0) : 0) + side
+      const x1 = Math.min(vw, r ? r.right - (cs ? parseFloat(cs.paddingRight) || 0 : 0) : vw) - side
+      const y0 = Math.max(0, panel && r ? r.top : 0)
+      const y1 = Math.min(vh, panel && r ? r.bottom : vh)
+      c.style.maxHeight = `${Math.max(160, y1 - y0 - 2 * EDGE)}px`
       const w = el.offsetWidth
       const h = el.offsetHeight
-      const left = Math.max(EDGE, Math.min(a.left + a.width / 2 - w / 2, vw - EDGE - w))
-      const roomBelow = vh - a.bottom - GAP - EDGE
-      const roomAbove = a.top - GAP - EDGE
-      const below = h <= roomBelow || roomBelow >= roomAbove
-      const top = Math.max(EDGE, Math.min(below ? a.bottom + GAP : a.top - GAP - h, vh - EDGE - h))
+      const left = Math.max(x0, Math.min(a.left + a.width / 2 - w / 2, x1 - w))
+      const roomBelow = y1 - a.bottom - GAP - EDGE
+      const roomAbove = a.top - y0 - GAP - EDGE
+      // In a sheet it always hangs below its pill; the sheet makes room for it (see --dp-room).
+      const below = !!panel || h <= roomBelow || roomBelow >= roomAbove
+      const top = Math.max(y0 + EDGE, Math.min(below ? a.bottom + GAP : a.top - GAP - h, y1 - EDGE - h))
       el.style.left = `${left}px`
       el.style.top = `${top}px`
       // A transformed ancestor (e.g. an animating sheet) shifts fixed positioning; correct for it.
-      const r = el.getBoundingClientRect()
-      if (Math.abs(r.left - left) > 0.5) el.style.left = `${2 * left - r.left}px`
-      if (Math.abs(r.top - top) > 0.5) el.style.top = `${2 * top - r.top}px`
+      const b = el.getBoundingClientRect()
+      if (Math.abs(b.left - left) > 0.5) el.style.left = `${2 * left - b.left}px`
+      if (Math.abs(b.top - top) > 0.5) el.style.top = `${2 * top - b.top}px`
       el.dataset.side = below ? 'below' : 'above'
       const ox = Math.max(16, Math.min(a.left + a.width / 2 - left, w - 16))
       c.style.transformOrigin = `${ox}px ${below ? a.bottom - top : a.top - top}px`
       c.style.setProperty('--dp-dy', below ? '-6px' : '6px')
+      return h - roomBelow
     }
-    place()
+    // The sheet grows to fit the calendar under its pill, so it never has to cover the title or the amount.
+    const first = place()
+    if (panel && dialog && first && first > 0) {
+      dialog.style.setProperty('--dp-room', `${Math.ceil(first)}px`)
+      const t0 = performance.now()
+      const follow = () => {
+        place()
+        if (performance.now() - t0 < 480) raf = requestAnimationFrame(follow)
+      }
+      raf = requestAnimationFrame(follow)
+    }
     if (props.keyboard) card.current?.querySelector<HTMLElement>('[role="gridcell"][tabindex="0"]')?.focus({ preventScroll: true })
     else card.current?.focus({ preventScroll: true })
     const vv = window.visualViewport
@@ -414,6 +440,8 @@ function Popover(props: {
     vv?.addEventListener('resize', place)
     vv?.addEventListener('scroll', place)
     return () => {
+      cancelAnimationFrame(raf)
+      dialog?.style.removeProperty('--dp-room')
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
       vv?.removeEventListener('resize', place)
@@ -467,9 +495,29 @@ function Popover(props: {
         onAnimationEnd={(e) => {
           if (closing && e.target === card.current) props.onClosed()
         }}
+        onKeyDown={(e) => {
+          // Tab off either end closes it and carries on from the pill, so focus moves on to the next field.
+          if (e.key !== 'Tab' || closing) return
+          const stops = [...(card.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [tabindex="0"]') ?? [])]
+          const at = document.activeElement
+          if (e.shiftKey ? at === (stops[0] ?? card.current) || at === card.current : at === stops[stops.length - 1]) props.onDismiss(true)
+        }}
         onFocusOut={(e) => {
+          if (closing) return
           const to = e.relatedTarget as Node | null
-          if (!closing && to && !box.current?.contains(to) && !anchor.contains(to)) props.onDismiss(false)
+          const outside = (n: Node | null) => !n || (!box.current?.contains(n) && !anchor.contains(n))
+          if (to) {
+            if (outside(to)) props.onDismiss(false)
+            return
+          }
+          // Focus went nowhere. If the element that had it was removed or disabled (a new month, an arrow
+          // that reached its limit) the card keeps it; otherwise focus really left (Tab past the end).
+          const from = e.target as HTMLElement
+          setTimeout(() => {
+            if (!box.current || !outside(document.activeElement)) return
+            if (!from.isConnected || (from as HTMLButtonElement).disabled) card.current?.focus({ preventScroll: true })
+            else props.onDismiss(false)
+          }, 0)
         }}
       >
         <div class="dp-quick">

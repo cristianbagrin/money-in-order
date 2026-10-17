@@ -202,10 +202,12 @@ dialog.sheet::backdrop {
 }
 
 .sheet-body {
-  padding: 0 20px calc(24px + env(safe-area-inset-bottom));
+  /* --dp-room: extra space the open calendar asks for, so it fits below its pill without covering the title or amount */
+  padding: 0 20px calc(24px + env(safe-area-inset-bottom) + var(--dp-room, 0px));
+  transition: padding-bottom var(--sheet-in) var(--sheet-ease);
 }
 .sheet[data-kb] > .sheet-panel > .sheet-scroll > .sheet-body {
-  padding-bottom: 16px;
+  padding-bottom: calc(16px + var(--dp-room, 0px));
 }
 
 /* wide screens: centred panel */
@@ -270,7 +272,7 @@ dialog.sheet::backdrop {
     padding-bottom: 10px;
   }
   .sheet-body {
-    padding-bottom: 24px;
+    padding-bottom: calc(24px + var(--dp-room, 0px));
   }
 }
 

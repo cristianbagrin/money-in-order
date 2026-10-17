@@ -331,6 +331,22 @@ h3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
+/* phones: many categories scroll inside their own area (a little padding keeps focus rings from being clipped) */
+@media (max-width: 959px) {
+  .register > .bubbles {
+    flex: 0 1 auto;
+    min-height: 106px;
+    align-content: start;
+    padding: 3px;
+    margin: -3px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .register > .bubbles::-webkit-scrollbar {
+    display: none;
+  }
+}
 .bubble {
   display: flex;
   flex-direction: column;
@@ -575,16 +591,20 @@ textarea:focus {
 /* ---------------------------------------------------------------- toast */
 
 .toast {
+  --toast-h: 44px;
+  --toast-dy: 14px; /* where it slips in from */
   position: fixed;
   z-index: 60;
   left: 50%;
-  /* top on phones, so it never covers the keypad or the tab bar */
-  top: calc(env(safe-area-inset-top) + 10px);
+  /* Just above the tab bar. Today moves it to the band above the amount line (--toast-top), so it never covers the number that changed. */
+  top: var(--toast-top, auto);
+  bottom: var(--toast-bottom, calc(var(--tabbar) + env(safe-area-inset-bottom) + 10px));
   width: min(calc(100% - 24px), 440px);
+  height: var(--toast-h);
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 12px 11px 16px;
+  padding: 0 6px 0 16px;
   background: var(--ink);
   color: #f3f5f4;
   border-radius: 14px;
@@ -596,26 +616,41 @@ textarea:focus {
 .toast.out {
   animation: toast-out 0.2s ease-in forwards;
 }
+.toast.still {
+  animation: none;
+}
 .toast span {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .toast-act {
+  flex: none;
+  height: 32px;
   border: 0;
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-weight: 650;
-  padding: 7px 12px;
+  padding: 0 12px;
   border-radius: 999px;
+}
+/* Inside an open sheet (so Undo stays clickable): over the dimmed page at the top on phones, never over the sheet's content. */
+.sheet .toast {
+  --toast-dy: -14px;
+  top: calc(env(safe-area-inset-top) + 8px);
+  bottom: auto;
 }
 @keyframes toast-in {
   from {
-    transform: translate(-50%, -16px) scale(0.96);
+    transform: translate(-50%, var(--toast-dy)) scale(0.96);
     opacity: 0;
   }
 }
 @keyframes toast-out {
   to {
-    transform: translate(-50%, -12px);
+    transform: translate(-50%, calc(var(--toast-dy) * 0.8));
     opacity: 0;
   }
 }
@@ -629,9 +664,12 @@ textarea:focus {
 .today {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
+  /* exactly the screen between the status bar and the tab bar: the amount and keypad never scroll away,
+     the bubbles scroll inside their own area when there are many */
+  height: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
 }
 .hero {
+  flex: none;
   padding: 6px 0 4px;
 }
 .hero-num {
@@ -690,14 +728,62 @@ textarea:focus {
 }
 
 .register {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
   margin-top: auto;
   padding-top: 10px;
+}
+.register > * {
+  flex: none;
 }
 .amountline {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 52px;
+}
+/* laptop: the currency sits beside the typed number, set like the phone's display */
+.amount-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  overflow: hidden;
+  cursor: text;
+  font-variation-settings: var(--vs-hand);
+  font-size: 40px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.amount-wrap.is-empty .amount-sym {
+  color: var(--rule-strong);
+}
+.amount-wrap.invalid {
+  color: var(--red);
+}
+.amount-sym {
+  flex: none;
+}
+.amount-sym:last-child {
+  margin-left: 0.25em;
+}
+/* the input is as wide as what it holds: a hidden copy of the text sizes the cell */
+.amount-fit {
+  display: inline-grid;
+  min-width: 0;
+}
+.amount-fit > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+}
+.amount-mirror {
+  visibility: hidden;
+  white-space: pre;
 }
 .amount-val {
   flex: 1;
@@ -715,16 +801,15 @@ textarea:focus {
   color: var(--rule-strong);
 }
 .amount-input {
-  flex: 1;
-  min-width: 0;
+  min-height: 0 !important;
   border: 0 !important;
   box-shadow: none !important;
   background: transparent !important;
   padding: 0 !important;
-  font-variation-settings: var(--vs-hand);
-  font-size: 40px !important;
-  font-weight: 680;
-  letter-spacing: -0.02em;
+  font-size: inherit !important;
+  line-height: inherit;
+  font-variation-settings: inherit;
+  font-weight: inherit;
 }
 .amount-input::placeholder {
   color: var(--rule-strong);
@@ -734,6 +819,7 @@ textarea:focus {
   font-size: 13px;
   color: var(--ink-3);
   margin-top: -4px;
+  min-height: 1.4em;
 }
 .register .note {
   margin: 2px 0 10px;
@@ -749,7 +835,7 @@ textarea:focus {
   -webkit-user-select: none;
 }
 .key {
-  height: clamp(44px, 6.2dvh, 54px);
+  height: clamp(44px, 6.2dvh, 58px);
   border: 0;
   border-right: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
@@ -1405,15 +1491,26 @@ textarea:focus {
     padding: 28px 40px 60px;
   }
   .today {
-    min-height: 0;
+    height: auto;
     margin-bottom: 0;
+  }
+  .register {
+    display: block;
   }
   .bubbles {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .toast {
+    /* centred on the content column (the rail takes the first 200px), not on the window */
+    left: calc(100px + 50%);
     top: auto;
     bottom: 24px;
+  }
+  .sheet .toast {
+    left: 50%;
+    top: auto;
+    bottom: 14px;
+    --toast-dy: 14px;
   }
   .pagehead .gear {
     display: none;
@@ -1482,6 +1579,16 @@ textarea:focus {
   }
   .rules li {
     padding: 8px 0;
+  }
+}
+
+/* tall phones: spend the spare height on the hero's breathing room and roomier bubbles */
+@media (max-width: 959px) and (min-height: 800px) {
+  .hero {
+    margin-top: clamp(0px, calc((100dvh - 830px) / 2.5), 40px);
+  }
+  .bubble {
+    min-height: clamp(46px, calc(46px + (100dvh - 860px) / 8), 56px);
   }
 }
 

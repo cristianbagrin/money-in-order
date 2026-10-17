@@ -46,11 +46,13 @@ function unlockScroll() {
 
 // Sheets open in order; the one beneath the top sheet steps back a little (phones), like iOS.
 const stack: HTMLDialogElement[] = []
+const topListeners = new Set<(d: HTMLDialogElement | null) => void>()
 
 function pushStack(d: HTMLDialogElement) {
   if (stack.includes(d)) return
   stack[stack.length - 1]?.setAttribute('data-under', '')
   stack.push(d)
+  for (const fn of topListeners) fn(d)
 }
 
 function popStack(d: HTMLDialogElement) {
@@ -58,7 +60,24 @@ function popStack(d: HTMLDialogElement) {
   if (i < 0) return
   stack.splice(i, 1)
   d.removeAttribute('data-under')
-  if (i === stack.length) stack[stack.length - 1]?.removeAttribute('data-under')
+  if (i === stack.length) {
+    stack[stack.length - 1]?.removeAttribute('data-under')
+    const top = stack[stack.length - 1] ?? null
+    for (const fn of topListeners) fn(top)
+  }
+}
+
+/** The sheet currently on top, if any. Anything that must stay clickable above a sheet (the toast) lives inside it. */
+export function topSheet(): HTMLDialogElement | null {
+  return stack[stack.length - 1] ?? null
+}
+
+/** Called whenever the top sheet changes (opened, or closing and revealing the one beneath). */
+export function onTopSheet(fn: (d: HTMLDialogElement | null) => void): () => void {
+  topListeners.add(fn)
+  return () => {
+    topListeners.delete(fn)
+  }
 }
 
 // ---------------------------------------------------------------- controller

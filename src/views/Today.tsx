@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { daily, monthView } from '../lib/budget'
-import { dayOfMonth, daysInMonth, monthOf } from '../lib/dates'
-import { cur, fmt, keypadToMinor, parseAmount } from '../lib/money'
+import { dayOfMonth, daysInMonth, isoDate, monthOf } from '../lib/dates'
+import { cur, evalAmount, fmt, keypadToMinor } from '../lib/money'
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type ID } from '../lib/types'
@@ -17,12 +17,15 @@ interface Draft {
   currency: string | null
   note: string
   date: string | null
+  /** the day `date` was last set: a picked day is only good for that day */
+  day?: string
 }
 const DRAFT_KEY = 'mio-draft'
 function loadDraft(): Draft {
   try {
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Draft | null
-    if (d && typeof d.digits === 'string') return d
+    // The amount and note may wait for tomorrow; a past date picked yesterday may not.
+    if (d && typeof d.digits === 'string') return d.day === isoDate() ? d : { ...d, date: null }
   } catch {
     /* storage unavailable */
   }
@@ -32,6 +35,7 @@ let draft: Draft = loadDraft()
 const draftListeners = new Set<() => void>()
 function setDraft(next: Partial<Draft>) {
   draft = { ...draft, ...next }
+  if ('date' in next || !draft.day) draft.day = isoDate()
   try {
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
   } catch {
@@ -141,12 +145,43 @@ export function Register(props: { today: string; touch: boolean }) {
   const currency = dr.currency ?? base
   const date = dr.date ?? today
   const c = cur(currency)
-  const amount = touch ? keypadToMinor(dr.digits) : Math.abs(parseAmount(dr.digits) ?? 0)
+  const typed = touch ? null : evalAmount(dr.digits, currency)
+  const invalid = !touch && dr.digits.trim() !== '' && typed === null
+  const amount = touch ? keypadToMinor(dr.digits) : Math.abs(typed ?? 0)
   const amountBase = currency === base ? amount : toBase(amount, currency)
   const currencies = currenciesInUse().filter(hasRate)
   const amountRef = useRef<HTMLInputElement>(null)
   const amountBox = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
+  const regRef = useRef<HTMLDivElement>(null)
+
+  // Toasts sit in the free band just above the amount line, so they never cover the number that just changed.
+  useLayoutEffect(() => {
+    const el = regRef.current
+    if (!el) return
+    const root = document.documentElement
+    const set = () => {
+      // one toast (44px, see .toast) and a small gap above the register
+      root.style.setProperty('--toast-top', `${Math.round(el.getBoundingClientRect().top) - 52}px`)
+      root.style.setProperty('--toast-bottom', 'auto')
+    }
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    if (el.parentElement) ro.observe(el.parentElement)
+    window.addEventListener('resize', set)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', set)
+      root.style.removeProperty('--toast-top')
+      root.style.removeProperty('--toast-bottom')
+    }
+  }, [])
+
+  // The app left open past midnight: a date picked yesterday goes back to today.
+  useEffect(() => {
+    if (draft.date && draft.day !== today) setDraft({ date: null })
+  }, [today])
 
   const month = monthOf(date)
   const view = useMemo(() => monthView(ix, month, monthOf(today)), [ix, month, today])
@@ -166,16 +201,15 @@ export function Register(props: { today: string; touch: boolean }) {
   const notesList = useMemo(() => [...new Set(ix.txns.filter((t) => t.note && !t.kind).map((t) => t.note!))].slice(0, 80), [ix])
   const suggested = dr.note.trim() ? memory.get(dr.note.trim().toLowerCase()) ?? null : null
 
+  /** What a bubble says. While typing, categories with money to spend show what would be left; the rest keep their value. */
   function left(id: ID): { text: string; over: boolean } {
     const cm = view.byId.get(id)
-    if (cm?.cat.daily && dd && !(dd.allowance === 0 && cm.available <= 0)) {
-      const l = dd.leftToday - amountBase
-      return { text: `${fmt(l, base)} today`, over: l < 0 }
-    }
-    const l = (cm?.available ?? 0) - amountBase
-    // Only warn where it matters: categories that hold money for spending.
-    const watched = !!cm && !cm.cat.saving && (cm.carry + cm.assigned > 0 || cm.available < 0)
-    return { text: fmt(l, base), over: l < 0 && watched }
+    if (!cm) return { text: fmt(0, base), over: false }
+    const now = cm.cat.daily && dd && !(dd.allowance === 0 && cm.available <= 0) ? dd.leftToday : cm.available
+    const spendable = !cm.cat.saving && cm.available > 0
+    const l = spendable ? now - amountBase : now
+    // Red is for a real problem: already overspent, or this entry would overspend.
+    return { text: fmt(l, base), over: l < 0 && !cm.cat.saving }
   }
 
   function log(cat: ID, el?: Element | null) {
@@ -223,11 +257,11 @@ export function Register(props: { today: string; touch: boolean }) {
     }
   }
 
-  // Laptop: typing digits anywhere goes to the amount; arrows walk the bubbles; Enter logs.
+  // Laptop: typing digits anywhere goes to the amount; arrows walk the bubbles; Enter logs; Esc starts over.
   useEffect(() => {
     if (touch) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
       if (document.querySelector('dialog[open]')) return
       const el = document.activeElement as HTMLElement | null
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
@@ -235,8 +269,12 @@ export function Register(props: { today: string; touch: boolean }) {
         amountRef.current?.focus()
         return
       }
-      if (e.key === 'Escape' && el === amountRef.current) {
-        setDraft({ digits: '' })
+      if (e.key === 'Escape') {
+        // Abandon the whole entry, from the amount, the note, a bubble or nowhere in particular.
+        if (!el || el === document.body || regRef.current?.contains(el)) {
+          setDraft({ digits: '', note: '', date: null, currency: null })
+          amountRef.current?.focus()
+        }
         return
       }
       const bubbles = [...(gridRef.current?.querySelectorAll<HTMLButtonElement>('.bubble') ?? [])]
@@ -256,37 +294,67 @@ export function Register(props: { today: string; touch: boolean }) {
   }, [touch])
 
   const display = dr.digits ? (c.suffix ? `${fmtDigits(dr.digits)} ${c.symbol}` : `${c.symbol}${fmtDigits(dr.digits)}`) : c.suffix ? `0 ${c.symbol}` : `${c.symbol}0`
+  const sym = (
+    <span class="amount-sym" aria-hidden="true">
+      {c.symbol}
+    </span>
+  )
+  // The line under the amount only speaks in another currency, but it keeps its height (wherever the
+  // currency can be switched) so choosing one moves nothing.
+  const converted = currency !== base && amount > 0
 
   return (
-    <div class="register">
+    <div class="register" ref={regRef}>
       <div class="amountline" ref={amountBox}>
         {touch ? (
           <div class={`amount-val${dr.digits ? '' : ' is-empty'}`} aria-live="polite" style={{ fontSize: fitSize(display, 40, 9) }}>
             {display}
           </div>
         ) : (
-          <input
-            ref={amountRef}
-            class="amount-input"
-            type="text"
-            inputMode="decimal"
-            aria-label="Amount"
-            placeholder={c.suffix ? `0 ${c.symbol}` : `${c.symbol}0`}
-            value={dr.digits}
-            autoFocus
-            onInput={(e) => setDraft({ digits: e.currentTarget.value.replace(/[^\d.,]/g, '') })}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                if (suggested) log(suggested)
-                else gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
-              }
-              if (e.key === 'ArrowDown') {
-                e.preventDefault()
-                gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
-              }
+          // The currency stays put beside the number, as on the phone; an amount that can't be read turns red.
+          <div
+            class={`amount-wrap${dr.digits ? '' : ' is-empty'}${invalid ? ' invalid' : ''}`}
+            onMouseDown={(e) => {
+              if (e.target === amountRef.current) return
+              e.preventDefault()
+              amountRef.current?.focus()
             }}
-          />
+          >
+            {!c.suffix && sym}
+            <span class="amount-fit">
+              <input
+                ref={amountRef}
+                class="amount-input"
+                type="text"
+                size={1}
+                inputMode="decimal"
+                aria-label="Amount"
+                aria-invalid={invalid ? 'true' : undefined}
+                placeholder="0"
+                maxLength={24}
+                value={dr.digits}
+                autoFocus
+                onInput={(e) => setDraft({ digits: e.currentTarget.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (suggested) log(suggested)
+                    else gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
+                  }
+                  if (e.key === 'ArrowDown') {
+                    // Land on the first bubble and stop there: the window's arrow handler must not also step down a row.
+                    e.preventDefault()
+                    e.stopPropagation()
+                    gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
+                  }
+                }}
+              />
+              <span class="amount-mirror" aria-hidden="true">
+                {dr.digits || '0'}
+              </span>
+            </span>
+            {c.suffix && sym}
+          </div>
         )}
         {currencies.length > 1 && (
           <button
@@ -304,7 +372,11 @@ export function Register(props: { today: string; touch: boolean }) {
         )}
         <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
       </div>
-      {currency !== base && amount > 0 && <div class="conv">≈ {fmt(amountBase, base)}</div>}
+      {currencies.length > 1 && (
+        <div class="conv" aria-hidden={converted ? undefined : 'true'}>
+          {converted ? `≈ ${fmt(amountBase, base)}` : ' '}
+        </div>
+      )}
       <NoteField
         value={dr.note}
         list="mio-notes"

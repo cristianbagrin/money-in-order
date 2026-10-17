@@ -1,6 +1,8 @@
 import type { ComponentChildren } from 'preact'
+import { createPortal } from 'preact/compat'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { undo } from '../lib/store'
+import { onTopSheet, topSheet } from './sheet'
 import { haptic, play } from './sound'
 
 // ---------------------------------------------------------------- toast
@@ -29,11 +31,23 @@ export function runUndo() {
 export function Toasts() {
   const [msg, setMsg] = useState<ToastMsg | null>(null)
   const [leaving, setLeaving] = useState(false)
+  // An open sheet makes everything behind it inert and covers it, so the toast (and its Undo) lives inside the top one.
+  const [host, setHost] = useState<HTMLDialogElement | null>(topSheet)
+  const [moved, setMoved] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(
+    () =>
+      onTopSheet((d) => {
+        setHost(d)
+        setMoved(true) // already on screen: change layers without slipping in again
+      }),
+    [],
+  )
   useEffect(() => {
     pushToast = (t) => {
       clearTimeout(timer.current)
       setLeaving(false)
+      setMoved(false)
       setMsg({ ...t, id: Date.now() })
       timer.current = setTimeout(
         () => {
@@ -52,8 +66,8 @@ export function Toasts() {
     clearTimeout(timer.current)
     setMsg(null)
   }
-  return (
-    <div class={`toast${leaving ? ' out' : ''}`} role="status" key={msg.id}>
+  const node = (
+    <div class={`toast${leaving ? ' out' : ''}${moved ? ' still' : ''}`} role="status" key={msg.id}>
       <span>{msg.text}</span>
       {msg.action && (
         <button
@@ -79,6 +93,7 @@ export function Toasts() {
       )}
     </div>
   )
+  return host ? createPortal(node, host) : node
 }
 
 // ---------------------------------------------------------------- keypad (phones only)
@@ -164,6 +179,8 @@ export function AmountField(props: {
   label: string
 }) {
   const ref = useRef<HTMLInputElement>(null)
+  const orig = useRef(props.value) // what the field held when it got focus
+  const abandoned = useRef(false) // Esc was pressed: the blur that follows must not commit
   useEffect(() => {
     if (props.autoFocus) ref.current?.focus()
   }, [])
@@ -177,12 +194,25 @@ export function AmountField(props: {
         value={props.value}
         onFocus={(e) => {
           const el = e.currentTarget
+          orig.current = props.value
+          abandoned.current = false
           requestAnimationFrame(() => document.activeElement === el && el.select())
         }}
-        onInput={(e) => props.onInput(e.currentTarget.value)}
-        onBlur={(e) => props.onCommit?.(e.currentTarget.value)}
+        onInput={(e) => {
+          abandoned.current = false
+          props.onInput(e.currentTarget.value)
+        }}
+        onBlur={(e) => {
+          if (abandoned.current) abandoned.current = false
+          else props.onCommit?.(e.currentTarget.value)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur()
+          // Esc abandons what was typed. A sheet around the field closes by itself (don't cancel that).
+          else if (e.key === 'Escape') {
+            abandoned.current = true
+            props.onInput(orig.current)
+          }
         }}
       />
       {props.value && (
@@ -204,6 +234,8 @@ export function AmountField(props: {
 
 /** A note field with a pencil instead of placeholder text. */
 export function NoteField(props: { value: string; onInput: (v: string) => void; onCommit?: (v: string) => void; onEnter?: () => void; list?: string }) {
+  const orig = useRef(props.value)
+  const abandoned = useRef(false)
   return (
     <label class="note">
       <IconPencil />
@@ -214,12 +246,26 @@ export function NoteField(props: { value: string; onInput: (v: string) => void; 
         list={props.list}
         enterKeyHint="done"
         autocomplete="off"
-        onInput={(e) => props.onInput(e.currentTarget.value)}
-        onBlur={(e) => props.onCommit?.(e.currentTarget.value)}
+        onFocus={() => {
+          orig.current = props.value
+          abandoned.current = false
+        }}
+        onInput={(e) => {
+          abandoned.current = false
+          props.onInput(e.currentTarget.value)
+        }}
+        onBlur={(e) => {
+          if (abandoned.current) abandoned.current = false
+          else props.onCommit?.(e.currentTarget.value)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.currentTarget.blur()
             props.onEnter?.()
+          } else if (e.key === 'Escape' && props.onCommit) {
+            // Fields that save on blur: Esc abandons the edit (a sheet around it closes by itself).
+            abandoned.current = true
+            props.onInput(orig.current)
           }
         }}
       />
@@ -292,12 +338,9 @@ export function IconPlus() {
 
 export function IconGear() {
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-      <circle cx="10" cy="10" r="2.6" />
-      <path
-        d="M10 1.8v2.4M10 15.8v2.4M1.8 10h2.4M15.8 10h2.4M4.2 4.2l1.7 1.7M14.1 14.1l1.7 1.7M4.2 15.8l1.7-1.7M14.1 5.9l1.7-1.7"
-        stroke-linecap="round"
-      />
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+      <path d="M8.56 3.76L8.79 1.38L11.21 1.38L11.44 3.76L13.39 4.57L15.24 3.05L16.95 4.76L15.43 6.61L16.24 8.56L18.62 8.79L18.62 11.21L16.24 11.44L15.43 13.39L16.95 15.24L15.24 16.95L13.39 15.43L11.44 16.24L11.21 18.62L8.79 18.62L8.56 16.24L6.61 15.43L4.76 16.95L3.05 15.24L4.57 13.39L3.76 11.44L1.38 11.21L1.38 8.79L3.76 8.56L4.57 6.61L3.05 4.76L4.76 3.05L6.61 4.57Z" />
+      <circle cx="10" cy="10" r="2.7" />
     </svg>
   )
 }
