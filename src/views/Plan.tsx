@@ -20,7 +20,7 @@ import {
   undoable,
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID } from '../lib/types'
-import { useIndex } from '../ui/hooks'
+import { useIndex, useSync } from '../ui/hooks'
 import { IconChevron, IconGear, IconPlus, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { play } from '../ui/sound'
@@ -47,6 +47,7 @@ export function Plan(props: {
   onSettings: () => void
 }) {
   const ix = useIndex()
+  const stale = useSync().stale
   const { today, month } = props
   const current = monthOf(today)
   const base = ix.settings.base
@@ -158,8 +159,9 @@ export function Plan(props: {
             Now
           </button>
         ) : (
-          <button class="iconbtn gear" aria-label="Settings" onClick={props.onSettings}>
+          <button class="iconbtn gear" aria-label={stale ? 'Settings, changes not synced' : 'Settings'} onClick={props.onSettings}>
             <IconGear />
+            {stale && <span class="dot" />}
           </button>
         )}
       </div>

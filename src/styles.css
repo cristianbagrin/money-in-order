@@ -204,6 +204,19 @@ h3 {
 .tab .dot.go {
   background: var(--green);
 }
+.gear {
+  position: relative;
+}
+.gear .dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--bg);
+}
 .rail {
   display: none;
 }

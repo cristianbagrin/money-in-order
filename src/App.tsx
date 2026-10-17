@@ -5,7 +5,7 @@ import { fmt } from './lib/money'
 import { redo } from './lib/store'
 import { joinSync, normalizeCode, syncStatus } from './lib/sync'
 import type { ID, Txn } from './lib/types'
-import { useIndex, useToday } from './ui/hooks'
+import { useIndex, useSync, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
 import { play } from './ui/sound'
 import { CategorySheet } from './views/CategorySheet'
@@ -258,6 +258,7 @@ function TabBar(props: { route: Route; go: (r: Route) => void; today: string }) 
 
 function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
   const b = useBadges(props.today)
+  const stale = useSync().stale
   return (
     <aside class="rail">
       <div class="brand">
@@ -270,6 +271,7 @@ function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
           <button key={t.id} class="tab" aria-current={props.route === t.id ? 'page' : undefined} onClick={() => props.go(t.id)}>
             {t.label}
             {t.id === 'plan' && <Dot rta={b.rta} overspent={b.overspent} />}
+            {t.id === 'settings' && stale && <span class="dot" aria-label="changes not synced" />}
           </button>
         ))}
       </nav>
