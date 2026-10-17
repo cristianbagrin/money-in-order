@@ -33,9 +33,12 @@ export async function refreshRates(force = false): Promise<boolean> {
       const json = (await res.json()) as Record<string, Record<string, number>>
       const table = json[base]
       if (!table) continue
-      const rates = { ...s.rates }
-      for (const c of wanted) {
-        if (s.pinned?.[c]) continue
+      // Build on what's here now (a sync may have landed meanwhile); the rates only go to the rate table.
+      const now = settings()
+      if (now.base !== s.base) return false
+      const rates = { ...now.rates }
+      for (const c of currenciesInUse()) {
+        if (c === now.base || now.pinned?.[c]) continue
         const perBase = table[c.toLowerCase()]
         // table says: 1 base = perBase units of c. We store: 1 unit of c = x base.
         // Full precision: rounding would turn weak currencies (VND, IDR, KRW) into 0.

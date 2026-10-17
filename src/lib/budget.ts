@@ -10,7 +10,11 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'id' | 'u'> = {
 }
 
 export function settingsOf(db: DB): Settings {
-  return db.meta.settings ?? { id: 'settings', u: 0, ...DEFAULT_SETTINGS }
+  const s = db.meta.settings ?? { id: 'settings', u: 0, ...DEFAULT_SETTINGS }
+  // Rates have their own record, so a background refresh never rewrites the user's settings.
+  // Budgets saved before that (or by an older app version) still carry them in the settings record.
+  const t = db.meta.rates
+  return t && !t.d && t.table?.base === s.base ? { ...s, rates: t.table.rates, ratesAt: t.table.at } : s
 }
 
 /** Precomputed sums over the whole database. Rebuilt whenever the database changes. */
@@ -188,8 +192,10 @@ export function monthView(ix: Index, month: Month, current: Month): MonthView {
     cats.push(cm)
     byId.set(cat.id, cm)
   }
-  const groups: GroupMonth[] = ix.groups.map((group) => {
-    const gc = cats.filter((c) => c.cat.group === group.id)
+  // A category whose group is gone shows under the first group rather than vanish with its money.
+  const known = new Set(ix.groups.map((g) => g.id))
+  const groups: GroupMonth[] = ix.groups.map((group, i) => {
+    const gc = cats.filter((c) => c.cat.group === group.id || (i === 0 && !known.has(c.cat.group)))
     return {
       group,
       cats: gc,

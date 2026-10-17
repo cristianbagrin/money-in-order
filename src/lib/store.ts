@@ -1,5 +1,6 @@
 import { buildIndex, DEFAULT_SETTINGS, fundingPlan, monthView, settingsOf, type Index } from './budget'
 import { addMonths, isoDate, monthOf } from './dates'
+import { edit, repair, same } from './merge'
 import { convert, type Rates } from './money'
 import {
   COLLECTIONS,
@@ -13,6 +14,7 @@ import {
   type Group,
   type ID,
   type Month,
+  type RateTable,
   type Rec,
   type Settings,
   type Txn,
@@ -22,6 +24,10 @@ type Listener = () => void
 
 export interface Persistence {
   save(db: DB): void
+  /** a record was just written here (called synchronously, before save) */
+  wrote?(name: CollectionName, rec: Rec): void
+  /** write what's pending now */
+  flush?(): Promise<void>
 }
 
 let db: DB = emptyDB()
@@ -73,11 +79,16 @@ export function setPersistence(p: Persistence | null) {
   persistence = p
 }
 
+/** Resolves once everything so far is saved on this device. */
+export function persistNow(): Promise<void> {
+  return persistence?.flush?.() ?? Promise.resolve()
+}
+
 /** Replace the whole database (startup load, sync merge, restore from backup). */
 export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
   const fixed = emptyDB()
   for (const name of COLLECTIONS) (fixed as unknown as Record<string, unknown>)[name] = next[name] ?? {}
-  db = fixed
+  db = repair(fixed)
   for (const name of COLLECTIONS) {
     for (const r of Object.values(db[name]) as Rec[]) if (r.u > lastStamp) lastStamp = r.u
   }
@@ -85,12 +96,13 @@ export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
   if (opts.local) for (const fn of changeListeners) fn()
 }
 
-type Patch = { [K in CollectionName]?: DB[K][string][] }
+type Patch = { [K in CollectionName]?: NonNullable<DB[K][keyof DB[K]]>[] }
 
 // ---------------------------------------------------------------- undo
 //
-// Wrap a user action in undoable(): every record it touches is remembered as it was before,
-// and undo() writes those versions back (as fresh edits, so undo syncs like anything else).
+// Wrap a user action in undoable(): every record it touches is remembered as it was before and after,
+// and undo() writes back only the fields the action changed (as fresh edits, so undo syncs like anything
+// else, and edits made since to other fields, here or on another device, stay).
 
 interface Recording {
   label: string
@@ -102,7 +114,10 @@ interface Recording {
 export interface UndoEntry {
   label: string
   at: number
+  /** "collection|id" -> the record before the action (null = it didn't exist) */
   prev: Map<string, Rec | null>
+  /** the same records right after the action */
+  next: Map<string, Rec | null>
   restore?: () => void
 }
 
@@ -130,7 +145,9 @@ export function undoable<T>(label: string, fn: () => T, restore?: () => void): T
   } finally {
     recording = null
     if (rec.prev.size) {
-      undoStack.push({ label, at: Date.now(), prev: rec.prev, restore })
+      const next = new Map<string, Rec | null>()
+      for (const key of rec.prev.keys()) next.set(key, lookup(key))
+      undoStack.push({ label, at: Date.now(), prev: rec.prev, next, restore })
       if (undoStack.length > 50) undoStack.shift()
       redoStack.length = 0
       undoChanged()
@@ -142,21 +159,41 @@ export function lastUndo(): UndoEntry | null {
   return undoStack[undoStack.length - 1] ?? null
 }
 
-/** Write back the remembered versions; returns what the reverse step needs. */
-function applyPrev(prev: Map<string, Rec | null>): Map<string, Rec | null> {
-  const back = new Map<string, Rec | null>()
+type Row = Record<string, unknown>
+
+/**
+ * Go from `from` back to `to`: the fields that differ between them get `to`'s values on the current
+ * record, every other field keeps whatever it holds now.
+ */
+function revert(to: Map<string, Rec | null>, from: Map<string, Rec | null>) {
   const patch: Record<string, Rec[]> = {}
-  for (const [key, old] of prev) {
+  for (const [key, want] of to) {
     const [name, id] = splitKey(key)
-    const cur = (db[name as CollectionName] as Record<ID, Rec>)[id] ?? null
-    back.set(key, cur)
-    let next: Rec | null = null
-    if (old) next = { ...old }
-    else if (cur) next = { ...cur, d: 1 }
-    if (next) (patch[name] ??= []).push(next)
+    const had = from.get(key) ?? null
+    const cur = (db[name as CollectionName] as Record<ID, Rec>)[id]
+    let next: Row | null = null
+    if (!want) {
+      if (cur && !cur.d) next = { ...cur, d: 1 }
+    } else if (!cur || !had) {
+      next = { ...cur, ...want }
+      if (!want.d) delete next.d
+    } else {
+      next = { ...cur }
+      const w = want as unknown as Row
+      const h = had as unknown as Row
+      for (const k of new Set([...Object.keys(w), ...Object.keys(h)])) {
+        if (k === 'id' || k === 'u' || k === 'd' || k === 'f' || same(w[k], h[k])) continue
+        if (w[k] === undefined) delete next[k]
+        else next[k] = w[k]
+      }
+      if (!want.d !== !had.d) {
+        if (want.d) next.d = 1
+        else delete next.d
+      }
+    }
+    if (next) (patch[name] ??= []).push(next as unknown as Rec)
   }
   commit(patch as Patch)
-  return back
 }
 
 function splitKey(key: string): [string, string] {
@@ -164,11 +201,16 @@ function splitKey(key: string): [string, string] {
   return [key.slice(0, i), key.slice(i + 1)]
 }
 
+function lookup(key: string): Rec | null {
+  const [name, id] = splitKey(key)
+  return (db[name as CollectionName] as Record<ID, Rec>)[id] ?? null
+}
+
 export function undo(): UndoEntry | null {
   const e = undoStack.pop()
   if (!e) return null
-  const back = applyPrev(e.prev)
-  redoStack.push({ label: e.label, at: Date.now(), prev: back })
+  revert(e.prev, e.next)
+  redoStack.push({ label: e.label, at: Date.now(), prev: e.next, next: e.prev })
   e.restore?.()
   undoChanged()
   return e
@@ -177,17 +219,18 @@ export function undo(): UndoEntry | null {
 export function redo(): UndoEntry | null {
   const e = redoStack.pop()
   if (!e) return null
-  const back = applyPrev(e.prev)
-  undoStack.push({ label: e.label, at: Date.now(), prev: back })
+  revert(e.prev, e.next)
+  undoStack.push({ label: e.label, at: Date.now(), prev: e.next, next: e.prev })
   undoChanged()
   return e
 }
 
-/** Write records. Each gets a fresh timestamp. */
+/** Write records. The fields that changed get a fresh timestamp; unchanged records aren't rewritten. */
 export function commit(patch: Patch) {
   const next = { ...db } as unknown as Record<string, Record<ID, Rec>>
+  const written: [CollectionName, Rec][] = []
   for (const name of Object.keys(patch) as CollectionName[]) {
-    const recs = patch[name]
+    const recs = patch[name] as Rec[] | undefined
     if (!recs?.length) continue
     const coll = { ...next[name] }
     for (const r of recs) {
@@ -195,13 +238,20 @@ export function commit(patch: Patch) {
         const key = `${name}|${r.id}`
         if (!recording.prev.has(key)) recording.prev.set(key, coll[r.id] ?? null)
       }
-      coll[r.id] = { ...r, u: stamp() }
+      const w = edit(coll[r.id], r, stamp())
+      if (!w) continue
+      coll[r.id] = w
+      written.push([name, w])
     }
     next[name] = coll
   }
-  db = next as unknown as DB
+  // Only edits to categories or groups, or money put on a deleted category, can leave something dangling.
+  const cats = next.cats as DB['cats']
+  const risky = written.some(([name, r]) => name === 'cats' || name === 'groups' || cats[(r as Txn).cat]?.d)
+  db = risky ? repair(next as unknown as DB) : (next as unknown as DB)
+  for (const [name, r] of written) persistence?.wrote?.(name, r)
   emit()
-  for (const fn of changeListeners) fn()
+  if (written.length) for (const fn of changeListeners) fn()
 }
 
 function tomb<T extends Rec>(r: T): T {
@@ -214,8 +264,20 @@ export function settings(): Settings {
   return settingsOf(db)
 }
 
+function settingsRec(): Settings {
+  return { ...DEFAULT_SETTINGS, ...db.meta.settings, id: 'settings', u: 0 }
+}
+
+/** Change settings. Rates go to their own record and leave the user's settings alone. */
 export function updateSettings(patch: Partial<Settings>) {
-  commit({ meta: [{ ...DEFAULT_SETTINGS, ...settings(), ...patch, id: 'settings' } as Settings] })
+  const { rates, ratesAt, ...rest } = patch
+  const meta: (Settings | RateTable)[] = []
+  if (Object.keys(rest).length) meta.push({ ...settingsRec(), ...rest, id: 'settings' })
+  if (rates || ratesAt !== undefined) {
+    const s = { ...settings(), ...rest }
+    meta.push({ id: 'rates', u: 0, table: { base: s.base, rates: rates ?? s.rates, at: ratesAt ?? s.ratesAt } })
+  }
+  if (meta.length) commit({ meta })
 }
 
 /**
@@ -243,7 +305,11 @@ export function changeBase(next: string): boolean {
     assigns,
     counts,
     cats,
-    meta: [{ ...s, base: next, rates, extraCurrencies, pinned: {} }],
+    meta: [
+      // The rates in the settings record keep older app versions consistent.
+      { ...settingsRec(), base: next, rates, ratesAt: s.ratesAt, extraCurrencies, pinned: {} },
+      { id: 'rates', u: 0, table: { base: next, rates, at: s.ratesAt } },
+    ],
   })
   return true
 }

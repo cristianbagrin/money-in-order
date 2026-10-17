@@ -11,7 +11,12 @@ export interface Rec {
   id: ID
   u: number
   d?: 1
+  /** when single fields changed, if not all at `u` (see merge.ts) */
+  f?: Stamps
 }
+
+/** field -> update time. `$` repeats the record's `u` (so an edit by an older app is noticed), `_` is the time of every field not listed. */
+export type Stamps = Record<string, number>
 
 /** Pseudo-category for income and anything else that feeds "Ready to Assign". */
 export const RTA = 'rta'
@@ -88,6 +93,7 @@ export interface Note extends Rec {
 
 export interface Settings extends Rec {
   base: string
+  /** read from the rate table (see settingsOf); kept in this record only for older app versions */
   rates: Rates
   ratesAt: number
   /** user-set rates that live updates should not overwrite */
@@ -100,6 +106,12 @@ export interface Settings extends Rec {
   ready?: 1
 }
 
+/** Live exchange rates. Machine data, kept apart from Settings so a background refresh never touches the user's choices. */
+export interface RateTable extends Rec {
+  /** one value, so the rates always travel with the budget currency they are for */
+  table: { base: string; rates: Rates; at: number }
+}
+
 export interface DB {
   groups: Record<ID, Group>
   cats: Record<ID, Category>
@@ -108,7 +120,7 @@ export interface DB {
   accounts: Record<ID, Account>
   counts: Record<ID, Count>
   notes: Record<ID, Note>
-  meta: Record<ID, Settings>
+  meta: { settings?: Settings; rates?: RateTable }
 }
 
 export const COLLECTIONS = ['groups', 'cats', 'txns', 'assigns', 'accounts', 'counts', 'notes', 'meta'] as const

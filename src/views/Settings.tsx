@@ -1,8 +1,8 @@
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { transactionsCSV } from '../lib/export'
 import { refreshRates } from '../lib/rates'
 import { addAccount, changeBase, deleteAccount, restoreBackup, saveAccount, settings, unarchiveCategory, undoable, updateSettings } from '../lib/store'
-import { disableSync, enableSync, joinSync, newCode, normalizeCode, syncNow } from '../lib/sync'
+import { disableSync, joinSync, normalizeCode, turnOnSync } from '../lib/sync'
 import { live, type Account, type DB } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
 import { useIndex, useSync } from '../ui/hooks'
@@ -304,56 +304,72 @@ function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => 
 
 function SyncBox() {
   const sync = useSync()
+  const [joining, setJoining] = useState(false)
   const [joinCode, setJoinCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const codeInput = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (joining) codeInput.current?.focus()
+  }, [joining])
 
   if (!sync.code) {
+    const join = async () => {
+      const code = normalizeCode(joinCode)
+      if (!code || busy) return
+      if (!confirm('Use the budget from your other device on this one? What is on this device now is replaced.')) return
+      setBusy(true)
+      const r = await joinSync(code)
+      setBusy(false)
+      if (r === 'joined') {
+        setJoining(false)
+        setJoinCode('')
+        play('success')
+        toast('Joined')
+      } else {
+        play('error')
+        toast(r === 'missing' ? 'Nothing is stored under that code' : 'Couldn’t reach the server')
+      }
+    }
     return (
       <Section title="Sync">
-        <button
-          class="btn block"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            await enableSync(newCode())
-            setBusy(false)
-            play('success')
-          }}
-        >
-          Turn on sync
-        </button>
-        <div class="row" style={{ marginTop: '10px' }}>
-          <input
-            type="text"
-            class="grow num"
-            aria-label="Sync code from your other device"
-            placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-            value={joinCode}
-            autocapitalize="characters"
-            onInput={(e) => setJoinCode(e.currentTarget.value)}
-          />
+        <div class="pills">
           <button
             class="pill"
-            disabled={busy || !normalizeCode(joinCode)}
+            disabled={busy}
             onClick={async () => {
-              const code = normalizeCode(joinCode)
-              if (!code) return
-              if (!confirm('Use the budget from your other device on this one? What is on this device now is replaced.')) return
               setBusy(true)
-              const r = await joinSync(code)
+              await turnOnSync()
               setBusy(false)
-              if (r === 'joined') {
-                play('success')
-                toast('Joined')
-              } else {
-                play('error')
-                toast(r === 'missing' ? 'Nothing is stored under that code' : 'Couldn’t reach the server')
-              }
+              play('success')
             }}
           >
-            Join
+            Turn on
+          </button>
+          <button class="pill" aria-pressed={joining} onClick={() => setJoining(!joining)}>
+            Join with code
           </button>
         </div>
+        {joining && (
+          <div class="row" style={{ marginTop: '10px' }}>
+            <input
+              type="text"
+              class="grow num"
+              aria-label="Sync code from your other device"
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+              ref={codeInput}
+              value={joinCode}
+              autocapitalize="characters"
+              onInput={(e) => setJoinCode(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void join()
+                if (e.key === 'Escape') setJoining(false)
+              }}
+            />
+            <button class="pill" disabled={busy || !normalizeCode(joinCode)} onClick={join}>
+              Join
+            </button>
+          </div>
+        )}
       </Section>
     )
   }
@@ -361,13 +377,11 @@ function SyncBox() {
   const status =
     sync.state === 'syncing'
       ? 'Syncing…'
-      : sync.state === 'offline'
-        ? 'Offline, will sync when back online'
-        : sync.state === 'error'
-          ? `Couldn’t sync: ${sync.error}`
-          : sync.last
-            ? `Synced ${new Date(sync.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-            : 'On'
+      : sync.state === 'offline' || sync.state === 'error'
+        ? sync.error
+        : sync.last
+          ? `Synced ${new Date(sync.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+          : 'On'
   return (
     <Section title="Sync">
       <p class={sync.state === 'error' ? 'neg' : 'muted'} style={{ margin: '0 0 10px', fontSize: '14px' }}>
@@ -388,9 +402,6 @@ function SyncBox() {
           }}
         >
           Copy code
-        </button>
-        <button class="pill" onClick={() => void syncNow()}>
-          Sync now
         </button>
         <button
           class="pill"
