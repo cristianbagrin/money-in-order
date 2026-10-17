@@ -70,7 +70,7 @@ export function Today(props: { today: string; onPlan: () => void }) {
   const d = useMemo(() => daily(ix, view, today), [ix, view, today])
   const touch = useMedia('(pointer: coarse)')
 
-  const planFirst = d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0
+  const planFirst = d && d.monthBudget <= 0 && d.available <= 0 && d.monthSpent === 0 && view.readyToAssign > 0
   const monthOver = d && d.available < 0 && d.allowance === 0
   // Without a daily category, the key number is what's left to spend this month.
   const monthLeft = d ? 0 : view.cats.filter((c) => !c.cat.saving && !c.cat.archived).reduce((s, c) => s + c.available, 0)

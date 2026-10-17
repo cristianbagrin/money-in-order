@@ -133,7 +133,7 @@ export function Plan(props: {
   const canRepeat = view.assigned === 0 && prevHasPlan && rta > 0
   const fundPill = canFund && (
     <button class="pill solid sm" onClick={fund}>
-      Fund targets <small>{fmt(Math.min(view.need, rta), base)}</small>
+      Fund targets {view.need < rta && <small>{fmt(view.need, base)}</small>}
     </button>
   )
   const repeatPill = canRepeat && (

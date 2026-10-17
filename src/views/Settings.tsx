@@ -17,8 +17,8 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
   return (
     <div>
       <div class="pagehead">
-        <h1 style={{ fontSize: '20px' }}>Settings</h1>
-        <button class="pill sm" onClick={props.onBack}>
+        <h1>Settings</h1>
+        <button class="pill sm settings-done" onClick={props.onBack}>
           Done
         </button>
       </div>
@@ -345,7 +345,7 @@ function SyncBox() {
           >
             Turn on
           </button>
-          <button class="pill" aria-pressed={joining} onClick={() => setJoining(!joining)}>
+          <button class="pill toggle" aria-pressed={joining} onClick={() => setJoining(!joining)}>
             Join with code
           </button>
         </div>

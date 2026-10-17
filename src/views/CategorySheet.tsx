@@ -60,7 +60,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
 
   return (
     <Sheet open onClose={props.onClose} title={cat.name}>
-      <div class={`cs-avail ${available < 0 ? 'neg' : available > 0 ? 'pos' : 'faint'}`}>
+      <div class={`cs-avail ${available < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : available > 0 ? 'pos' : 'faint'}`}>
         <span class={`marked${available < 0 ? ' neg' : ''}`}>{fmt(shown, base)}</span>
       </div>
       <p class="cs-line">{parts.join(' · ')}</p>
@@ -186,6 +186,12 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
   const show = (v: number) => (v ? fmt(v, base, { bare: true }) : '')
   const [amountStr, setAmountStr] = useState(t ? show(t.amount) : '')
   useEffect(() => setAmountStr(t ? show(t.amount) : ''), [t?.amount, t?.kind, cat.id])
+  // The chosen goal month stays in view in the sideways row.
+  const monthsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = monthsRef.current
+    if (el && el.scrollWidth > el.clientWidth) el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [kind, t?.kind === 'goal' ? t.by : ''])
   // A kind just picked without an amount: the field takes focus so the amount can be typed right away.
   const focusNext = useRef(false)
   const fieldRef = useRef<HTMLInputElement>(null)
@@ -221,7 +227,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
 
   // The goal's pace: what this month asks for, the same figure as the Target pill and Fund targets.
   let pace = ''
-  if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? `About ${fmt(cm.goal, base)} a month.` : 'Goal reached.'
+  if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? '' : 'Goal reached.'
 
   return (
     <section class="section">
@@ -261,13 +267,13 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
         ))}
       </div>
       {t?.kind === 'goal' && (
-        <div class="pills scroll" style={{ marginTop: '10px' }}>
+        <div class="pills scroll" style={{ marginTop: '10px' }} ref={monthsRef}>
           <button class="pill sm soft" aria-pressed={!t.by} onClick={() => save({ kind: 'goal', amount: t.amount })}>
             Any time
           </button>
           {Array.from({ length: 18 }, (_, i) => addMonths(month, i)).map((m) => (
             <button key={m} class="pill sm soft" aria-pressed={t.by === m} onClick={() => save({ kind: 'goal', amount: t.amount, by: m })}>
-              {monthName(m, { short: true })} {m.slice(2, 4)}
+              {monthName(m, { short: true })} {m.slice(0, 4)}
             </button>
           ))}
         </div>

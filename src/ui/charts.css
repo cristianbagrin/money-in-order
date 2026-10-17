@@ -57,7 +57,7 @@
   font-weight: 650;
 }
 .ch-saved {
-  fill: var(--green, #0a7f5a);
+  fill: var(--ink-2, #57646b);
 }
 /* a ring of surface behind text that sits on lines */
 .ch-halo {
