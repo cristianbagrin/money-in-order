@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useState } from 'preact/hooks'
-import { assignedInMonth, averageSpent, monthView, spentInMonth } from '../lib/budget'
-import { addMonths, monthDiff, monthName } from '../lib/dates'
+import { Fragment } from 'preact'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { assignedInMonth, averageSpent, monthView, spentInMonth, type CatMonth } from '../lib/budget'
+import { addMonths, monthName } from '../lib/dates'
 import { evalAmount, fmt } from '../lib/money'
 import { archiveCategory, categoryHasHistory, deleteCategory, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
 import { useIndex } from '../ui/hooks'
-import { AmountField, Section, toast } from '../ui/kit'
+import { toast } from '../ui/kit'
 import { useCountUp } from '../ui/motion'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
-
-function toInput(minor: number, base: string): string {
-  return minor ? fmt(minor, base, { bare: true }) : ''
-}
 
 export function CategorySheet(props: { catId: ID | null; month: string; current: string; onClose: () => void; onHistory: (id: ID) => void }) {
   const ix = useIndex()
@@ -23,9 +20,6 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
   const cm = cat ? view.byId.get(cat.id) : undefined
   const available = cm?.available ?? 0
   const shown = useCountUp(available)
-  const [assignStr, setAssignStr] = useState('')
-
-  useEffect(() => setAssignStr(toInput(cm?.assigned ?? 0, base)), [props.catId, month, cm?.assigned])
 
   if (!cat) return <Sheet open={false} onClose={props.onClose} children={null} />
 
@@ -59,12 +53,16 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
     toast(`${fmt(amt, base)} from ${name}`, { undo: true })
   }
 
-  const parts = [`${fmt(assigned, base)} assigned`, `${fmt(spent, base)} spent`]
-  if (carry) parts.push(`${fmt(carry, base, { sign: true })} from ${monthName(prev)}`)
+  // One line of what happened: only the parts that aren't zero (assigned always).
+  const parts = [`${fmt(assigned, base)} assigned`]
+  if (spent) parts.push(`${fmt(spent, base)} spent`)
+  if (carry) parts.push(`${fmt(carry, base, { sign: true })} from ${monthName(prev, { short: true })}`)
 
   return (
     <Sheet open onClose={props.onClose} title={cat.name}>
-      <div class={`cs-avail ${available < 0 ? 'neg' : available > 0 ? 'pos' : 'faint'}`}>{fmt(shown, base)}</div>
+      <div class={`cs-avail ${available < 0 ? 'neg' : available > 0 ? 'pos' : 'faint'}`}>
+        <span class={`marked${available < 0 ? ' neg' : ''}`}>{fmt(shown, base)}</span>
+      </div>
       <p class="cs-line">{parts.join(' · ')}</p>
 
       {available < 0 && (
@@ -86,41 +84,26 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
         </div>
       )}
 
-      <Section title={`Assigned in ${monthName(month)}`}>
-        <AmountField
-          label="Assigned"
-          value={assignStr}
-          onInput={setAssignStr}
-          onCommit={(raw) => {
-            const v = raw.trim() === '' ? 0 : evalAmount(raw)
-            if (v !== null) assign(v)
-            setAssignStr(toInput(v ?? assigned, base))
-          }}
-        />
-        {quick.length > 0 && (
-          <div class="pills" style={{ marginTop: '10px' }}>
-            {quick.map((q) => (
-              <button
-                key={q.label}
-                class="pill"
-                onClick={() => {
-                  assign(q.value)
-                  setAssignStr(toInput(q.value, base))
-                  toast(`${fmt(q.value, base)} assigned`, { undo: true })
-                }}
-              >
-                {q.label} <small>{fmt(q.value, base)}</small>
-              </button>
-            ))}
-          </div>
-        )}
-      </Section>
+      {quick.length > 0 && (
+        <div class="pills cs-quick">
+          {quick.map((q) => (
+            <button
+              key={q.label}
+              class="pill"
+              onClick={() => {
+                assign(q.value)
+                toast(`${fmt(q.value, base)} assigned`, { undo: true })
+              }}
+            >
+              {q.label} <small>{fmt(q.value, base)}</small>
+            </button>
+          ))}
+        </div>
+      )}
 
-      <Section title="Target">
-        <TargetEditor cat={cat} base={base} month={month} />
-      </Section>
+      <TargetEditor cat={cat} cm={cm} base={base} month={month} />
 
-      <div class="pills section">
+      <div class="pills cs-toggles">
         <Toggle cat={cat} field="daily" label="Daily allowance" />
         <Toggle cat={cat} field="saving" label="Savings" />
       </div>
@@ -141,7 +124,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
           </button>
         ) : categoryHasHistory(cat.id) ? (
           <button
-            class="link red"
+            class="link"
             onClick={() => {
               undoable(`Archived ${cat.name}`, () => archiveCategory(cat.id, current, current))
               play('delete')
@@ -153,7 +136,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
           </button>
         ) : (
           <button
-            class="link red"
+            class="link"
             onClick={() => {
               undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id))
               play('delete')
@@ -173,7 +156,7 @@ function Toggle(props: { cat: Category; field: 'daily' | 'saving'; label: string
   const on = !!props.cat[props.field]
   return (
     <button
-      class="pill soft"
+      class="pill toggle"
       aria-pressed={on}
       onClick={() => {
         const next: Category = { ...props.cat }
@@ -195,13 +178,22 @@ const KINDS: [Target['kind'] | 'none', string][] = [
   ['goal', 'Goal'],
 ]
 
-function TargetEditor(props: { cat: Category; base: string; month: string }) {
-  const { cat } = props
+/** Kind pills; the amount is a small field right after the pressed one ("Monthly 335"). */
+function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: string; month: string }) {
+  const { cat, cm, base, month } = props
   const t = cat.target
   const kind = t?.kind ?? 'none'
-  const show = (v: number) => (v ? fmt(v, props.base, { bare: true }) : '')
+  const show = (v: number) => (v ? fmt(v, base, { bare: true }) : '')
   const [amountStr, setAmountStr] = useState(t ? show(t.amount) : '')
   useEffect(() => setAmountStr(t ? show(t.amount) : ''), [t?.amount, t?.kind, cat.id])
+  // A kind just picked without an amount: the field takes focus so the amount can be typed right away.
+  const focusNext = useRef(false)
+  const fieldRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!focusNext.current) return
+    focusNext.current = false
+    fieldRef.current?.focus()
+  }, [kind])
 
   function save(next: Target | undefined) {
     const c: Category = { ...cat }
@@ -210,63 +202,77 @@ function TargetEditor(props: { cat: Category; base: string; month: string }) {
     undoable('Changed target', () => saveCategory(c))
   }
   function setKind(k: string) {
+    if (k === kind) return
     play('toggle')
     const amount = t?.amount ?? 0
+    focusNext.current = !amount
     if (k === 'none') save(undefined)
     else if (k === 'goal') save({ kind: 'goal', amount })
     else save({ kind: k as 'monthly' | 'refill', amount })
   }
+  function commit(raw: string) {
+    if (!t) return
+    const v = raw.trim() === '' ? 0 : evalAmount(raw, base)
+    if (v === null || v < 0) return setAmountStr(show(t.amount))
+    setAmountStr(show(v))
+    if (v === t.amount) return
+    save(t.kind === 'goal' ? { ...t, amount: v } : { kind: t.kind, amount: v })
+  }
+
+  // The goal's pace: what this month asks for, the same figure as the Target pill and Fund targets.
+  let pace = ''
+  if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? `About ${fmt(cm.goal, base)} a month.` : 'Goal reached.'
 
   return (
-    <>
-      <div class="pills">
+    <section class="section">
+      <h2>Target</h2>
+      <div class="pills cs-kinds">
         {KINDS.map(([k, label]) => (
-          <button key={k} class="pill" aria-pressed={kind === k} onClick={() => setKind(k)}>
-            {label}
-          </button>
+          <Fragment key={k}>
+            <button class="pill sm soft" aria-pressed={kind === k} onClick={() => setKind(k)}>
+              {label}
+            </button>
+            {t && kind === k && k !== 'none' && (
+              <input
+                ref={fieldRef}
+                class="cs-target"
+                type="text"
+                inputMode="decimal"
+                aria-label="Target amount"
+                placeholder="0"
+                value={amountStr}
+                onFocus={(e) => {
+                  const el = e.currentTarget
+                  requestAnimationFrame(() => document.activeElement === el && el.select())
+                }}
+                onInput={(e) => setAmountStr(e.currentTarget.value)}
+                onBlur={(e) => commit(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  if (e.key === 'Escape') {
+                    // Abandon what was typed; the sheet closes as usual.
+                    e.currentTarget.value = show(t.amount)
+                    setAmountStr(show(t.amount))
+                  }
+                }}
+              />
+            )}
+          </Fragment>
         ))}
       </div>
-      {t && (
-        <div class="row" style={{ marginTop: '10px' }}>
-          <div class="grow">
-            <AmountField
-              label="Target amount"
-              value={amountStr}
-              onInput={setAmountStr}
-              onCommit={(raw) => {
-                const v = evalAmount(raw)
-                if (v === null || v < 0) return setAmountStr(show(t.amount))
-                setAmountStr(show(v))
-                if (v === t.amount) return
-                save(t.kind === 'goal' ? { ...t, amount: v } : { kind: t.kind, amount: v })
-              }}
-            />
-          </div>
-        </div>
-      )}
       {t?.kind === 'goal' && (
         <div class="pills scroll" style={{ marginTop: '10px' }}>
           <button class="pill sm soft" aria-pressed={!t.by} onClick={() => save({ kind: 'goal', amount: t.amount })}>
             Any time
           </button>
-          {Array.from({ length: 18 }, (_, i) => addMonths(props.month, i)).map((m) => (
+          {Array.from({ length: 18 }, (_, i) => addMonths(month, i)).map((m) => (
             <button key={m} class="pill sm soft" aria-pressed={t.by === m} onClick={() => save({ kind: 'goal', amount: t.amount, by: m })}>
               {monthName(m, { short: true })} {m.slice(2, 4)}
             </button>
           ))}
         </div>
       )}
-      {t && t.amount > 0 && <p class="hint">{targetMeaning(t, props.base, props.month)}</p>}
-    </>
+      {pace && <p class="hint">{pace}</p>}
+    </section>
   )
-}
-
-/** What the target asks for, in one plain line. */
-function targetMeaning(t: Target, base: string, month: string): string {
-  const a = fmt(t.amount, base)
-  if (t.kind === 'monthly') return `${a} every month.`
-  if (t.kind === 'refill') return `Filled up to ${a} each month. Leftovers count.`
-  if (!t.by) return `Build up to ${a}.`
-  const months = Math.max(1, monthDiff(month, t.by) + 1)
-  return `${a} by ${monthName(t.by, { year: true })}, about ${fmt(Math.ceil(t.amount / months / 100) * 100, base)} a month.`
 }

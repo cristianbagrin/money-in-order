@@ -863,21 +863,30 @@ textarea:focus {
   letter-spacing: -0.03em;
   line-height: 1.05;
 }
-.rta-cap {
-  font-size: 15px;
-  color: var(--ink-2);
+/* the caption with the one action that matters right now beside it */
+.rta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
   margin-top: 2px;
+}
+.rta-cap {
+  flex: 1 1 150px;
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--ink-2);
 }
 .rta-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
 }
 
 .ritual {
-  margin: 0 0 16px;
-  padding: 4px 14px;
+  margin: 0 0 12px;
+  padding: 2px 14px;
   border-radius: 16px;
   background: var(--surface);
   border: 1px solid var(--rule);
@@ -889,31 +898,35 @@ textarea:focus {
 }
 .ritual li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 6px 0;
+  gap: 6px 12px;
+  min-height: 44px;
+  padding: 5px 0;
   border-top: 1px solid var(--rule);
 }
 .ritual li:first-child {
   border-top: 0;
 }
+/* a step number (not a checkbox), and a check once done */
 .ritual .step {
   flex: none;
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1.5px solid var(--rule-strong);
+  background: var(--sunk);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--ink-2);
+  font-variation-settings: var(--vs-column);
   font-size: 12px;
+  font-weight: 650;
   transition: all 0.25s var(--ease);
 }
 .ritual li.done .step {
   background: var(--green);
-  border-color: var(--green);
+  color: #fff;
 }
 .ritual li.done .ritual-text {
   color: var(--ink-3);
@@ -925,7 +938,14 @@ textarea:focus {
   font-size: 14.5px;
 }
 .ritual .pills {
-  padding: 0 0 8px 34px;
+  flex-basis: 100%;
+  gap: 6px;
+  padding: 0 0 4px 34px;
+}
+.ritual .ritual-hide {
+  font-size: 13px;
+  color: var(--ink-3);
+  padding: 6px 0 8px;
 }
 
 .colhead {
@@ -944,20 +964,26 @@ textarea:focus {
 .grp-name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--ink-2);
   cursor: grab;
   padding: 4px 0;
+}
+.grp-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: text;
+  border-radius: 4px;
 }
 .grp-name input {
   min-height: 30px;
   padding: 2px 8px;
   font-size: 16px;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .grp-add {
   width: 28px;
@@ -965,23 +991,40 @@ textarea:focus {
   opacity: 0.35;
   transition: opacity 0.15s;
 }
-.grp:hover .grp-add {
-  opacity: 0.8;
+@media (hover: hover) {
+  .grp:hover .grp-add {
+    opacity: 0.8;
+  }
+  .grp-add:hover {
+    opacity: 1;
+  }
 }
-.grp-add:hover,
+@media (hover: none) {
+  .grp-add {
+    opacity: 0.7;
+  }
+}
 .grp-add:focus-visible {
   opacity: 1;
 }
 
 .crow {
+  /* the Assigned and Available columns with their gaps; what's left is the name column */
+  --rest: 222px;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px 92px;
+  grid-template-columns: minmax(0, 1fr) 96px 106px;
   align-items: center;
   column-gap: 10px;
   min-height: 42px;
   padding: 3px 0;
   background: var(--bg);
+}
+/* rows can be dragged from anywhere that isn't a field or a button */
+@media (hover: hover) and (pointer: fine) {
+  .crow {
+    cursor: grab;
+  }
 }
 /* the row's bottom rule doubles as its spending gauge */
 .crow::before {
@@ -999,15 +1042,16 @@ textarea:focus {
   left: 0;
   bottom: 0;
   height: 2px;
-  width: var(--used, 0%);
-  background: var(--pen);
-  opacity: 0.55;
+  /* how much of the money is spent, drawn under the name only */
+  width: calc((100% - var(--rest)) * var(--used, 0));
+  background: var(--ink-3);
+  opacity: 0.6;
   border-radius: 2px;
   transition: width 0.4s var(--ease);
 }
 .crow.over::after {
   background: var(--red);
-  opacity: 0.7;
+  opacity: 0.75;
 }
 .cname {
   min-width: 0;
@@ -1022,6 +1066,7 @@ textarea:focus {
   font-size: 15px;
   cursor: text;
   vertical-align: middle;
+  border-radius: 4px;
 }
 .cname input,
 .cnote input {
@@ -1037,6 +1082,7 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: text;
+  border-radius: 4px;
 }
 .cnote input {
   min-height: 30px;
@@ -1060,22 +1106,30 @@ textarea:focus {
   transition: opacity 0.15s;
 }
 .crow:hover .cnote-add,
-.crow.editing .cnote-add {
+.crow.editing .cnote-add,
+.cnote-add:focus-visible {
   opacity: 1;
 }
 @media (hover: none) {
   .cnote-add {
     display: none;
   }
+  /* renaming on a phone: the name gets the whole line, 'Add note' sits under it */
+  .crow.editing .cname-line {
+    flex-wrap: wrap;
+  }
   .crow.editing .cnote-add {
-    display: inline;
+    display: block;
+    flex-basis: 100%;
+    padding: 6px 0 2px;
+    font-size: 13px;
   }
 }
 .casg {
   text-align: right;
   width: 100%;
   min-height: 34px !important;
-  padding: 4px 9px !important;
+  padding: 4px 8px !important;
   border-radius: 10px !important;
   font-variation-settings: var(--vs-column);
   font-size: 16px !important; /* 16px keeps iOS from zooming */
@@ -1083,8 +1137,14 @@ textarea:focus {
   border: 1px solid var(--rule) !important;
   background: var(--surface) !important;
 }
-.casg:hover {
-  border-color: var(--rule-strong) !important;
+/* long amounts step down while the box isn't being edited (focused, it stays 16px and scrolls) */
+.casg:not(:focus) {
+  font-size: min(16px, calc(136px / var(--len, 1))) !important;
+}
+@media (hover: hover) {
+  .casg:hover {
+    border-color: var(--rule-strong) !important;
+  }
 }
 .casg:focus {
   border-color: var(--pen) !important;
@@ -1092,20 +1152,22 @@ textarea:focus {
 .cspent {
   display: none;
 }
+/* Bare numbers like the Assigned column (the currency is in the hero). Never cut: very long amounts
+   (8+ digits) step the font down instead; --len is the number of characters. */
 .avail {
   justify-self: end;
-  min-width: 82px;
+  min-width: 72px;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: 999px;
   text-align: right;
   font-variation-settings: var(--vs-column);
   font-weight: 620;
-  font-size: 14px;
+  font-size: min(14px, calc(140px / var(--len, 1)));
+  letter-spacing: -0.02em;
   white-space: nowrap;
   transition: transform 0.1s;
 }
@@ -1132,6 +1194,43 @@ textarea:focus {
   margin-top: 16px;
 }
 
+/* Short phones (iPhone SE): the whole plan fits above the tab bar. */
+@media (max-width: 959px) and (max-height: 699px) {
+  .rta {
+    padding-bottom: 4px;
+  }
+  .rta-num {
+    font-size: 40px;
+    line-height: 1;
+  }
+  .rta-cap {
+    font-size: 14px;
+  }
+  .grp {
+    margin-top: 3px;
+  }
+  .grp-head {
+    min-height: 22px;
+  }
+  .grp-name {
+    padding: 1px 0;
+  }
+  .grp-add {
+    height: 22px;
+  }
+  .crow {
+    min-height: 36px;
+    padding: 2px 0;
+  }
+  .casg {
+    min-height: 32px !important;
+    padding: 3px 8px !important;
+  }
+  .cname {
+    line-height: 1.15;
+  }
+}
+
 
 /* ---------------------------------------------------------------- category sheet */
 
@@ -1154,6 +1253,28 @@ textarea:focus {
   font-size: 14px;
   margin: 4px 0 0;
 }
+.cs-quick {
+  margin-top: 16px;
+}
+.cs-kinds {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+/* the target amount: a small field right after the pressed kind, taking what the line has left */
+.cs-kinds input {
+  flex: 0 1 120px;
+  min-width: 64px;
+  min-height: 30px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  text-align: right;
+  font-variation-settings: var(--vs-column);
+  letter-spacing: -0.03em;
+}
+.cs-toggles {
+  margin-top: 22px;
+}
 .cover {
   margin-top: 18px;
   padding: 12px 12px 14px;
@@ -1168,7 +1289,12 @@ textarea:focus {
 .cs-foot {
   display: flex;
   justify-content: space-between;
-  margin-top: 26px;
+  margin-top: 22px;
+}
+.cs-foot .link {
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 560;
 }
 
 /* Count your money: one account per row, balance on the right in the app's amount style */
@@ -1573,7 +1699,7 @@ textarea:focus {
 
   .colhead {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 110px 96px 100px;
+    grid-template-columns: minmax(0, 1fr) 120px 110px 120px;
     column-gap: 14px;
     padding: 6px 0 2px;
     font-size: 12px;
@@ -1584,7 +1710,8 @@ textarea:focus {
     text-align: right;
   }
   .crow {
-    grid-template-columns: minmax(0, 1fr) 110px 96px 100px;
+    --rest: 392px;
+    grid-template-columns: minmax(0, 1fr) 120px 110px 120px;
     column-gap: 14px;
   }
   .cspent {
@@ -1595,6 +1722,10 @@ textarea:focus {
   }
   .avail {
     justify-self: end;
+    font-size: min(14px, calc(160px / var(--len, 1)));
+  }
+  .casg:not(:focus) {
+    font-size: min(16px, calc(176px / var(--len, 1))) !important;
   }
 }
 
@@ -1661,10 +1792,19 @@ textarea:focus {
     --gutter: 13px;
   }
   .crow {
-    grid-template-columns: minmax(0, 1fr) 96px 84px;
+    --rest: 208px;
+    grid-template-columns: minmax(0, 1fr) 90px 102px;
+    column-gap: 8px;
+  }
+  .casg {
+    padding-inline: 6px !important;
+  }
+  .casg:not(:focus) {
+    font-size: min(16px, calc(132px / var(--len, 1))) !important;
   }
   .avail {
-    min-width: 72px;
+    min-width: 64px;
+    padding: 0 7px;
   }
 }
 
