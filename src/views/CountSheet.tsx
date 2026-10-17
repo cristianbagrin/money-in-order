@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { evalAmount, fmt } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
 import { lastCount, previewCount, recordCount, undoable } from '../lib/store'
 import { live, RTA, type ID } from '../lib/types'
 import { useIndex } from '../ui/hooks'
-import { toast } from '../ui/kit'
+import { AmountField, toast } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
 
@@ -19,6 +19,7 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
   const prev = lastCount()
   const [vals, setVals] = useState<Record<ID, string>>({})
   const [diffTo, setDiffTo] = useState<ID>(RTA)
+  const saveRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!props.open) return
@@ -29,13 +30,13 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
 
   const bal = useMemo(() => {
     const out: Record<ID, number> = {}
-    for (const a of accounts) out[a.id] = evalAmount(vals[a.id] ?? '') ?? 0
+    for (const a of accounts) out[a.id] = evalAmount(vals[a.id] ?? '', a.cur) ?? 0
     return out
-  }, [vals, accounts.length])
-  const invalid = (id: ID) => (vals[id] ?? '').trim() !== '' && evalAmount(vals[id]) === null
+  }, [vals, ix.db.accounts])
+  const invalid = (a: { id: ID; cur: string }) => (vals[a.id] ?? '').trim() !== '' && evalAmount(vals[a.id], a.cur) === null
   const noRate = accounts.filter((a) => !hasRate(a.cur)).map((a) => a.cur)
   const filled =
-    accounts.length > 0 && accounts.every((a) => (vals[a.id] ?? '').trim() !== '' && !invalid(a.id)) && !noRate.length
+    accounts.length > 0 && accounts.every((a) => (vals[a.id] ?? '').trim() !== '' && !invalid(a)) && !noRate.length
   const r = previewCount({ date: props.today, bal, rates: ix.settings.rates })
   const gap = r.diff + r.fx
 
@@ -50,30 +51,37 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
 
   return (
     <Sheet open={props.open} onClose={props.onClose} title="Count your money">
-      {accounts.map((a) => (
-        <div class="row" key={a.id} style={{ minHeight: '56px', borderBottom: '1px solid var(--rule)' }}>
-          <span class="grow">
-            <b style={{ fontWeight: 600 }}>{a.name}</b>
-            {prev?.bal[a.id] !== undefined && (
-              <span class="faint num" style={{ display: 'block', fontSize: '12px' }}>
-                last {fmt(prev.bal[a.id], prev.curs?.[a.id] ?? a.cur)}
+      {/* Enter walks down the accounts, then to Save. */}
+      <div
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return
+          const fields = [...e.currentTarget.querySelectorAll('input')]
+          const i = fields.indexOf(e.target as HTMLInputElement)
+          if (i < 0) return
+          // (Without this the same Enter would also press Save once the focus lands on it.)
+          e.preventDefault()
+          if (i < fields.length - 1) fields[i + 1].focus()
+          else saveRef.current?.focus()
+        }}
+      >
+        {accounts.map((a) => (
+          <div class="count-row" key={a.id}>
+            <span class="grow">
+              <b>{a.name}</b>
+              <span class="faint num count-sub">
+                {a.cur}
+                {prev?.bal[a.id] !== undefined && ` · last ${fmt(prev.bal[a.id], prev.curs?.[a.id] ?? a.cur)}`}
               </span>
-            )}
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            class={`num${invalid(a.id) ? ' bad' : ''}`}
-            aria-label={`${a.name} balance in ${a.cur}`}
-            aria-invalid={invalid(a.id)}
-            style={{ width: '46%', textAlign: 'right' }}
-            placeholder={a.cur}
-            value={vals[a.id] ?? ''}
-            onFocus={(e) => e.currentTarget.select()}
-            onInput={(e) => setVals({ ...vals, [a.id]: e.currentTarget.value })}
-          />
-        </div>
-      ))}
+            </span>
+            <AmountField
+              class={`count-amt${invalid(a) ? ' bad' : ''}`}
+              label={`${a.name} balance in ${a.cur}`}
+              value={vals[a.id] ?? ''}
+              onInput={(v) => setVals((all) => ({ ...all, [a.id]: v }))}
+            />
+          </div>
+        ))}
+      </div>
       <button class="link" onClick={props.onAccounts}>
         Edit accounts
       </button>
@@ -134,7 +142,7 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
         </div>
       )}
       {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again.</p>}
-      <button class="btn block green" style={{ marginTop: '20px' }} disabled={!filled} onClick={save}>
+      <button class="btn block" ref={saveRef} style={{ marginTop: '20px' }} disabled={!filled} onClick={save}>
         Save
       </button>
     </Sheet>

@@ -26,10 +26,7 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
       <SyncBox />
 
       <Section title="Accounts">
-        <Accounts />
-        <button class="btn soft block" style={{ marginTop: '12px' }} onClick={props.onCount}>
-          Count your money
-        </button>
+        <Accounts onCount={props.onCount} />
       </Section>
 
       <Section title="Currencies">
@@ -76,10 +73,10 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
         </div>
       </Section>
 
-      <Section title="Sound">
+      <Section>
         <div class="pills">
           <button
-            class="pill"
+            class="pill toggle"
             aria-pressed={sound}
             onClick={() => {
               setSoundOn(!sound)
@@ -87,7 +84,7 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
               if (!sound) play('success')
             }}
           >
-            {sound ? 'On' : 'Off'}
+            Sound
           </button>
         </div>
       </Section>
@@ -154,7 +151,7 @@ async function share(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-function Accounts() {
+function Accounts(props: { onCount: () => void }) {
   const ix = useIndex()
   const s = ix.settings
   const accounts = live(ix.db.accounts).sort((a, b) => a.order - b.order)
@@ -180,6 +177,9 @@ function Accounts() {
           }}
         >
           <IconPlus />
+        </button>
+        <button class="pill" onClick={props.onCount}>
+          Count your money
         </button>
       </div>
       {adding && <NewAccount currencies={currencies} onDone={() => setAdding(false)} />}
@@ -286,9 +286,6 @@ function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => 
         ))}
       </div>
       <div class="cs-foot" style={{ marginTop: '12px' }}>
-        <button class="link" onClick={props.onDone}>
-          Done
-        </button>
         <button
           class="link red"
           onClick={() => {

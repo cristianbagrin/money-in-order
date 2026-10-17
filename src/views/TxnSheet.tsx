@@ -1,3 +1,4 @@
+import { memo } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import { cur, evalAmount, fmt } from '../lib/money'
 
@@ -21,16 +22,16 @@ const KIND_LABEL: Record<NonNullable<Txn['kind']>, string> = {
   fx: 'Exchange rates',
 }
 
-export function TxnRow(props: { t: Txn; onClick: () => void; selected?: boolean; plain?: boolean }) {
-  const ix = useIndex()
-  const { t } = props
-  const base = ix.settings.base
-  const cat = t.cat === RTA ? null : ix.catById.get(t.cat)
-  const catName = t.cat === RTA ? 'Income' : cat?.name ?? 'Unknown'
+/**
+ * One History row. It takes everything as props (no store subscription) and is memoized, so a long list
+ * re-renders only the rows that changed.
+ */
+export const TxnRow = memo(function TxnRow(props: { t: Txn; base: string; catName: string; onOpen: (t: Txn) => void; selected?: boolean; plain?: boolean }) {
+  const { t, base, catName } = props
   const title = t.note || (t.kind ? KIND_LABEL[t.kind] : catName)
   const positive = t.base > 0
   return (
-    <button class={`txn${props.selected ? ' sel' : ''}`} onClick={props.onClick} data-txn={t.id}>
+    <button class={`txn${props.selected ? ' sel' : ''}`} onClick={() => props.onOpen(t)} data-txn={t.id}>
       <div class="txn-main">
         <div class="txn-title">{title}</div>
         {title !== catName && !props.plain && <div class="txn-sub">{catName}</div>}
@@ -41,7 +42,7 @@ export function TxnRow(props: { t: Txn; onClick: () => void; selected?: boolean;
       </div>
     </button>
   )
-}
+})
 
 /** Edit a transaction. Every change applies right away (and can be undone). */
 export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () => void }) {
@@ -50,11 +51,14 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
 
+  // Show what is stored: when the sheet opens, and whenever the record changes underneath it (undo, sync).
+  // The field being typed in is left alone.
   useEffect(() => {
     if (!t) return
-    setAmount(amountText(t.amt, t.cur))
-    setNote(t.note ?? '')
-  }, [t?.id])
+    const typing = (label: string) => document.activeElement instanceof HTMLInputElement && document.activeElement.getAttribute('aria-label') === label
+    if (!typing('Amount')) setAmount(amountText(t.amt, t.cur))
+    if (!typing('Note')) setNote(t.note ?? '')
+  }, [t?.id, t?.amt, t?.cur, t?.note])
 
   if (!t || t.d) return <Sheet open={false} onClose={props.onClose} children={null} />
   const tx = t
@@ -79,7 +83,7 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
   function commitAmount(raw: string) {
     // Untouched: never rewrite (the shown text may be rounded).
     if (raw.trim() === amountText(tx.amt, tx.cur)) return
-    const v = evalAmount(raw)
+    const v = evalAmount(raw, tx.cur)
     if (v === null || v === 0) {
       setAmount(amountText(tx.amt, tx.cur))
       return

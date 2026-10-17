@@ -138,7 +138,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
     for (const a of accounts) {
       if (!a.name.trim()) continue
       const acct = addAccount(a.name.trim(), curs.includes(a.cur) ? a.cur : main)
-      bal[acct.id] = evalAmount(a.bal) ?? 0
+      bal[acct.id] = evalAmount(a.bal, acct.cur) ?? 0
     }
     // With no balances typed yet, the first real count becomes the starting balance.
     if (Object.values(bal).some((v) => v !== 0)) recordCount({ date: today(), bal, rates: settings().rates, diffTo: RTA })
@@ -151,7 +151,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
 
   return (
     <div class="welcome" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 28px)' }}>
-      <h1 style={{ fontSize: '34px' }}>Count your money</h1>
+      <h1 style={{ fontSize: '34px' }}>Your money</h1>
 
       <div style={{ marginTop: '22px' }}>
         <CurrencyPicker

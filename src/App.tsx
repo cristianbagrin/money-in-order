@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
 import { fmt } from './lib/money'
 import { redo } from './lib/store'
-import { enableSync, normalizeCode, syncStatus } from './lib/sync'
+import { joinSync, normalizeCode, syncStatus } from './lib/sync'
 import type { ID, Txn } from './lib/types'
 import { useIndex, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
@@ -31,6 +31,11 @@ function readRoute(): Route {
   const h = location.hash.replace(/^#\/?/, '')
   if (h === 'ledger') return 'history'
   return ROUTES.includes(h as Route) ? (h as Route) : 'today'
+}
+
+/** Fields that keep their own undo once you've typed in them. */
+function isTextField(el: Element): boolean {
+  return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|email|url|tel|password|number)$/.test((el as HTMLInputElement).type))
 }
 
 function readJoin(): string | undefined {
@@ -63,12 +68,20 @@ export function App() {
     setReviewMonth(monthOf(today))
   }, [monthOf(today)])
 
-  // Undo / redo from the keyboard (text fields keep their own undo).
+  // Undo / redo from the keyboard. A text field keeps its own undo once you've typed in it; while it is
+  // empty or untouched since it got focus (right after logging, or after Enter in an Assigned box) the keys are the app's.
   useEffect(() => {
+    let edited: EventTarget | null = null
+    const onFocus = () => {
+      edited = null
+    }
+    const onInput = (e: Event) => {
+      edited = e.target
+    }
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
-      const el = document.activeElement
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      const el = document.activeElement as HTMLInputElement | null
+      if (el && isTextField(el) && el.value && edited === el) return
       e.preventDefault()
       if (e.shiftKey) {
         const r = redo()
@@ -78,18 +91,49 @@ export function App() {
         }
       } else runUndo()
     }
+    document.addEventListener('focusin', onFocus)
+    document.addEventListener('input', onInput)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('focusin', onFocus)
+      document.removeEventListener('input', onInput)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [])
 
-  // A join link opened on a device that's already set up: offer to merge.
+  // A sheet whose record is gone (deleted on another device) closes for good, so it can't pop open again later.
+  useEffect(() => {
+    if (txn) {
+      const r = ix.db.txns[txn.id]
+      if (!r || r.d) setTxn(null)
+    }
+    if (catSheet) {
+      const c = ix.db.cats[catSheet]
+      if (!c || c.d) setCatSheet(null)
+    }
+  }, [ix, txn, catSheet])
+
+  // Settings' Done goes back to where you came from.
+  const lastMain = useRef<Route>('plan')
+  useEffect(() => {
+    if (route !== 'settings') lastMain.current = route
+  }, [route])
+
+  // A join link on a device that's already set up works like Settings > Join: the other budget replaces this one.
   useEffect(() => {
     if (!joinCode || !ix.settings.ready) return
     history.replaceState(null, '', '#/today')
     if (syncStatus().code === joinCode) return
-    if (confirm('Sync this device with the budget from that link? Both sides are merged.')) {
-      void enableSync(joinCode).then(() => toast('Synced'))
-    }
+    if (!confirm('Use the budget from your other device on this one? What is on this device now is replaced.')) return
+    void joinSync(joinCode).then((r) => {
+      if (r === 'joined') {
+        play('success')
+        toast('Joined')
+      } else {
+        play('error')
+        toast(r === 'missing' ? 'Nothing is stored under that code' : 'Couldn’t reach the server')
+      }
+    })
   }, [joinCode, ix.settings.ready])
 
   if (!ix.settings.ready) {
@@ -148,7 +192,7 @@ export function App() {
       />
     )
   else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} />
-  else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onBack={() => go('plan')} />
+  else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 
   return (
@@ -202,7 +246,6 @@ function TabBar(props: { route: Route; go: (r: Route) => void; today: string }) 
   const b = useBadges(props.today)
   return (
     <nav class="tabbar" aria-label="Sections">
-      <span class="tab-ink" style={{ '--i': Math.max(0, TABS.findIndex((t) => t.id === (props.route === 'settings' ? 'plan' : props.route))) }} />
       {TABS.map((t) => (
         <button key={t.id} class="tab" aria-current={props.route === t.id || (t.id === 'plan' && props.route === 'settings') ? 'page' : undefined} onClick={() => props.go(t.id)}>
           {t.label}
@@ -230,12 +273,12 @@ function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
           </button>
         ))}
       </nav>
-      <div class="rail-foot">
+      <button class="rail-foot" onClick={() => props.go('plan')}>
         <small>Ready to assign</small>
         <span class={`num ${b.rta < 0 ? 'neg' : b.rta > 0 ? 'pos' : 'faint'}`} style={{ fontSize: '17px', fontWeight: 650 }}>
           {fmt(b.rta, b.base)}
         </span>
-      </div>
+      </button>
     </aside>
   )
 }

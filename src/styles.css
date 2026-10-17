@@ -28,7 +28,8 @@
   --rule-strong: #d0d0c8;
   --ink: #15242c;
   --ink-2: #57646b;
-  --ink-3: #8e989c;
+  --ink-3: #616c73; /* secondary text: 5:1 on --bg, 4.7:1 on --sunk */
+  --ink-4: #8e989c; /* decorative only (ticks, bullets, icons): never for text */
   --pen: #1d58a8;
   --pen-deep: #143f7d;
   --pen-wash: #e5edf8;
@@ -191,25 +192,6 @@ h3 {
   color: var(--pen);
   font-weight: 700;
 }
-.tab-ink {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 25%;
-  height: 2.5px;
-  display: flex;
-  justify-content: center;
-  transform: translateX(calc(var(--i, 0) * 100%));
-  transition: transform 0.32s var(--ease);
-  pointer-events: none;
-}
-.tab-ink::after {
-  content: '';
-  width: 28px;
-  height: 100%;
-  border-radius: 0 0 3px 3px;
-  background: var(--pen);
-}
 .tab .dot {
   position: absolute;
   top: 13px;
@@ -263,6 +245,15 @@ h3 {
 .pills.scroll::-webkit-scrollbar {
   display: none;
 }
+/* With a mouse (or room to spare) nothing hides in a sideways scroll: the pills wrap. */
+@media (hover: hover) and (pointer: fine), (min-width: 960px) {
+  .pills.scroll {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 0;
+    padding: 2px 0;
+  }
+}
 .pill {
   display: inline-flex;
   align-items: center;
@@ -292,7 +283,8 @@ h3 {
   border-color: var(--pen);
   color: #fff;
 }
-.pill.soft[aria-pressed='true'],
+/* A single choice is solid wherever it appears; the light wash is for on/off toggles and currencies in use. */
+.pill.toggle[aria-pressed='true'],
 .pill.picked {
   background: var(--pen-wash);
   border-color: var(--pen);
@@ -1179,6 +1171,40 @@ textarea:focus {
   margin-top: 26px;
 }
 
+/* Count your money: one account per row, balance on the right in the app's amount style */
+.count-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  border-bottom: 1px solid var(--rule);
+}
+.count-row b {
+  display: block;
+  font-weight: 600;
+}
+.count-sub {
+  display: block;
+  font-size: 12px;
+}
+.amountfield.count-amt {
+  flex: none;
+  width: 52%;
+}
+.amountfield.count-amt input {
+  min-height: 46px;
+  padding-right: 40px;
+  font-size: 22px;
+  text-align: right;
+}
+.amountfield.count-amt .clear {
+  right: 3px;
+}
+.amountfield.count-amt.bad input {
+  border-color: var(--red);
+  color: var(--red);
+}
+
 /* ---------------------------------------------------------------- HISTORY */
 
 .searchbar {
@@ -1189,14 +1215,14 @@ textarea:focus {
   position: absolute;
   left: 13px;
   top: 14px;
-  color: var(--ink-3);
+  color: var(--ink-4);
 }
 .searchbar input {
   padding-left: 38px;
   border-radius: 999px;
   border-color: var(--rule);
 }
-.filters {
+.pills.scroll.filters {
   margin-top: 10px;
 }
 .day {
@@ -1223,12 +1249,24 @@ textarea:focus {
   text-align: left;
   transition: background 0.12s;
 }
-.txn:hover,
+@media (hover: hover) {
+  .txn:hover {
+    background: var(--sunk);
+  }
+}
 .txn.sel {
   background: var(--sunk);
 }
 .txn:active {
   background: var(--rule);
+}
+/* a day of rows is skipped (not laid out or painted) while it is far off screen */
+.daygrp {
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(44px + var(--n, 1) * 54px);
+  /* the rows' hover and focus shapes reach 10px past the text column, which paint containment would clip */
+  margin: 0 -10px;
+  padding: 0 10px 4px;
 }
 .txn-main {
   flex: 1;
@@ -1477,9 +1515,21 @@ textarea:focus {
   }
   .rail-foot {
     margin-top: auto;
-    padding: 0 10px;
+    padding: 8px 10px;
     display: grid;
     gap: 2px;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    text-align: left;
+  }
+  .rail-foot:active {
+    background: var(--sunk);
+  }
+  @media (hover: hover) {
+    .rail-foot:hover {
+      background: var(--sunk);
+    }
   }
   .rail-foot small {
     color: var(--ink-3);
@@ -1514,6 +1564,11 @@ textarea:focus {
   }
   .pagehead .gear {
     display: none;
+  }
+  /* the button follows the form instead of sitting at the bottom of a tall window */
+  .welcome .foot {
+    margin-top: 32px;
+    padding-top: 0;
   }
 
   .colhead {
