@@ -63,6 +63,10 @@ export function App() {
     window.addEventListener('hashchange', on)
     return () => window.removeEventListener('hashchange', on)
   }, [])
+  // Leaving History, by a tap or the browser's Back button, clears its filter.
+  useEffect(() => {
+    if (route !== 'history') setHistoryFilter('all')
+  }, [route])
 
   // Keep the visible months on "now" when the month rolls over.
   useEffect(() => {
@@ -160,7 +164,6 @@ export function App() {
 
   const go = (r: Route) => {
     if (r !== route) play('tap')
-    if (route === 'history' && r !== 'history') setHistoryFilter('all')
     location.hash = `#/${r}`
     setRoute(r)
     window.scrollTo(0, 0)
