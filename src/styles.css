@@ -1816,6 +1816,13 @@ textarea:focus {
   .today[data-fit='tight'] .register .note {
     margin-bottom: 6px;
   }
+  /* iPhone SE with its status bar: a little tighter still */
+  .today[data-cramped] .key {
+    height: 39px;
+  }
+  .today[data-cramped] .hero-num {
+    font-size: 40px;
+  }
 }
 
 @media (max-width: 959px) and (max-height: 740px) {

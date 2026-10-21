@@ -78,6 +78,7 @@ export function Today(props: { today: string; onPlan: () => void }) {
     const fit = () => {
       const h = el.clientHeight
       el.dataset.fit = h <= 710 ? 'tight' : h >= 732 ? 'roomy' : ''
+      el.toggleAttribute('data-cramped', h <= 590)
     }
     fit()
     const ro = new ResizeObserver(fit)
