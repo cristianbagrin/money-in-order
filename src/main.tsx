@@ -5,7 +5,17 @@ import { App } from './App'
 import { loadDB, startPersistence } from './lib/persist'
 import { refreshRates } from './lib/rates'
 import { replaceDB } from './lib/store'
-import { initSync } from './lib/sync'
+import { initSync, syncIdle } from './lib/sync'
+
+let refreshing: Promise<unknown> | null = null
+
+/** Refresh rates once the sync has merged, so the refresh starts from the newest settings (it only fetches when they're old). */
+function refreshAfter(synced: Promise<unknown>) {
+  refreshing ??= Promise.race([synced, new Promise((r) => setTimeout(r, 10_000))])
+    .then(() => refreshRates())
+    .catch(() => {})
+    .finally(() => (refreshing = null))
+}
 
 async function boot() {
   const { db, replayed } = await loadDB()
@@ -14,9 +24,11 @@ async function boot() {
 
   void navigator.storage?.persist?.()
   render(<App />, document.getElementById('app')!)
-  // Refresh rates once the first sync has merged, so the refresh starts from the newest settings.
-  const synced = initSync({ dirty: replayed })
-  void Promise.race([synced, new Promise((r) => setTimeout(r, 10_000))]).then(() => refreshRates())
+  refreshAfter(initSync({ dirty: replayed }))
+  // A PWA resumed after a day in the background keeps running: check the rates again when it comes back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshAfter(syncIdle())
+  })
   registerSW({ immediate: true })
 }
 

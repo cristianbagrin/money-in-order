@@ -1,8 +1,8 @@
 // End-to-end encrypted sync. The server stores one opaque blob per sync code and never sees the key.
 
-import { get, set } from 'idb-keyval'
+import { get, set, update } from 'idb-keyval'
 import { hasNews, merge } from './merge'
-import { clearUndo, getDB, onLocalChange, persistNow, replaceDB } from './store'
+import { dbEpoch, getDB, onLocalChange, persistNow, pullNow, replaceDB, swapDB } from './store'
 import type { DB } from './types'
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // no 0/O/1/I/L
@@ -21,6 +21,8 @@ interface SyncConfig {
   /** when the oldest edit not yet uploaded was made */
   since?: number
   last: number
+  /** the budget (see dbEpoch) this code syncs; missing when saved before budgets had one */
+  epoch?: string
 }
 
 let cfg: SyncConfig | null = null
@@ -32,6 +34,11 @@ let staleTimer: ReturnType<typeof setTimeout> | null = null
 let running: Promise<void> | null = null
 let again = false
 const listeners = new Set<() => void>()
+/** Tabs share one sync state: a tab that turns sync on or off or joins a budget tells the others. */
+const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('money-in-order/sync') : null
+let ready!: () => void
+/** Resolves once this tab knows whether sync is on, and with which code. */
+export const syncReady = new Promise<void>((r) => (ready = r))
 
 class ServerError extends Error {}
 
@@ -137,8 +144,45 @@ async function open(blob: string, key: CryptoKey): Promise<DB> {
   return JSON.parse(new TextDecoder().decode(json)).db as DB
 }
 
+function epochOf(c: SyncConfig | null | undefined): string {
+  return c?.epoch ?? ''
+}
+
+/** Save this tab's sync state, unless another tab has turned sync off or joined another budget meanwhile: then follow that. */
 async function saveCfg() {
-  if (cfg) await set('sync', cfg)
+  const c = cfg
+  if (!c) return
+  let mine = true
+  await update<SyncConfig | null>('sync', (saved) => {
+    mine = saved?.code === c.code && epochOf(saved) === epochOf(c)
+    return mine ? c : (saved ?? null)
+  })
+  if (!mine) await follow()
+}
+
+/** Save a sync state chosen here (turned on or off, budget joined) and tell the other tabs. */
+async function storeCfg() {
+  await set('sync', cfg)
+  channel?.postMessage(1)
+}
+
+/** Take the sync state as another tab may have stored it: turned off, turned on, or another budget joined. */
+async function follow() {
+  const was = cfg
+  const saved = (await get('sync').catch(() => undefined)) as SyncConfig | null | undefined
+  if (cfg !== was || (saved?.code === was?.code && epochOf(saved) === epochOf(was))) return
+  if (!saved?.code) {
+    cfg = null
+    keys = null
+    return setState('off')
+  }
+  // A joined budget comes with its code: take it in too (until this tab holds it, nothing syncs).
+  if (epochOf(saved) !== dbEpoch()) await pullNow()
+  const k = await derive(saved.code)
+  if (cfg !== was) return
+  cfg = saved
+  keys = k
+  setState('idle')
 }
 
 /** Remember the code after sync is turned off, so turning it back on resumes the same budget. */
@@ -147,9 +191,12 @@ async function rememberCode(code: string) {
 }
 
 async function syncOnce(): Promise<void> {
+  await follow()
   const c = cfg
   const k = keys
-  if (!c || !k) return
+  // Sync only the budget this code belongs to: a tab still holding a replaced one waits until it has taken the new one.
+  const gone = () => cfg !== c || epochOf(c) !== dbEpoch()
+  if (!c || !k || gone()) return
   if (!navigator.onLine) {
     setState('offline', OFFLINE)
     return
@@ -163,17 +210,18 @@ async function syncOnce(): Promise<void> {
         cache: 'no-store',
         signal: AbortSignal.timeout(30_000),
       })
-      if (cfg !== c) return // turned off meanwhile
+      if (gone()) return // turned off or budget swapped meanwhile
       let remoteRev: string | null = c.rev
       if (res.status === 200) {
         remoteRev = res.headers.get('X-Rev')
         const remote = await open(await res.text(), k.key)
-        if (cfg !== c) return
+        if (gone()) return
         const local = getDB()
         if (hasNews(local, remote)) {
           replaceDB(merge(local, remote))
           // Only remember the new revision once its data is saved on this device.
           await persistNow()
+          if (gone()) return
         }
         if (hasNews(remote, getDB())) markDirty()
         c.rev = remoteRev
@@ -197,7 +245,7 @@ async function syncOnce(): Promise<void> {
         body,
         signal: AbortSignal.timeout(30_000),
       })
-      if (cfg !== c) return
+      if (gone()) return
       if (put.status === 412) continue // someone else wrote first: pull, merge, try again
       if (!put.ok) throw new ServerError(String(put.status))
       c.rev = put.headers.get('X-Rev')
@@ -211,10 +259,11 @@ async function syncOnce(): Promise<void> {
     if (done) c.last = Date.now()
     else schedule(5000) // other devices kept writing first: try again in a moment
     await saveCfg()
-    setState('idle')
+    if (cfg === c) setState('idle')
   } catch (e) {
-    if (cfg !== c) return
+    if (gone()) return
     await saveCfg().catch(() => {})
+    if (cfg !== c) return
     if (!navigator.onLine) return setState('offline', OFFLINE)
     const reach = e instanceof ServerError || e instanceof TypeError || (e instanceof DOMException && e.name === 'TimeoutError')
     setState('error', reach ? UNREACHABLE : 'Couldn’t sync. Trying again shortly.')
@@ -255,8 +304,10 @@ function wire() {
     schedule(1200)
     if (!was) notify()
   })
+  // Each sync first takes the sync state other tabs stored, so these also pick up Turn on in another tab.
+  if (channel) channel.onmessage = () => void syncNow()
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && cfg) void syncNow()
+    if (document.visibilityState === 'visible') void syncNow()
   })
   window.addEventListener('online', () => cfg && void syncNow())
   window.addEventListener('offline', () => cfg && setState('offline', OFFLINE))
@@ -267,23 +318,30 @@ function wire() {
 
 /** Resume syncing at startup. Resolves after the first sync (at once when sync is off). */
 export async function initSync(opts: { dirty?: boolean } = {}) {
-  const saved = (await get('sync').catch(() => undefined)) as SyncConfig | undefined
-  if (!saved?.code) return
-  cfg = saved
-  void rememberCode(saved.code)
+  wire()
+  try {
+    await follow()
+  } finally {
+    ready()
+  }
+  if (!cfg) return
+  void rememberCode(cfg.code)
   // Changes recovered after an interrupted save may not have been uploaded yet.
   if (opts.dirty) markDirty()
-  keys = await derive(saved.code)
-  wire()
-  setState('idle')
   await syncNow()
+}
+
+/** Resolves once the sync running now (if any) is done. */
+export function syncIdle(): Promise<void> {
+  return running ?? Promise.resolve()
 }
 
 /** Start syncing with a code. Local data is merged with whatever is stored under the code. */
 export async function enableSync(code: string) {
-  cfg = { code, rev: null, dirty: true, since: Date.now(), last: 0 }
-  keys = await derive(code)
-  await saveCfg()
+  const k = await derive(code)
+  cfg = { code, rev: null, dirty: true, since: Date.now(), last: 0, epoch: dbEpoch() }
+  keys = k
+  await storeCfg()
   await rememberCode(code)
   wire()
   setState('idle')
@@ -307,12 +365,12 @@ export async function joinSync(code: string): Promise<'joined' | 'missing' | 'er
     if (res.status === 404) return 'missing'
     if (!res.ok) return 'error'
     const remote = await open(await res.text(), k.key)
-    replaceDB(remote)
-    clearUndo()
-    cfg = { code, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now() }
+    // A different budget, not a merge: other tabs drop the old one instead of merging it back in.
+    swapDB(remote)
+    cfg = { code, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now(), epoch: dbEpoch() }
     keys = k
+    await storeCfg()
     await persistNow()
-    await saveCfg()
     await rememberCode(code)
     wire()
     setState('idle')
@@ -325,7 +383,7 @@ export async function joinSync(code: string): Promise<'joined' | 'missing' | 'er
 export async function disableSync() {
   cfg = null
   keys = null
-  await set('sync', null)
+  await storeCfg()
   setState('off')
 }
 

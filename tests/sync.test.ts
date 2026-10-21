@@ -5,6 +5,7 @@ const kv = new Map<string, unknown>()
 vi.mock('idb-keyval', () => ({
   get: async (k: string) => kv.get(k),
   set: async (k: string, v: unknown) => void kv.set(k, v),
+  update: async (k: string, f: (v: unknown) => unknown) => void kv.set(k, f(kv.get(k))),
 }))
 
 let online = false

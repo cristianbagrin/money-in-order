@@ -4,10 +4,12 @@
 // - Other tabs hear about each write and take it in.
 // - Records are also journaled synchronously in localStorage until their IndexedDB write completes,
 //   so a reload right after logging can't lose them.
+// - A different budget swapped in (joined from another device) is stored under a new epoch ('dbe'). A tab still
+//   holding the old budget can't write, journal or merge it back: it drops it and takes the new one.
 
 import { createStore, get, getMany } from 'idb-keyval'
 import { hasNews, merge } from './merge'
-import { getDB, replaceDB, setPersistence } from './store'
+import { clearUndo, getDB, replaceDB, setPersistence, uid } from './store'
 import { COLLECTIONS, emptyDB, type CollectionName, type DB, type Rec } from './types'
 
 /** The store idb-keyval uses by default (where the app has always kept 'db' and 'sync'). */
@@ -24,6 +26,17 @@ const replayed = new Map<string, string>()
 const UNKNOWN = {}
 let seen: unknown = UNKNOWN
 let seq = 0
+/** The epoch of the budget this tab holds ('' for data stored before budgets had one). */
+let epoch = ''
+/** A budget swapped in here isn't stored yet: it replaces whatever is, and nothing stored is taken in meanwhile. */
+let fresh = false
+
+/** What another tab stored after swapping in a different budget. */
+interface Swapped {
+  db: DB | undefined
+  mark: unknown
+  epoch: string
+}
 
 function split(key: string): [CollectionName, string] {
   const i = key.indexOf('|')
@@ -38,7 +51,7 @@ function recIn(db: DB, key: string): Rec | undefined {
 function saveJournal() {
   try {
     // A huge batch (restoring a backup) isn't worth the main-thread time; IndexedDB has it shortly.
-    if (journal.size && journal.size <= 500) localStorage.setItem(JOURNAL + TAB, JSON.stringify([...journal]))
+    if (journal.size && journal.size <= 500) localStorage.setItem(JOURNAL + TAB, JSON.stringify({ epoch, recs: [...journal] }))
     else localStorage.removeItem(JOURNAL + TAB)
   } catch {
     // storage blocked or full
@@ -49,9 +62,10 @@ function saveJournal() {
 export async function loadDB(): Promise<{ db: DB | null; replayed: boolean }> {
   let saved: DB | undefined
   try {
-    const [db, mark] = await getMany(['db', 'dbw'], store)
+    const [db, mark, e] = await getMany(['db', 'dbw', 'dbe'], store)
     saved = db as DB | undefined
     seen = mark
+    epoch = (e as string | undefined) ?? ''
   } catch {
     // IndexedDB unavailable (private mode): run in memory.
   }
@@ -62,8 +76,12 @@ export async function loadDB(): Promise<{ db: DB | null; replayed: boolean }> {
       if (!k?.startsWith(JOURNAL)) continue
       const raw = localStorage.getItem(k) ?? '[]'
       replayed.set(k, raw)
+      // Older journals are plain lists (of the budget stored then); one of a budget swapped out since is dropped.
+      const data = JSON.parse(raw) as [string, Rec][] | { epoch: string; recs: [string, Rec][] }
+      const [from, recs] = Array.isArray(data) ? ['', data] : [data.epoch, data.recs]
+      if (from !== epoch) continue
       const part = emptyDB() as unknown as Record<string, Record<string, Rec>>
-      for (const [key, rec] of JSON.parse(raw) as [string, Rec][]) {
+      for (const [key, rec] of recs) {
         const [name, id] = split(key)
         if ((COLLECTIONS as readonly string[]).includes(name)) part[name][id] = rec
       }
@@ -76,38 +94,63 @@ export async function loadDB(): Promise<{ db: DB | null; replayed: boolean }> {
   return { db: news ? merge(saved ?? emptyDB(), extra!) : (saved ?? null), replayed: news }
 }
 
-/** Write a snapshot; returns the merged database when another tab had stored something this one lacks. */
-function write(db: DB): Promise<DB | null> {
+/**
+ * Write a snapshot of the budget of epoch `e` (`fresh`: swapped in here, written as is). Returns the merged
+ * database when another tab had stored something this one lacks, or, when another tab has swapped in a
+ * different budget, what it stored (and writes nothing).
+ */
+function write(db: DB, e: string, fresh: boolean): Promise<{ news?: DB; swapped?: Swapped }> {
   return store('readwrite', (os) => {
-    return new Promise<DB | null>((resolve, reject) => {
-      let news: DB | null = null
+    return new Promise<{ news?: DB; swapped?: Swapped }>((resolve, reject) => {
+      const out: { news?: DB; swapped?: Swapped } = {}
       const put = (data: DB) => {
         seen = `${TAB}:${++seq}`
         os.put(data, 'db')
         os.put(seen, 'dbw')
+        if (fresh) os.put(e, 'dbe')
       }
-      const t = os.get('dbw')
-      t.onsuccess = () => {
-        if (t.result === seen) return put(db)
-        // Someone else wrote last (another tab, or an earlier session): keep their records too.
-        const g = os.get('db')
-        g.onsuccess = () => {
-          const stored = g.result as DB | undefined
-          if (stored && hasNews(db, stored)) put((news = merge(db, stored)))
-          else put(db)
+      if (fresh) put(db)
+      else {
+        const t = os.get('dbw')
+        const v = os.get('dbe')
+        v.onsuccess = () => {
+          const era = (v.result as string | undefined) ?? ''
+          if (era === e && t.result === seen) return put(db)
+          // Someone else wrote last (another tab, or an earlier session): keep their records too.
+          const g = os.get('db')
+          g.onsuccess = () => {
+            const stored = g.result as DB | undefined
+            if (era !== e) out.swapped = { db: stored, mark: t.result, epoch: era }
+            else if (stored && hasNews(db, stored)) put((out.news = merge(db, stored)))
+            else put(db)
+          }
         }
       }
-      os.transaction.oncomplete = () => resolve(news)
+      os.transaction.oncomplete = () => resolve(out)
       os.transaction.onerror = os.transaction.onabort = () => reject(os.transaction.error)
     })
   })
 }
 
+/** Another tab swapped in a different budget: drop this one, with anything of it not yet stored, and take that. */
+function adopt(other: Swapped) {
+  epoch = other.epoch
+  seen = other.mark
+  journal.clear()
+  saveJournal()
+  clearUndo()
+  replaceDB(other.db ?? emptyDB())
+}
+
 /** Take in what another tab saved. */
 async function pull() {
+  const e = epoch
   try {
     if ((await get('dbw', store)) === seen) return
-    const [stored, mark] = await getMany(['db', 'dbw'], store)
+    const [stored, mark, era] = await getMany(['db', 'dbw', 'dbe'], store)
+    // A budget swapped in here (meanwhile, or not stored yet) replaces whatever is stored.
+    if (fresh || epoch !== e) return
+    if ((era ?? '') !== epoch) return adopt({ db: stored as DB | undefined, mark, epoch: era ?? '' })
     if (stored && hasNews(getDB(), stored)) replaceDB(merge(getDB(), stored))
     seen = mark
   } catch {
@@ -124,9 +167,15 @@ export function startPersistence(opts: { replayed: boolean }) {
     timer = null
     if (!pending) return last
     const snap = pending
+    const e = epoch
+    const f = fresh
     pending = null
-    last = write(snap).then(
-      (news) => {
+    last = write(snap, e, f).then(
+      ({ news, swapped }) => {
+        // Swapped meanwhile: this snapshot's budget is gone.
+        if (epoch !== e) return
+        if (swapped) return adopt(swapped)
+        if (f) fresh = false
         for (const [key, rec] of journal) if (recIn(snap, key)?.u === rec.u) journal.delete(key)
         saveJournal()
         try {
@@ -155,6 +204,14 @@ export function startPersistence(opts: { replayed: boolean }) {
       saveJournal()
     },
     flush,
+    pull,
+    replace() {
+      epoch = uid()
+      fresh = true
+      journal.clear()
+      saveJournal()
+    },
+    epoch: () => epoch,
   })
   if (channel) channel.onmessage = () => void pull()
   document.addEventListener('visibilitychange', () => {

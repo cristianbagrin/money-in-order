@@ -28,6 +28,12 @@ export interface Persistence {
   wrote?(name: CollectionName, rec: Rec): void
   /** write what's pending now */
   flush?(): Promise<void>
+  /** take in what other tabs saved */
+  pull?(): Promise<void>
+  /** the next save is a different budget (see swapDB): store it as is, under a new epoch */
+  replace?(): void
+  /** the epoch of the budget held here */
+  epoch?(): string
 }
 
 let db: DB = emptyDB()
@@ -94,6 +100,26 @@ export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
   }
   emit()
   if (opts.local) for (const fn of changeListeners) fn()
+}
+
+/**
+ * Swap in a different budget (joined from another device). Nothing of the current one is kept or merged:
+ * undo history goes, and it is stored under a new epoch, so a tab still holding the old budget drops it.
+ */
+export function swapDB(next: DB) {
+  persistence?.replace?.()
+  clearUndo()
+  replaceDB(next)
+}
+
+/** Which budget this is: changes only when a different one is swapped in, here or in another tab. */
+export function dbEpoch(): string {
+  return persistence?.epoch?.() ?? ''
+}
+
+/** Take in what other tabs saved (or the different budget one of them swapped in). */
+export function pullNow(): Promise<void> {
+  return persistence?.pull?.() ?? Promise.resolve()
 }
 
 type Patch = { [K in CollectionName]?: NonNullable<DB[K][keyof DB[K]]>[] }
