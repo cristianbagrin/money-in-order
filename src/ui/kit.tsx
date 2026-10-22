@@ -161,16 +161,17 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
   return <KeyGrid decimals={props.decimals} press={press} clear={clear} />
 }
 
-/** The keys themselves, shared by Today's keypad and the one docked under amount fields. */
-function KeyGrid(props: { decimals: number; press: (k: string) => void; clear: () => boolean }) {
+/**
+ * The keys themselves, shared by Today's keypad and the one docked under amount fields. With `done`, the
+ * bottom right key is a return key that lets go of the field, where a phone keyboard has it.
+ */
+function KeyGrid(props: { decimals: number; press: (k: string) => void; clear: () => boolean; done?: () => void }) {
   const lastPointer = useRef(0)
   const hold = useRef<ReturnType<typeof setTimeout>>(undefined)
   const endHold = () => clearTimeout(hold.current)
   useEffect(() => endHold, [])
   const keys = ['1', '2', '3', '+', '4', '5', '6', '-', '7', '8', '9', '*', props.decimals ? '.' : '00', '0', 'back', '/']
-  return (
-    <div class="keypad" role="group" aria-label="Amount keypad">
-      {keys.map((k) => (
+  const key = (k: string) => (
         <button
           key={k}
           type="button"
@@ -203,7 +204,33 @@ function KeyGrid(props: { decimals: number; press: (k: string) => void; clear: (
         >
           {k === 'back' ? <IconBack /> : OP_SIGN[k] ?? k}
         </button>
-      ))}
+      )
+  if (!props.done)
+    return (
+      <div class="keypad" role="group" aria-label="Amount keypad">
+        {keys.map(key)}
+      </div>
+    )
+  const done = props.done
+  // Digits in a 3×4 block; the operators and the return key share the column beside it.
+  return (
+    <div class="keypad has-done" role="group" aria-label="Amount keypad">
+      <div class="keypad-digits">{keys.filter((k) => !OPS.includes(k)).map(key)}</div>
+      <div class="keypad-ops">
+        {keys.filter((k) => OPS.includes(k)).map(key)}
+        <button
+          type="button"
+          class="key done"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            lastPointer.current = Date.now()
+            done()
+          }}
+          onClick={() => Date.now() - lastPointer.current >= 1000 && done()}
+        >
+          Done
+        </button>
+      </div>
     </div>
   )
 }
@@ -224,6 +251,10 @@ function typeInto(el: HTMLInputElement, value: string, caret: number, inputType:
   el.value = value
   el.setSelectionRange(caret, caret)
   el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }))
+  // iOS doesn't scroll a field to a caret set from script: keep what's being typed in view.
+  requestAnimationFrame(() => {
+    if (el.selectionEnd === el.value.length) el.scrollLeft = el.scrollWidth
+  })
 }
 
 /** Enter on the field, as the keyboard would press it; a field that has no use for it just lets go. */
@@ -233,6 +264,16 @@ function pressEnter(el: HTMLInputElement) {
     const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     el.dispatchEvent(ev)
     if (!ev.defaultPrevented && document.activeElement === el) el.blur()
+  } finally {
+    letGo = false
+  }
+}
+
+/** Done where Enter would go on to the next field: this one just lets go. */
+function release(el: HTMLInputElement) {
+  letGo = true
+  try {
+    el.blur()
   } finally {
     letGo = false
   }
@@ -402,13 +443,71 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
         ) : (
           <span />
         )}
-        <button type="button" class="calc-done" {...act(() => pressEnter(input))}>
-          {props.next ? 'Next' : 'Done'}
-        </button>
+        {props.next && (
+          <button type="button" class="calc-done" {...act(() => pressEnter(input))}>
+            Next
+          </button>
+        )}
       </div>
-      <KeyGrid decimals={decimals} press={press} clear={clear} />
+      <KeyGrid decimals={decimals} press={press} clear={clear} done={() => (props.next ? release(input) : pressEnter(input))} />
     </div>,
     host ?? document.body,
+  )
+}
+
+// ---------------------------------------------------------------- the system keyboard on phones
+
+/**
+ * iOS only brings its keyboard up for a focus made during the tap itself. A field that appears a moment
+ * later (after a re-render) gets it by taking over from this stand-in, focused now. Call it in the tap's
+ * handler, before the state change that shows the field; it says whether it did anything (touch screens only).
+ */
+export function primeKeyboard(): boolean {
+  if (!matchMedia('(pointer: coarse)').matches) return false
+  let el = document.getElementById('kb-standin') as HTMLInputElement | null
+  if (!el) {
+    el = document.createElement('input')
+    el.id = 'kb-standin'
+    el.type = 'text'
+    el.tabIndex = -1
+    el.autocomplete = 'off'
+    el.setAttribute('aria-hidden', 'true')
+    // on screen (iOS ignores a focus far outside it) but invisible, and 16px so the page doesn't zoom
+    el.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;pointer-events:none'
+    document.body.appendChild(el)
+  }
+  el.focus({ preventScroll: true })
+  return true
+}
+
+/**
+ * On a phone, a tap on empty space lets go of the field being typed in (and of selected text), as in any
+ * app. iOS doesn't do this for web pages: the keyboard stays up until another field is tapped. A tap, not
+ * a scroll: it has to end close to where it started.
+ */
+export function letGoOnTapAway() {
+  const KEEP = 'input, textarea, select, button, a, label, [role="button"], [contenteditable], [tabindex], .calc, .keypad'
+  let start: { x: number; y: number; t: number; target: EventTarget | null } | null = null
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      start = e.pointerType === 'mouse' ? null : { x: e.clientX, y: e.clientY, t: Date.now(), target: e.target }
+    },
+    true,
+  )
+  document.addEventListener(
+    'pointerup',
+    (e) => {
+      const s = start
+      start = null
+      if (!s || e.target !== s.target || Date.now() - s.t > 600 || Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) return
+      if ((e.target as Element).closest?.(KEEP)) return
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) el.blur()
+      const sel = getSelection()
+      if (sel && !sel.isCollapsed) sel.removeAllRanges()
+    },
+    true,
   )
 }
 
@@ -451,7 +550,7 @@ export function regroup(e: Event): string {
 // ---------------------------------------------------------------- amount field with clear button
 
 /** Keeps password managers and iOS's password bar away from fields that are only amounts or notes. */
-const NO_AUTOFILL = { autocomplete: 'off', 'data-1p-ignore': true, 'data-lpignore': 'true', 'data-bwignore': true, 'data-form-type': 'other' }
+export const NO_AUTOFILL = { autocomplete: 'off', 'data-1p-ignore': true, 'data-lpignore': 'true', 'data-bwignore': true, 'data-form-type': 'other' }
 
 /**
  * A text field for money: the caret goes to the end on focus, an × clears it to type fresh, and on
@@ -536,7 +635,8 @@ export function NoteField(props: { value: string; onInput: (v: string) => void; 
         type="text"
         aria-label="Note"
         value={props.value}
-        list={props.list}
+        // Past notes are offered once you start typing, not as a list the moment the field is touched.
+        list={props.value.trim() ? props.list : undefined}
         enterKeyHint="done"
         {...NO_AUTOFILL}
         onFocus={() => {
@@ -545,7 +645,7 @@ export function NoteField(props: { value: string; onInput: (v: string) => void; 
         }}
         onInput={(e) => {
           abandoned.current = false
-          props.onInput(regroup(e))
+          props.onInput(e.currentTarget.value)
         }}
         onBlur={(e) => {
           if (abandoned.current) abandoned.current = false

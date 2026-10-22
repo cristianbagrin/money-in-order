@@ -21,7 +21,7 @@ import {
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID, type Month } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
-import { caretToEnd, IconGear, IconPlus, regroup, toast, useCalc } from '../ui/kit'
+import { caretToEnd, IconGear, IconPlus, NO_AUTOFILL, primeKeyboard, regroup, toast, useCalc } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { confetti } from '../ui/confetti'
 import { haptic, play } from '../ui/sound'
@@ -66,7 +66,6 @@ export function Plan(props: {
   setMonth: (m: string | ((prev: string) => string)) => void
   onCategory: (id: ID) => void
   onCount: () => void
-  onReflect: (month: string) => void
   onSettings: () => void
 }) {
   const ix = useIndex()
@@ -234,7 +233,7 @@ export function Plan(props: {
           </div>
         )}
         {planning && !empty && <Saving ix={ix} month={month} current={current} saved={view.saved} />}
-        {planning && !empty && <Outlook fc={fc} current={current} base={base} onMonth={props.setMonth} />}
+        {planning && !empty && <Outlook fc={fc} current={current} />}
       </section>
 
       {showRitual && ritual && (
@@ -242,7 +241,6 @@ export function Plan(props: {
           r={ritual}
           today={today}
           onCount={props.onCount}
-          onReflect={props.onReflect}
           fill={
             canFill && (
               <button class="pill sm" onClick={() => fill()}>
@@ -268,7 +266,7 @@ export function Plan(props: {
                 {editingGroup === g.group.id ? (
                   <InlineInput
                     value={g.group.name}
-                    label="Group name"
+                    label="Group"
                     plain
                     onDone={(v) => {
                       setEditingGroup(null)
@@ -290,14 +288,14 @@ export function Plan(props: {
                     role="button"
                     tabIndex={0}
                     aria-label={`Rename ${g.group.name}`}
-                    onClick={() => setEditingGroup(g.group.id)}
+                    onClick={() => (primeKeyboard(), setEditingGroup(g.group.id))}
                     onKeyDown={onActivate(() => setEditingGroup(g.group.id))}
                   >
                     {g.group.name}
                   </span>
                 )}
               </div>
-              <button class="iconbtn grp-add" aria-label={`Add a category to ${g.group.name}`} onClick={() => setAdding(g.group.id)}>
+              <button class="iconbtn grp-add" aria-label={`Add a category to ${g.group.name}`} onClick={() => (primeKeyboard(), setAdding(g.group.id))}>
                 <IconPlus />
               </button>
             </div>
@@ -322,7 +320,7 @@ export function Plan(props: {
               <div class="crow editing">
                 <div class="cname">
                   <div class="cname-line">
-                    <InlineInput value="" label="New category name" placeholder="Name" plain onDone={(v, enter) => newCategory(g.group.id, v, enter)} />
+                    <InlineInput value="" label="New category" placeholder="Name" plain onDone={(v, enter) => newCategory(g.group.id, v, enter)} />
                   </div>
                 </div>
               </div>
@@ -337,7 +335,7 @@ export function Plan(props: {
             <div class="grp-name">
               <InlineInput
                 value=""
-                label="New group name"
+                label="New group"
                 plain
                 onDone={(v) => {
                   setAddingGroup(false)
@@ -349,7 +347,7 @@ export function Plan(props: {
             </div>
           </div>
         ) : (
-          <button class="pill ghost" onClick={() => setAddingGroup(true)}>
+          <button class="pill ghost" onClick={() => (primeKeyboard(), setAddingGroup(true))}>
             <IconPlus /> Group
           </button>
         )}
@@ -384,19 +382,12 @@ function Saving(props: { ix: Index; month: Month; current: Month; saved: number 
 }
 
 /**
- * One line on the coming months (their marks sit under the month strip): where the usual income stops
- * covering the plan, or how many months the money in hand already pays for.
+ * One line on the coming months (their marks sit under the month strip): how many months the money in
+ * hand already pays for. Nothing while the usual income doesn't cover the plan: the red marks say where.
  */
-function Outlook(props: { fc: Forecast; current: Month; base: string; onMonth: (m: Month) => void }) {
-  const { fc, base } = props
-  if (fc.typical <= 0) return null
-  const short = fc.runsOut ? fc.months.find((m) => m.month === fc.runsOut)! : null
-  if (short)
-    return (
-      <button class="outlook-line neg" onClick={() => props.onMonth(short.month)}>
-        Short <span class="num">{fmt(-short.left, base)}</span> in {monthName(short.month)}
-      </button>
-    )
+function Outlook(props: { fc: Forecast; current: Month }) {
+  const { fc } = props
+  if (fc.typical <= 0 || fc.runsOut) return null
   if (!fc.until || fc.ahead < 1) return null
   const until = monthName(fc.until, { year: fc.until.slice(0, 4) !== props.current.slice(0, 4) })
   return (
@@ -447,6 +438,7 @@ function InlineInput(props: { value: string; label: string; onDone: (v: string |
       placeholder={props.placeholder}
       defaultValue={props.value}
       size={size}
+      {...NO_AUTOFILL}
       onInput={(e) => setSize(fit(e.currentTarget.value))}
       spellcheck={props.plain ? false : undefined}
       autocorrect={props.plain ? 'off' : undefined}
@@ -543,6 +535,9 @@ function CatRow(props: {
     return all[all.length - 1] === asgRef.current
   }
   const shown = (v: number) => (v || !ghost ? fmt(v, base, { bare: true }) : '')
+  // Hovering the Available pill of a category with a target says what's still to assign (laptops only).
+  const t = cat.target
+  const targetHint = !t || t.amount <= 0 ? '' : c.need > 0 ? `${fmt(c.need, base)} to go` : t.kind === 'goal' && c.available < t.amount ? `${fmt(t.amount - c.available, base)} to the goal` : 'Target met'
 
   return (
     <div class="crow-wrap" ref={swipe.wrap} data-sort-id={cat.id}>
@@ -565,7 +560,7 @@ function CatRow(props: {
         <div class="cname">
           <div class="cname-line">
             {props.editing === 'name' ? (
-              <InlineInput key="edit" value={cat.name} label="Category name" plain onDone={(v) => saveName(v)} />
+              <InlineInput key="edit" value={cat.name} label="Category" plain onDone={(v) => saveName(v)} />
             ) : (
               <span
                 key="name"
@@ -574,7 +569,7 @@ function CatRow(props: {
                 tabIndex={0}
                 aria-label={`Rename ${cat.name}`}
                 aria-keyshortcuts="Delete"
-                onClick={(e) => !swipe.swallow(e) && props.setEditing('name')}
+                onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('name'))}
                 onKeyDown={(e) => {
                   // Delete on a focused name deletes the row, as a swipe does on a phone.
                   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -597,7 +592,10 @@ function CatRow(props: {
                   if (e.button !== 0) return
                   // Act now and keep the name field from blurring first (that would re-render this away before the tap lands).
                   e.preventDefault()
-                  addNote(e.currentTarget.closest('.cname')?.querySelector('input') ?? null)
+                  // On a phone the keyboard has to stay up: the stand-in takes the focus (the name saves as it
+                  // lets go) and hands it on to the note field.
+                  if (primeKeyboard()) props.setEditing('note')
+                  else addNote(e.currentTarget.closest('.cname')?.querySelector('input') ?? null)
                 }}
                 onClick={() => props.setEditing('note')}
                 onKeyDown={onActivate(() => props.setEditing('note'))}
@@ -607,7 +605,7 @@ function CatRow(props: {
             )}
           </div>
           {props.editing === 'note' ? (
-            <div class="cnote">
+            <div class="cnote is-editing">
               <InlineInput value={cat.note ?? ''} label="Note" onDone={saveNote} />
             </div>
           ) : cat.note ? (
@@ -615,7 +613,7 @@ function CatRow(props: {
               class="cnote"
               role="button"
               tabIndex={0}
-              onClick={(e) => !swipe.swallow(e) && props.setEditing('note')}
+              onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('note'))}
               onKeyDown={onActivate(() => props.setEditing('note'))}
             >
               {cat.note}
@@ -690,6 +688,11 @@ function CatRow(props: {
         >
           {availText}
         </button>
+        {targetHint && (
+          <span class={`avail-hint num${c.need > 0 ? '' : ' met'}`} aria-hidden="true">
+            {targetHint}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -718,10 +721,8 @@ function useRitual(today: string) {
   const incomeNow = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === month)
   const seen = new Set(incomeNow.map((t) => (t.note ?? '').toLowerCase()))
   const again = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === prev && !seen.has((t.note ?? '').toLowerCase())).slice(0, 4)
-  const hasHistory = ix.months.some((m) => m < month)
-  const reflected = !!ix.db.notes[prev]?.text?.trim()
   const funded = left.toFill === 0 || left.rta <= 0
-  if (counted && incomeNow.length > 0 && funded && (reflected || !hasHistory)) return null
+  if (counted && incomeNow.length > 0 && funded) return null
   const hide = () => {
     try {
       localStorage.setItem(key, '1')
@@ -730,7 +731,7 @@ function useRitual(today: string) {
     }
     setHidden(true)
   }
-  return { prev, counted, logged: incomeNow.length > 0, suggestions: again, hasHistory, reflected, funded, hide }
+  return { prev, counted, logged: incomeNow.length > 0, suggestions: again, funded, hide }
 }
 
 /** One numbered step; a check once it's done. */
@@ -746,12 +747,11 @@ function Step(props: { n: number; done: boolean; text: ComponentChildren; childr
   )
 }
 
-/** The start-of-month routine from the spreadsheet: count, log income, fill in the plan, look back. */
+/** The start-of-month routine from the spreadsheet: count, log income, fill in the plan. */
 function Ritual(props: {
   r: NonNullable<ReturnType<typeof useRitual>>
   today: string
   onCount: () => void
-  onReflect: (m: string) => void
   fill: ComponentChildren
 }) {
   const { r, today } = props
@@ -792,15 +792,6 @@ function Ritual(props: {
         <Step n={3} done={r.funded} text="Fill in your plan">
           {props.fill}
         </Step>
-        {r.hasHistory && (
-          <Step n={4} done={r.reflected} text={`Look back at ${monthName(r.prev)}`}>
-            {!r.reflected && (
-              <button class="pill sm" onClick={() => props.onReflect(r.prev)}>
-                Write
-              </button>
-            )}
-          </Step>
-        )}
       </ol>
       <button class="link ritual-hide" onClick={r.hide}>
         Hide for this month

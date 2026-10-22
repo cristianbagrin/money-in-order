@@ -432,13 +432,13 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
   else if (t && t.amount > 0 && cm && !cat.archived) {
     const carry = cm.carry
     const prev = monthName(addMonths(month, -1))
-    if (t.kind === 'topup') pace = `Adds ${fmt(t.amount, base)} every month, whatever came over.`
+    if (t.kind === 'topup') pace = `Add ${fmt(t.amount, base)} every month, no matter what.`
     else if (t.kind === 'monthly')
       pace =
         carry > 0
           ? `${fmt(carry, base)} came over from ${prev}, so ${fmt(cm.goal, base)} tops it up.`
           : carry < 0
-            ? `${fmt(-carry, base)} over in ${prev}, so it needs ${fmt(cm.goal, base)}.`
+            ? `You need ${fmt(cm.goal, base)} because you went ${fmt(-carry, base)} over in ${prev}.`
             : 'What’s left at the end of the month counts toward the next.'
   }
 

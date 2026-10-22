@@ -6,6 +6,7 @@ import { loadDB, startPersistence } from './lib/persist'
 import { refreshRates } from './lib/rates'
 import { replaceDB } from './lib/store'
 import { initSync, syncIdle } from './lib/sync'
+import { letGoOnTapAway } from './ui/kit'
 
 let refreshing: Promise<unknown> | null = null
 
@@ -24,6 +25,7 @@ async function boot() {
 
   void navigator.storage?.persist?.()
   render(<App />, document.getElementById('app')!)
+  letGoOnTapAway()
   refreshAfter(initSync({ dirty: replayed }))
   // A PWA resumed after a day in the background keeps running: check the rates again when it comes back.
   document.addEventListener('visibilitychange', () => {

@@ -5,11 +5,11 @@ import { dayOfMonth, daysInMonth, isoDate, monthOf } from '../lib/dates'
 import { cur, evalAmount, fmt } from '../lib/money'
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
-import { RTA, type Account, type ID } from '../lib/types'
+import { RTA, type Account, type ID, type Source } from '../lib/types'
 import { DatePill } from '../ui/calendar'
 import { useIndex, useMedia } from '../ui/hooks'
 import { AnyCurrency, CurrencyPill } from '../ui/currency'
-import { Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
+import { IconChevron, Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { haptic, play } from '../ui/sound'
 import './today.css'
@@ -22,6 +22,8 @@ interface Draft {
   date: string | null
   /** the account the entry comes from (only with accounts tracked); remembered across entries */
   acct?: ID | null
+  /** the income source picked for this entry; the first one otherwise */
+  src?: ID | null
   /** the day `date` was last set: a picked day is only good for that day */
   day?: string
 }
@@ -157,13 +159,8 @@ function Ruler(props: { today: string }) {
   )
 }
 
-/**
- * Which account the entry comes from. Two or three accounts: tap to go round, like the currency. More: a small
- * popover of pills under the line, one tap to choose.
- */
-function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: Account) => void }) {
-  const { accounts, value } = props
-  const many = accounts.length > 3
+/** A small popover of pills under the amount line: closes on a tap outside it or Esc (only it, not the whole entry). */
+function usePopover() {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -177,7 +174,7 @@ function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: A
       e.preventDefault()
       e.stopPropagation()
       setOpen(false)
-      box.current?.querySelector<HTMLButtonElement>('.acctpill')?.focus()
+      box.current?.querySelector<HTMLButtonElement>('button')?.focus()
     }
     document.addEventListener('pointerdown', down, true)
     document.addEventListener('keydown', key, true)
@@ -186,6 +183,17 @@ function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: A
       document.removeEventListener('keydown', key, true)
     }
   }, [open])
+  return { open, setOpen, box }
+}
+
+/**
+ * Which account the entry comes from. Two or three accounts: tap to go round, like the currency. More: a small
+ * popover of pills under the line, one tap to choose.
+ */
+function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: Account) => void }) {
+  const { accounts, value } = props
+  const many = accounts.length > 3
+  const { open, setOpen, box } = usePopover()
   return (
     <div class="acctbox" ref={box}>
       <button
@@ -221,6 +229,45 @@ function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: A
   )
 }
 
+/**
+ * Income, beside the currency and the date: a tap logs the amount as income from the source it shows (the
+ * first one in Settings unless another was picked). With several sources the arrow picks another.
+ */
+function IncomePill(props: { sources: Source[]; value: Source | null; suggest: boolean; amount: string; onLog: (el: Element) => void; onPick: (s: Source) => void }) {
+  const { sources, value } = props
+  const { open, setOpen, box } = usePopover()
+  const name = value?.name ?? 'Income'
+  return (
+    <div class={`incomebox${props.suggest ? ' suggest' : ''}`} ref={box}>
+      <button class="pill incomepill" aria-label={`Log ${props.amount || 'the amount'} as income${value ? ` from ${name}` : ''}`} onClick={(e) => props.onLog(e.currentTarget)}>
+        +&#8202;{name}
+      </button>
+      {sources.length > 1 && (
+        <button class="pill incomepick" aria-label="Pick the income source" aria-haspopup="true" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}>
+          <IconChevron dir="down" />
+        </button>
+      )}
+      {open && (
+        <div class="acctpop pills" role="group" aria-label="Income source">
+          {sources.map((x) => (
+            <button
+              key={x.id}
+              class="pill sm"
+              aria-pressed={x.id === value?.id}
+              onClick={() => {
+                props.onPick(x)
+                setOpen(false)
+              }}
+            >
+              {x.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Type the amount, tap where it went. On phones a keypad; on laptops the keyboard. */
 export function Register(props: { today: string; touch: boolean }) {
   const ix = useIndex()
@@ -245,6 +292,7 @@ export function Register(props: { today: string; touch: boolean }) {
   // The one in use stays among the choices even when it was picked from the full list.
   const currencies = [...new Set([...currenciesInUse().filter(hasRate), currency])]
   const [anyCur, setAnyCur] = useState(false)
+  const wide = useMedia('(min-width: 960px)')
   const amountRef = useRef<HTMLInputElement>(null)
   const amountBox = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -300,6 +348,8 @@ export function Register(props: { today: string; touch: boolean }) {
   const knownSrc = known?.src && sources.some((x) => x.id === known.src) ? known.src : undefined
   const suggested = known && !(known.cat === RTA && sources.length && !knownSrc) ? known.cat : null
   const suggestedSrc = suggested === RTA ? knownSrc : undefined
+  // The income pill: a source picked for this entry, else the one the note suggests, else the first.
+  const source = sources.find((x) => x.id === dr.src) ?? sources.find((x) => x.id === suggestedSrc) ?? sources[0] ?? null
 
   /** What a bubble says. While typing, every category shows what it would have left after this entry. */
   function left(id: ID): { text: string; over: boolean } {
@@ -344,7 +394,7 @@ export function Register(props: { today: string; touch: boolean }) {
     play(income || inflow ? 'income' : 'log')
     haptic('medium')
     flash(el ?? null, 'pulse-once')
-    setDraft({ digits: '', note: '', date: null, currency: null })
+    setDraft({ digits: '', note: '', date: null, currency: null, src: null })
     if (!touch) amountRef.current?.focus()
 
     // Say what it means, not just what happened.
@@ -385,7 +435,7 @@ export function Register(props: { today: string; touch: boolean }) {
       if (e.key === 'Escape') {
         // Abandon the whole entry, from the amount, the note, a bubble or nowhere in particular.
         if (!el || el === document.body || regRef.current?.contains(el)) {
-          setDraft({ digits: '', note: '', date: null, currency: null })
+          setDraft({ digits: '', note: '', date: null, currency: null, src: null })
           amountRef.current?.focus()
         }
         return
@@ -418,8 +468,10 @@ export function Register(props: { today: string; touch: boolean }) {
   // The line under the amount says what a sum comes to and what another currency is worth. It keeps its
   // height wherever the currency can be switched, so choosing one moves nothing.
   const converted = currency !== base && amount > 0
-  // Every pill beside the number takes room from it.
-  const room = tracking ? (currencies.length > 1 ? 5.5 : 7) : 9
+  const convText = [total, converted ? `≈ ${fmt(amountBase, base)}` : ''].filter(Boolean).join('   ')
+  // On a laptop every pill beside the number takes room from it; on a phone the pills have a row of their
+  // own and only the conversion shares the number's.
+  const room = wide ? (tracking ? (currencies.length > 1 ? 4.5 : 6) : 7.5) : convText ? 9 : 13
 
   return (
     <div class="register" ref={regRef}>
@@ -456,7 +508,7 @@ export function Register(props: { today: string; touch: boolean }) {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    if (suggested) log(suggested, null, suggestedSrc)
+                    if (suggested) log(suggested, null, suggested === RTA ? source?.id : undefined)
                     else gridRef.current?.querySelector<HTMLButtonElement>('.bubble')?.focus()
                   }
                   if (e.key === 'ArrowDown') {
@@ -474,41 +526,51 @@ export function Register(props: { today: string; touch: boolean }) {
             {c.suffix && sym}
           </div>
         )}
-        {account && (
-          <AccountPill
-            accounts={cash}
-            value={account}
-            onPick={(a) => {
-              // The entry is in the account's currency again; a typed cent can't stay on a currency without cents.
-              setDraft({ acct: a.id, currency: null, digits: touch && !cur(a.cur).decimals ? dr.digits.replace(/\.\d*/g, '') : dr.digits })
-            }}
+        <div class="amountpills">
+          {account && (
+            <AccountPill
+              accounts={cash}
+              value={account}
+              onPick={(a) => {
+                // The entry is in the account's currency again; a typed cent can't stay on a currency without cents.
+                setDraft({ acct: a.id, currency: null, digits: touch && !cur(a.cur).decimals ? dr.digits.replace(/\.\d*/g, '') : dr.digits })
+              }}
+            />
+          )}
+          {currencies.length > 1 && (
+            <CurrencyPill
+              code={currency}
+              class={currency !== base ? 'picked' : ''}
+              label={`Currency ${currency}. Tap to change, hold for any currency`}
+              onTap={() => {
+                const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
+                pickCurrency(next)
+              }}
+              onHold={() => setAnyCur(true)}
+            />
+          )}
+          <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
+          <IncomePill
+            sources={sources}
+            value={source}
+            suggest={suggested === RTA}
+            amount={amount ? fmt(amount, currency) : ''}
+            onLog={(el) => log(RTA, el, source?.id)}
+            onPick={(x) => setDraft({ src: x.id })}
           />
-        )}
-        {currencies.length > 1 && (
-          <CurrencyPill
-            code={currency}
-            class={currency !== base ? 'picked' : ''}
-            label={`Currency ${currency}. Tap to change, hold for any currency`}
-            onTap={() => {
-              const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
-              pickCurrency(next)
-            }}
-            onHold={() => setAnyCur(true)}
-          />
-        )}
-        <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
-      </div>
-      {(currencies.length > 1 || total) && (
-        <div class="conv" aria-hidden={converted || total ? undefined : 'true'}>
-          {[total, converted ? `≈ ${fmt(amountBase, base)}` : ''].filter(Boolean).join('   ') || ' '}
         </div>
-      )}
+        {(currencies.length > 1 || total) && (
+          <div class="conv" aria-hidden={convText ? undefined : 'true'}>
+            {convText || ' '}
+          </div>
+        )}
+      </div>
       <NoteField
         value={dr.note}
         list="mio-notes"
         onInput={(v) => setDraft({ note: v })}
         onEnter={() => {
-          if (suggested && amount) log(suggested, null, suggestedSrc)
+          if (suggested && amount) log(suggested, null, suggested === RTA ? source?.id : undefined)
         }}
       />
       <datalist id="mio-notes">
@@ -530,16 +592,6 @@ export function Register(props: { today: string; touch: boolean }) {
             </button>
           )
         })}
-        {(sources.length ? sources : [null]).map((src) => (
-          <button
-            key={src?.id ?? 'income'}
-            class={`bubble income${suggested === RTA && (!src || suggestedSrc === src.id) ? ' suggest' : ''}`}
-            onClick={(e) => log(RTA, e.currentTarget, src?.id)}
-          >
-            <b>{src?.name ?? 'Income'}</b>
-            <span>{amount ? `+${fmt(amount, currency)}` : 'to plan'}</span>
-          </button>
-        ))}
       </div>
       {touch && <Keypad value={dr.digits} onChange={(v) => setDraft({ digits: v })} decimals={c.decimals} />}
       <AnyCurrency open={anyCur} onClose={() => setAnyCur(false)} value={currency} onPick={pickCurrency} />

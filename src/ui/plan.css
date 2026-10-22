@@ -19,6 +19,60 @@
 .sort-lifted .crow {
   background: transparent;
 }
+/* Editing the note: the field reads like the note it edits, and nothing clips its edges. */
+.cnote.is-editing {
+  overflow: visible;
+}
+.cname .cnote input {
+  font-size: 12.5px;
+  font-weight: inherit;
+  color: var(--ink-2);
+}
+
+/* A phone has no room to spare in the Assigned box: while typing it grows to the left over the name, so a
+   long sum stays readable. --len is the number of characters in it. */
+@media (pointer: coarse) {
+  .casg:focus {
+    position: relative;
+    z-index: 2;
+    justify-self: end;
+    width: max(100%, calc(var(--len, 1) * 0.6em + 24px));
+    max-width: calc(100vw - 2 * var(--gutter) - 110px);
+    box-shadow: -10px 0 0 var(--bg);
+  }
+}
+
+/* Hovering the Available pill of a category with a target: what's still to assign, beside the pill, out in the margin. */
+.avail-hint {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1100px) {
+  .avail-hint {
+    display: block;
+    position: absolute;
+    left: calc(100% + 14px);
+    top: 50%;
+    transform: translate(-4px, -50%);
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--pen);
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 0.12s,
+      transform 0.12s var(--ease);
+  }
+  .avail-hint.met {
+    color: var(--green);
+  }
+  .avail:hover + .avail-hint,
+  .avail:focus-visible + .avail-hint {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+
 /* what the plan suggests, faint in an empty box */
 .casg::placeholder {
   color: var(--ink-3);
@@ -76,13 +130,6 @@
   font-size: 13px;
   text-align: left;
   color: var(--ink-2);
-}
-button.outlook-line {
-  cursor: pointer;
-}
-.outlook-line.neg {
-  color: var(--red);
-  font-weight: 560;
 }
 
 /* ---------------------------------------------------------------- category sheet */

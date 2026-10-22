@@ -8,7 +8,8 @@ import './monthstrip.css'
 export type MonthMark = 'planned' | 'covered' | 'short'
 
 /**
- * The months in a row, the chosen one pressed; ‹ › and ← → step one month and the row slides along.
+ * The months in a row, the chosen one pressed. ‹ › page the row a whole stretch of months (the chosen one stays
+ * chosen); ← → on a keyboard step one month and the row slides along.
  * Plan shows last month, now and what's coming; Review shows the months behind.
  */
 export function MonthStrip(props: {
@@ -28,12 +29,13 @@ export function MonthStrip(props: {
   const { month, current, min, max } = props
   const count = props.count ?? 6
   const clamp = (m: Month) => (min && m < min ? min : max && m > max ? max : m)
-  const firstStart = () => {
-    let s = addMonths(current, -(props.at ?? 1))
+  /** A row start that keeps the whole row inside min…max. */
+  const fitStart = (s: Month) => {
     if (max && addMonths(s, count - 1) > max) s = addMonths(max, -(count - 1))
     if (min && s < min) s = min
     return s
   }
+  const firstStart = () => fitStart(addMonths(current, -(props.at ?? 1)))
   const [start, setStart] = useState(firstStart)
   // The row follows the chosen month: one step past either end slides it, a jump (Now, a link) re-centres it.
   useEffect(() => {
@@ -75,12 +77,13 @@ export function MonthStrip(props: {
     const m = addMonths(start, i)
     if ((!min || m >= min) && (!max || m <= max)) months.push(m)
   }
-  const atMin = !!min && month <= min
-  const atMax = !!max && month >= max
+  const atMin = !!min && start <= min
+  const atMax = !!max && addMonths(start, count - 1) >= max
+  const page = (n: number) => setStart((s) => fitStart(addMonths(s, n * count)))
   const thisYear = current.slice(0, 4)
   return (
     <div class="mstrip" role="group" aria-label="Months">
-      <button class="iconbtn mstrip-arrow" aria-label="Previous month" disabled={atMin} onClick={() => step(-1)}>
+      <button class="iconbtn mstrip-arrow" aria-label="Earlier months" disabled={atMin} onClick={() => page(-1)}>
         <IconChevron dir="left" />
       </button>
       <div class="mstrip-row" style={{ '--n': count }}>
@@ -103,7 +106,7 @@ export function MonthStrip(props: {
           )
         })}
       </div>
-      <button class="iconbtn mstrip-arrow" aria-label="Next month" disabled={atMax} onClick={() => step(1)}>
+      <button class="iconbtn mstrip-arrow" aria-label="Later months" disabled={atMax} onClick={() => page(1)}>
         <IconChevron dir="right" />
       </button>
     </div>

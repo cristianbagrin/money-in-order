@@ -757,11 +757,50 @@ textarea:focus {
 .register > * {
   flex: none;
 }
+/* The number, then its pills (account, currency, date, income); what a sum or another currency comes to
+   on the line under them. Phones give the pills a row of their own under the number, and the
+   conversion goes up beside the number. */
 .amountline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'amt pills'
+    'conv conv';
+  align-items: center;
+  column-gap: 8px;
+  min-height: 52px;
+}
+.amountline > .amount-val,
+.amountline > .amount-wrap {
+  grid-area: amt;
+}
+.amountline > .conv {
+  grid-area: conv;
+}
+.amountpills {
+  grid-area: pills;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 52px;
+  min-width: 0;
+}
+@media (max-width: 959px) {
+  .amountline {
+    grid-template-areas:
+      'amt conv'
+      'pills pills';
+    row-gap: 6px;
+    min-height: 0;
+  }
+  .amountline > .conv {
+    margin: 0;
+    min-height: 0;
+    text-align: right;
+  }
+  /* income at the far end of the row, away from the pills that set up the entry */
+  .amountpills .incomebox {
+    margin-left: auto;
+  }
 }
 /* laptop: the currency sits beside the typed number, set like the phone's display */
 .amount-wrap {

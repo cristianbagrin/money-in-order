@@ -151,10 +151,6 @@ export function App() {
           setCatSheet(id)
         }}
         onCount={() => openAccounts(true)}
-        onReflect={(m) => {
-          setReviewMonth(m)
-          go('review')
-        }}
         onSettings={() => go('settings')}
       />
     )

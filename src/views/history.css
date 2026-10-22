@@ -49,16 +49,16 @@
   }
 }
 
-/* Filters wrap onto as many rows as they need, so every one is on screen. Funds first, then income, then accounts:
-   the kinds are told apart by colour and outline rather than by labels. */
+/* Filters flow as one wrapping run, so every one is on screen. Funds first, then income, then accounts:
+   the kinds are told apart by colour and outline rather than by labels or rows of their own. */
 .filters {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 12px;
 }
 .filters .pills {
-  gap: 6px;
+  display: contents;
 }
 .filters .income .pill {
   border-color: transparent;
