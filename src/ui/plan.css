@@ -141,7 +141,7 @@ button.outlook-line {
   max-width: 170px;
   min-height: 36px;
   padding: 2px 10px;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   text-align: right;
   font-variation-settings: var(--vs-column);
   font-size: 17px;
@@ -174,7 +174,7 @@ button.outlook-line {
 .cs-del {
   margin-top: 8px;
   padding: 12px 12px 6px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--sunk);
 }
 .cs-del p {

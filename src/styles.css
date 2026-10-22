@@ -47,7 +47,6 @@
 
   --gutter: 16px;
   --tabbar: 56px;
-  --radius: 12px;
   /* the two roundnesses: small things (fields, chips, rows) and big ones (cards, sheets); pills are fully round */
   --r-sm: 10px;
   --r-lg: 18px;
@@ -370,7 +369,7 @@ h3 {
   min-height: 46px;
   padding: 5px 12px;
   border: 1px solid var(--rule-strong);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   text-align: left;
   line-height: 1.15;
@@ -503,7 +502,7 @@ textarea {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--rule-strong);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   background: var(--surface);
   padding: 8px 12px;
   font-size: 16px; /* below 16px iOS zooms the page on focus */
@@ -626,7 +625,7 @@ textarea:focus {
   padding: 0 6px 0 16px;
   background: var(--ink);
   color: #f3f5f4;
-  border-radius: 14px;
+  border-radius: var(--r-sm);
   font-size: 14px;
   box-shadow: 0 10px 30px rgba(21, 36, 44, 0.25);
   transform: translateX(-50%);
@@ -924,7 +923,7 @@ textarea:focus {
 .ritual {
   margin: 0 0 12px;
   padding: 2px 14px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   border: 1px solid var(--rule);
 }
@@ -1015,7 +1014,7 @@ textarea:focus {
   white-space: nowrap;
   vertical-align: middle;
   cursor: text;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 /* Renaming in place: the field is the size of the text it edits, with a little room to type. */
 .grp-name input {
@@ -1094,7 +1093,7 @@ textarea:focus {
   font-size: 15px;
   cursor: text;
   vertical-align: middle;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 .cname input,
 .cnote input {
@@ -1118,7 +1117,7 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: text;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
 }
 .cname-line {
   display: flex;
@@ -1163,7 +1162,7 @@ textarea:focus {
   width: 100%;
   min-height: 34px !important;
   padding: 4px 8px !important;
-  border-radius: 10px !important;
+  border-radius: var(--r-sm) !important;
   font-variation-settings: var(--vs-column);
   font-size: 16px !important; /* 16px keeps iOS from zooming */
   letter-spacing: -0.03em;
@@ -1187,7 +1186,7 @@ textarea:focus {
   justify-self: end;
   padding: 2px 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: none;
 }
 @media (hover: hover) {
@@ -1328,7 +1327,7 @@ textarea:focus {
 .cover {
   margin-top: 18px;
   padding: 12px 12px 14px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--red-wash);
 }
 .cover p {
@@ -1427,7 +1426,7 @@ textarea:focus {
   position: relative;
   margin: 0 -10px;
   width: calc(100% + 20px);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
 }
 .txn {
   display: flex;
@@ -1437,7 +1436,7 @@ textarea:focus {
   min-height: 44px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   background: none;
   text-align: left;
   transition: background 0.12s;
@@ -1463,7 +1462,7 @@ textarea:focus {
   align-items: center;
   justify-content: flex-end;
   padding-right: 18px;
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   background: var(--red);
   color: #fff;
   font-size: 14px;
@@ -1703,7 +1702,7 @@ textarea:focus {
 .card {
   margin-top: 18px;
   padding: 14px 14px 10px;
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   border: 1px solid var(--rule);
 }
@@ -1760,7 +1759,7 @@ textarea:focus {
     height: 38px;
     text-align: left;
     padding: 0 12px;
-    border-radius: 10px;
+    border-radius: var(--r-sm);
     font-size: 14.5px;
   }
   .rail .tab:hover {
@@ -1779,7 +1778,7 @@ textarea:focus {
     display: grid;
     gap: 2px;
     border: 0;
-    border-radius: 10px;
+    border-radius: var(--r-sm);
     background: none;
     text-align: left;
   }

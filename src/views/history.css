@@ -19,7 +19,7 @@
   gap: 8px;
   margin-top: 10px;
   padding: 10px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--sunk);
   animation: periods-in 0.18s ease-out;
 }

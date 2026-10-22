@@ -17,7 +17,7 @@
   left: 0;
   right: 0;
   padding: 10px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow:
     0 12px 40px rgba(21, 36, 44, 0.18),
