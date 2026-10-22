@@ -167,7 +167,7 @@ export function App() {
         }}
       />
     )
-  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} />
+  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => setCounting(true)} />
   else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onAccounts={() => setAccounts(true)} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 
