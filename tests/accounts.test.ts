@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { balances, netWorth, totalMoney, wealthSeries } from '../src/lib/accounts'
+import { balances, investmentsInPlan, netWorth, totalMoney, wealthSeries } from '../src/lib/accounts'
 import { expectedTotal, monthView } from '../src/lib/budget'
 import * as S from '../src/lib/store'
 import { emptyDB, RTA, type Category } from '../src/lib/types'
@@ -76,6 +76,110 @@ describe('tracked accounts and moves', () => {
     const w = wealthSeries(S.getIndex(), ['2026-09', '2026-10'], '2026-10-22')
     expect(w[0]).toMatchObject({ cash: 500000, invest: 200000, total: 700000, added: 0 })
     expect(w[1]).toMatchObject({ cash: 450000, invest: 250000, total: 700000, added: 50000 })
+  })
+})
+
+describe('an account that becomes an investment', () => {
+  const index = () => S.getIndex()
+  const setUp = () => {
+    const bank = S.addAccount('Bank', 'TWD')
+    const fund = S.addAccount('Vanguard', 'EUR') // counted as cash at first, like in onboarding
+    S.recordCount({ date: '2026-10-01', bal: { [bank.id]: 500000, [fund.id]: 10000 }, rates: S.settings().rates, diffTo: RTA })
+    return { bank, fund }
+  }
+
+  it('is the root cause: flagging it later leaves its money in the plan, and net worth counts it twice', () => {
+    const { fund } = setUp()
+    expect(totalMoney(index())).toBe(500000 + 10000 * 36)
+    S.saveAccount({ ...fund, invest: 1 }) // what the toggle used to do
+    expect(totalMoney(index())).toBe(500000 + 10000 * 36) // still in "Total money"
+    expect(netWorth(index())).toBe(500000 + 10000 * 36 + 10000 * 36) // and again as an investment
+  })
+
+  it('moves the money out of the plan in one undoable step, and back', () => {
+    const { bank, fund } = setUp()
+    S.undoable('Investment', () => S.setInvestment(fund.id, true, '2026-10-05'))
+    expect(totalMoney(index())).toBe(500000)
+    expect(netWorth(index())).toBe(500000 + 10000 * 36)
+    expect(bal('Vanguard')).toMatchObject({ bal: 10000 })
+    const t = index().txns.find((x) => x.acct === fund.id)!
+    expect(t).toMatchObject({ kind: 'adj', cat: RTA, base: -360000, note: 'Vanguard moved to investments' })
+    // nothing to correct at the next count
+    expect(S.previewCount({ date: '2026-10-06', bal: { [bank.id]: 500000 }, rates: S.settings().rates })).toMatchObject({ diff: 0, total: 500000 })
+    expect(investmentsInPlan(index())).toEqual([])
+
+    S.undo()
+    expect(totalMoney(index())).toBe(500000 + 10000 * 36)
+    expect(S.getDB().accounts[fund.id].invest).toBeUndefined()
+    S.redo()
+    expect(totalMoney(index())).toBe(500000)
+
+    S.undoable('Investment', () => S.setInvestment(fund.id, false, '2026-10-07'))
+    expect(totalMoney(index())).toBe(500000 + 10000 * 36)
+    expect(netWorth(index())).toBe(totalMoney(index()))
+    expect(S.getDB().accounts[fund.id].invest).toBeUndefined()
+  })
+
+  it('does not disturb tracked balances or the wealth series', () => {
+    const { bank, fund } = setUp()
+    S.setTrackAccounts(true)
+    S.addTxn({ date: '2026-10-02', cat: cat('Living').id, amt: -20000, cur: 'TWD', acct: bank.id })
+    S.setInvestment(fund.id, true, '2026-10-05')
+    expect(bal('Bank').bal).toBe(480000)
+    expect(bal('Vanguard').bal).toBe(10000)
+    const w = wealthSeries(index(), ['2026-10'], '2026-10-22')
+    expect(w[0]).toMatchObject({ cash: 480000, invest: 360000, total: 840000 })
+    // and back as cash, the correction (which names the account) is not counted as its spending
+    S.setInvestment(fund.id, false, '2026-10-06')
+    expect(bal('Vanguard').bal).toBe(10000)
+    expect(totalMoney(index())).toBe(480000 + 360000)
+  })
+
+  it('has no money to move when it was never counted', () => {
+    const e = S.addAccount('New', 'TWD')
+    const before = Object.keys(S.getDB().txns).length
+    S.setInvestment(e.id, true, '2026-10-05')
+    expect(Object.keys(S.getDB().txns).length).toBe(before)
+    expect(S.getDB().accounts[e.id].invest).toBe(1)
+  })
+
+  it('finds an investment still counted in the plan, and takes it out once', () => {
+    const { fund } = setUp()
+    S.saveAccount({ ...fund, invest: 1 }) // flagged the old way
+    expect(investmentsInPlan(index())).toEqual([{ acct: expect.objectContaining({ name: 'Vanguard' }), base: 360000 }])
+    expect(S.takeOutOfPlan(fund.id, '2026-10-05')).toBe(360000)
+    expect(totalMoney(index())).toBe(500000)
+    expect(investmentsInPlan(index())).toEqual([])
+    expect(S.takeOutOfPlan(fund.id, '2026-10-05')).toBe(0)
+    expect(netWorth(index())).toBe(500000 + 10000 * 36)
+  })
+
+  it('sees nothing wrong when the account was an investment when counted, or counted since', () => {
+    const bank = S.addAccount('Bank', 'TWD')
+    const fund = S.addAccount('Fund', 'EUR', { invest: true })
+    S.recordCount({ date: '2026-10-01', bal: { [bank.id]: 500000, [fund.id]: 10000 }, rates: S.settings().rates, diffTo: RTA })
+    expect(investmentsInPlan(index())).toEqual([])
+    // flagged late, then a cash count that left it out of the total
+    const old = S.addAccount('Old', 'TWD')
+    S.recordCount({ date: '2026-10-02', bal: { [bank.id]: 500000, [old.id]: 70000 }, rates: S.settings().rates, diffTo: RTA })
+    S.saveAccount({ ...old, invest: 1 })
+    expect(investmentsInPlan(index()).map((x) => x.acct.name)).toEqual(['Old'])
+    S.recordCount({ date: '2026-10-03', bal: { [bank.id]: 500000 }, rates: S.settings().rates, diffTo: RTA })
+    expect(investmentsInPlan(index())).toEqual([])
+  })
+
+  it('works out foreign balances at the count\'s own rates, with several investments', () => {
+    const bank = S.addAccount('Bank', 'TWD')
+    const a = S.addAccount('A', 'EUR')
+    const b = S.addAccount('B', 'PLN')
+    S.recordCount({ date: '2026-10-01', bal: { [bank.id]: 100000, [a.id]: 5000, [b.id]: 20000 }, rates: { EUR: 36, PLN: 8 }, diffTo: RTA })
+    S.updateSettings({ rates: { EUR: 40, PLN: 9 } })
+    S.saveAccount({ ...a, invest: 1 })
+    S.saveAccount({ ...b, invest: 1 })
+    expect(investmentsInPlan(index()).map((x) => [x.acct.name, x.base])).toEqual([
+      ['A', 180000],
+      ['B', 160000],
+    ])
   })
 })
 

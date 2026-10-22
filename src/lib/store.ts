@@ -1,4 +1,4 @@
-import { balances } from './accounts'
+import { balances, investmentsInPlan } from './accounts'
 import { buildIndex, DEFAULT_SETTINGS, monthView, settingsOf, type Index } from './budget'
 import { isoDate, monthOf } from './dates'
 import { edit, repair, same } from './merge'
@@ -647,6 +647,39 @@ export function addAccount(name: string, currency: string, opts: { invest?: bool
 export function deleteAccount(id: ID) {
   const a = db.accounts[id]
   if (a) commit({ accounts: [tomb(a)] })
+}
+
+/** A correction on Ready to assign that names the account: its money leaves the plan's total (negative) or returns to it. */
+function planShift(a: Account, base: number, date: string, note: string): Txn {
+  return { id: uid(), u: 0, date, cat: RTA, amt: base, cur: settings().base, base, kind: 'adj', acct: a.id, note }
+}
+
+/**
+ * Mark an account as an investment (or back as cash). The plan's total is the money in cash accounts, so an
+ * account's balance moves out of it (or back in) in the same step: one correction, undone with the rest.
+ * An investment whose money never left the plan (see investmentsInPlan) brings nothing back.
+ * Returns what moved in the base currency (negative: out of the plan).
+ */
+export function setInvestment(id: ID, invest: boolean, date: string): number {
+  const a = db.accounts[id]
+  if (!a || a.d || !!a.invest === invest) return 0
+  const { invest: _, ...rest } = a
+  const next: Account = invest ? { ...rest, invest: 1 } : rest
+  const ix = getIndex()
+  const bal = balances(ix).find((b) => b.acct.id === id)?.base ?? 0
+  const txns: Txn[] = []
+  if (bal && invest) txns.push(planShift(a, -bal, date, `${a.name} moved to investments`))
+  else if (bal && !investmentsInPlan(ix).some((x) => x.acct.id === id)) txns.push(planShift(a, bal, date, `${a.name} moved back to your money`))
+  commit({ accounts: [next], txns })
+  return txns[0]?.base ?? 0
+}
+
+/** Take an investment's money out of the plan's total, when counting it as cash left it there. Returns the amount. */
+export function takeOutOfPlan(id: ID, date: string): number {
+  const found = investmentsInPlan(getIndex()).find((x) => x.acct.id === id)
+  if (!found) return 0
+  commit({ txns: [planShift(found.acct, -found.base, date, `${found.acct.name} moved to investments`)] })
+  return found.base
 }
 
 export interface CountInput {

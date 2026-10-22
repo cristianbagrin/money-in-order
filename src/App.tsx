@@ -9,7 +9,6 @@ import { useIndex, useSync, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
 import { AccountsSheet } from './views/AccountsSheet'
 import { CategorySheet } from './views/CategorySheet'
-import { CountSheet } from './views/CountSheet'
 import { History } from './views/History'
 import { Onboarding } from './views/Onboarding'
 import { Plan } from './views/Plan'
@@ -47,8 +46,13 @@ export function App() {
   const [catSheet, setCatSheet] = useState<ID | null>(null)
   const [catMonth, setCatMonth] = useState(monthOf(today))
   const [txn, setTxn] = useState<Txn | null>(null)
-  const [counting, setCounting] = useState(false)
   const [accounts, setAccounts] = useState(false)
+  // opened to count: the first balance is ready to type
+  const [counting, setCounting] = useState(false)
+  const openAccounts = (count = false) => {
+    setCounting(count)
+    setAccounts(true)
+  }
   const [historyFilter, setHistoryFilter] = useState('all')
 
   useEffect(() => {
@@ -146,9 +150,7 @@ export function App() {
           setCatMonth(planMonth)
           setCatSheet(id)
         }}
-        onCount={() => {
-          setCounting(true)
-        }}
+        onCount={() => openAccounts(true)}
         onReflect={(m) => {
           setReviewMonth(m)
           go('review')
@@ -167,14 +169,14 @@ export function App() {
         }}
       />
     )
-  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => setCounting(true)} />
-  else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onAccounts={() => setAccounts(true)} onBack={() => go(lastMain.current)} />
+  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => openAccounts(true)} />
+  else if (route === 'settings') page = <Settings onCount={() => openAccounts(true)} onAccounts={() => openAccounts()} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 
   return (
     <div class="app">
       <div class="statusbar" />
-      <Rail route={route} go={go} today={today} onAccounts={() => setAccounts(true)} />
+      <Rail route={route} go={go} today={today} onAccounts={() => openAccounts()} />
       <main class={`main${route === 'today' ? ' main-today' : ''}`} key={route}>
         {page}
       </main>
@@ -191,16 +193,7 @@ export function App() {
         }}
       />
       <TxnSheet txn={txn} today={today} onClose={() => setTxn(null)} />
-      <AccountsSheet open={accounts} today={today} onClose={() => setAccounts(false)} onCount={() => setCounting(true)} />
-      <CountSheet
-        open={counting}
-        today={today}
-        onClose={() => setCounting(false)}
-        onAccounts={() => {
-          setCounting(false)
-          setAccounts(true)
-        }}
-      />
+      <AccountsSheet open={accounts} count={counting} today={today} onClose={() => setAccounts(false)} />
       <Toasts />
     </div>
   )

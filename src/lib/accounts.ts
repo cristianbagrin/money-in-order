@@ -71,7 +71,8 @@ export function flowInto(t: Txn, a: Account, opts: { cash: boolean; linked?: Set
     return v
   }
   if (opts.linked?.has(t.cat) && !t.kind) return inCur(-t.amt, t.cur)
-  if (opts.cash && t.acct === a.id) return inCur(t.amt, t.cur)
+  // (a correction that names the account, like moving an investment out of the plan, is not money in or out of it)
+  if (opts.cash && t.acct === a.id && !t.kind) return inCur(t.amt, t.cur)
   return 0
 }
 
@@ -118,6 +119,42 @@ export function totalMoney(ix: Index): number {
 /** Cash plus investments, in the base currency. */
 export function netWorth(ix: Index): number {
   return totalMoney(ix) + balances(ix).reduce((s, b) => s + (b.acct.invest ? b.base : 0), 0)
+}
+
+/**
+ * Investments whose money is still inside the plan's total: the newest cash count holding the account
+ * counted it with the cash (its total adds up with it), and nothing was booked since to take it out.
+ * That happens when an account was counted as cash and only later marked as an investment.
+ * `base` is what the plan holds, in the base currency at that count's rates.
+ */
+export function investmentsInPlan(ix: Index): { acct: Account; base: number }[] {
+  const s = ix.settings
+  const counts = countsDesc(ix)
+  const accounts = accountsInOrder(ix)
+  const cash = accounts.filter((a) => !a.invest)
+  const invests = accounts.filter((a) => a.invest)
+  const out: { acct: Account; base: number }[] = []
+  for (const a of invests) {
+    // the newest count in which a cash account was actually typed (an investments-only count says nothing about the plan)
+    const count = counts.find((c) => c.bal[a.id] !== undefined && cash.some((x) => c.bal[x.id] !== undefined && !c.carried?.includes(x.id)))
+    if (!count) continue
+    const out1 = ix.txns.find((t) => t.kind === 'adj' && t.acct === a.id && afterCount(t, count)) // newest first
+    if (out1 && out1.base < 0) continue
+    const inBase = (x: Account) => convert(count.bal[x.id], count.curs?.[x.id] ?? x.cur, s.base, count.rates, s.base)
+    const mine = inBase(a)
+    const held = cash.reduce((sum, x) => sum + (count.bal[x.id] === undefined ? 0 : inBase(x)), 0)
+    const others = invests.filter((x) => x.id !== a.id && count.bal[x.id] !== undefined).slice(0, 8)
+    const tol = 2 * (cash.length + others.length + 1)
+    if (mine <= tol) continue
+    // does the counted total add up with this account in it (and any of the other investments)?
+    let included = false
+    for (let mask = 0; mask < 1 << others.length && !included; mask++) {
+      const sum = held + mine + others.reduce((n, x, i) => n + (mask & (1 << i) ? inBase(x) : 0), 0)
+      included = Math.abs(count.total - sum) <= tol
+    }
+    if (included) out.push({ acct: a, base: Math.round(mine) })
+  }
+  return out
 }
 
 export interface WealthPoint {

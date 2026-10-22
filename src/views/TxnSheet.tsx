@@ -52,7 +52,7 @@ export const TxnRow = memo(function TxnRow(props: {
     ? t.note
       ? props.moveLabel
       : ''
-    : [title !== catName && !props.plain ? catName : '', props.extra].filter(Boolean).join(' · ')
+    : [title !== catName && !props.plain && !(t.kind && t.cat === RTA) ? catName : '', props.extra].filter(Boolean).join(' · ')
   const positive = t.base > 0
   const sw = useSwipeDelete<HTMLDivElement, HTMLButtonElement>(() => props.onDelete(t))
 

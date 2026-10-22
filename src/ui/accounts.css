@@ -13,27 +13,40 @@
   position: relative;
   margin: 0 -10px;
   width: calc(100% + 20px);
-  border-radius: 12px;
+  border-radius: var(--r-sm, 10px);
 }
+/* the name opens the editor, the balance turns into a field: two targets side by side */
 .acc-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: 100%;
+  gap: 4px;
   min-height: 56px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 12px;
-  background: none;
-  text-align: left;
-  transition: background 0.12s;
+  border-radius: var(--r-sm, 10px);
   /* vertical scrolling stays the browser's; a horizontal drag is the row's swipe */
   touch-action: pan-y;
   -webkit-touch-callout: none;
 }
-.acc-row b {
+.acc-name,
+.acc-amt {
+  align-self: stretch;
+  min-height: 56px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-sm, 10px);
+  background: none;
+  text-align: left;
+  transition: background 0.12s;
+}
+.acc-name {
+  flex: 1;
+  min-width: 0;
+}
+.acc-name b {
   display: block;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .acc-sub {
   display: block;
@@ -43,9 +56,36 @@
 }
 .acc-amt {
   display: grid;
+  align-content: center;
   justify-items: end;
+  flex: none;
+  max-width: 62%;
+  text-align: right;
   font-size: 17px;
   font-weight: 600;
+}
+/* the balance as a field: the number's own size, the balance kept as placeholder */
+.amountfield.acc-count {
+  flex: none;
+  width: 52%;
+  margin: 6px 10px 6px 0;
+}
+.amountfield.acc-count input {
+  min-height: 44px;
+  padding-right: 40px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: right;
+}
+.amountfield.acc-count input::placeholder {
+  color: var(--ink-3);
+}
+.amountfield.acc-count .clear {
+  right: 3px;
+}
+.amountfield.acc-count.bad input {
+  border-color: var(--red);
+  color: var(--red);
 }
 /* swipe to delete: the row is opaque while it slides, over a red area it uncovers */
 .acc-wrap.swiping {
@@ -55,14 +95,16 @@
   background: var(--surface);
   will-change: transform;
 }
-.acc-row:active {
+.acc-name:active,
+.acc-amt:active {
   background: var(--sunk);
 }
 .acc-x {
   display: none;
 }
 @media (hover: hover) {
-  .acc-row:hover {
+  .acc-name:hover,
+  .acc-amt:hover {
     background: var(--sunk);
   }
   .acc-x {
@@ -91,7 +133,7 @@
     pointer-events: auto;
   }
   .acc-wrap:hover .acc-row {
-    padding-right: 44px;
+    padding-right: 34px;
   }
   .acc-x:hover {
     background: var(--red-wash);
@@ -113,6 +155,60 @@
 }
 .acc-actions {
   margin-top: 18px;
+}
+
+/* a long-standing mistake offered for a one-tap fix */
+.acc-fix {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.acc-fix .link {
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pen);
+}
+
+/* what the typed balances mean for the plan, and Save */
+.acc-rec {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.acc-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+.acc-line:first-child {
+  font-size: 15px;
+}
+.acc-ok {
+  margin: 0;
+  font-size: 14px;
+}
+.acc-rec .section-title {
+  margin: 12px 0 0;
+}
+.acc-save {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+.acc-save .link {
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 560;
 }
 
 /* inline forms: add, edit, move */
