@@ -430,13 +430,12 @@ describe('insights', () => {
     )
   })
 
-  it('points out a category that keeps going over', () => {
+  it('says when a category went over two months in a row', () => {
     spend('2026-08-05', 'Trips', 500)
     give(SEP, 'Trips', 500)
     spend('2026-09-05', 'Trips', 800) // 300 more than September's 500
     give(OCT, 'Trips', 2000)
     spend('2026-10-05', 'Trips', 100)
-    expect(check(insights(ix(), OCT, TODAY))).toContain('Trips went over plan in 2 of the last 3 months.')
     const sep = insights(ix(), SEP, TODAY)
     expect(check(sep)).toContain('You spent NT$800, NT$300 more than planned, all in Trips, 2 months in a row.')
     once(sep, 'Trips')

@@ -588,6 +588,11 @@ export function MonthBars(props: {
     if (p.income > 0) rows.push({ key: 'tick', tone: 'green', value: fmt(p.income, base), label: 'income' })
     if (p.savingsRate !== null) rows.push({ key: 'none', value: ratePct(p.savingsRate), label: 'of income saved' })
     else if (p.saved > 0) rows.push({ key: 'none', value: fmt(p.saved, base), label: 'set aside for savings' })
+    // what came in and was neither spent nor saved; only once the month is over
+    if (p.income > 0 && p.month !== current) {
+      const left = p.income - p.spent - p.saved
+      rows.push({ key: 'none', value: fmt(left, base), label: left < 0 ? 'more out than in' : 'left over' })
+    }
     tip = <Tip x={x0 + band * (i + 0.5)} w={w} title={monthLabel(p.month, current)} rows={rows} />
   }
 

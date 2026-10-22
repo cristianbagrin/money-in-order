@@ -29,7 +29,7 @@ function everydayIds(ix: Index): { ids: Set<ID>; daily: boolean } {
 }
 
 /** Money kept toward a goal or a buffer, not meant to be spent this month. */
-function setAside(cat: Category): boolean {
+export function setAside(cat: Category): boolean {
   const t = cat.target
   return !!t && (t.kind === 'goal' || (t.kind === 'refill' && !cat.daily))
 }
@@ -64,7 +64,7 @@ function shortfall(c: CatMonth): { own: number; carried: number } {
 }
 
 /** Did this month's own spending push the category below zero? Debt carried in from earlier doesn't count. */
-function wentOver(c: CatMonth): boolean {
+export function wentOver(c: CatMonth): boolean {
   return shortfall(c).own > 0
 }
 
@@ -101,6 +101,14 @@ function spentThrough(ix: Index, month: string, limit: number, ids: Set<ID>): Ma
 /** The day of month `m` that matches day `elapsed` of a `days`-long month, by the share of the month gone. */
 function samePoint(m: string, elapsed: number, days: number): number {
   return Math.round((elapsed * daysInMonth(m)) / days)
+}
+
+/** Middle value; the mean of the two middle ones for an even count. */
+export function median(values: number[]): number {
+  if (!values.length) return 0
+  const v = [...values].sort((a, b) => a - b)
+  const h = v.length >> 1
+  return v.length % 2 ? v[h] : Math.round((v[h - 1] + v[h]) / 2)
 }
 
 function cumulative(values: number[]): number[] {
@@ -249,6 +257,10 @@ export interface CatTrend {
   thisMonth: number
   /** mean of the earlier values in `series` from months with activity in this category */
   average: number
+  /** the month before, at the same point; null when it is before the data */
+  last: number | null
+  /** a typical month: the median of up to three months before, from months the category was used; null without any */
+  usual: number | null
   /** planned spending this month, see plannedOf() */
   planned: number
   /** months in the window whose own spending pushed the category below zero */
@@ -291,6 +303,7 @@ export function categoryTrends(ix: Index, month: string, today: string, n = 6): 
         count++
       }
     }
+    const used = months.map((m) => !!(ix.act.get(m)?.has(cat.id) || ix.asg.get(m)?.has(cat.id)))
     let overMonths = 0
     for (const v of views) {
       const c = v.byId.get(cat.id)
@@ -302,11 +315,46 @@ export function categoryTrends(ix: Index, month: string, today: string, n = 6): 
       series,
       thisMonth: series[series.length - 1],
       average: count ? Math.round(total / count) : 0,
+      ...against(series, used),
       planned,
       overMonths,
     })
   }
   return out.sort((a, b) => b.thisMonth - a.thisMonth)
+}
+
+/** The last value against the one before it and against the median of up to three before it (from `used` months). */
+function against(series: number[], used: boolean[]): { last: number | null; usual: number | null } {
+  const k = series.length - 1
+  const earlier: number[] = []
+  for (let i = Math.max(0, k - 3); i < k; i++) if (used[i]) earlier.push(series[i])
+  return { last: k >= 1 ? series[k - 1] : null, usual: earlier.length ? median(earlier) : null }
+}
+
+export interface SpendTrend {
+  thisMonth: number
+  last: number | null
+  usual: number | null
+  planned: number
+}
+
+/** All spending outside savings in `month` (so far, in the current month) against the month before and a typical month. */
+export function spendingTrend(ix: Index, month: string, today: string): SpendTrend {
+  const current = monthOf(today)
+  const months = windowMonths(ix, month, 4)
+  const days = daysInMonth(month)
+  const elapsed = month === current ? dayOfMonth(today) : days
+  const ids = spendIds(ix)
+  const series = months.map((m) => {
+    let s = 0
+    for (const v of spentThrough(ix, m, m === month ? elapsed : samePoint(m, elapsed, days), ids).values()) s += v
+    return s
+  })
+  return {
+    thisMonth: series[series.length - 1],
+    ...against(series, months.map(() => true)),
+    planned: totalPlanned(monthView(ix, month, current)),
+  }
 }
 
 // ---------------------------------------------------------------- weeks and days
@@ -587,28 +635,6 @@ export function insights(ix: Index, month: string, today: string): Insight[] {
       : { tone: 'bad', text: `${lead}, ${money(diff)} more than ${than}.` }
   }
 
-  // -- categories that keep going over
-  const repeat = (): Insight | null => {
-    if (recent.length < 2) return null
-    let best: { name: string; k: number; spent: number; id: ID } | null = null
-    for (const c of spendCats) {
-      if (c.cat.archived || mentioned.has(c.cat.id)) continue
-      let k = 0
-      for (const m of recent) {
-        const p = viewOf(m).byId.get(c.cat.id)
-        if (p && wentOver(p)) k++
-      }
-      if (k < 2) continue
-      if (!best || k > best.k || (k === best.k && -c.activity > best.spent)) best = { name: c.cat.name, k, spent: -c.activity, id: c.cat.id }
-    }
-    if (!best) return null
-    mentioned.add(best.id)
-    const n = recent.length
-    return best.k === n
-      ? { tone: 'bad', text: `${best.name} went over plan ${n} months in a row; it may need a bigger plan.` }
-      : { tone: 'bad', text: `${best.name} went over plan in ${best.k} of the last ${n} months.` }
-  }
-
   // -- savings rate against the target
   const savings = (): Insight | null => {
     const income = view.income
@@ -652,9 +678,10 @@ export function insights(ix: Index, month: string, today: string): Insight[] {
       : { tone: view.spent > plan ? 'bad' : 'neutral', text: `Spending was ${money(diff)} higher than in ${prevName}.` }
   }
 
+  // Categories that keep going over are left to advice() (compare.ts), which can say what plan would fit.
   const order: (() => Insight | Insight[] | null)[] = isCurrent
-    ? [shortfalls, dayToDay, week, savings, repeat]
-    : [savings, versusPlan, shortfalls, repeat, unusual, versusLast]
+    ? [shortfalls, dayToDay, week, savings]
+    : [savings, versusPlan, shortfalls, unusual, versusLast]
   const out: Insight[] = []
   for (const make of order) {
     if (out.length >= 4) break

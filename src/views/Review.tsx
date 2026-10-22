@@ -1,14 +1,17 @@
+import type { JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { daily, monthView } from '../lib/budget'
-import { addMonths, monthName, monthOf } from '../lib/dates'
+import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
+import { advice, byChange, change, goalLine, goals, monthsBefore, rangeName, type Basis } from '../lib/compare'
 import { claudeSummary } from '../lib/export'
-import { burn, categoryTrends, insights, lastDays, monthSeries, weeks } from '../lib/insights'
+import { burn, categoryTrends, insights, lastDays, monthSeries, spendingTrend, weeks, type CatTrend, type SpendTrend } from '../lib/insights'
 import { fmt } from '../lib/money'
 import { setNote } from '../lib/store'
 import { BurnChart, DayBars, MonthBars, Sparkline, WeekBars } from '../ui/charts'
 import { useIndex, useMedia } from '../ui/hooks'
 import { IconChevron, toast } from '../ui/kit'
 import { play } from '../ui/sound'
+import '../ui/review.css'
 
 export function Review(props: { today: string; month: string; setMonth: (m: string) => void }) {
   const ix = useIndex()
@@ -39,6 +42,13 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
   }, [ix, current, today])
   const wk = useMemo(() => weeks(ix, today, 8), [ix, today])
   const trends = useMemo(() => categoryTrends(ix, month, today, 6), [ix, month, today])
+  const total = useMemo(() => spendingTrend(ix, month, today), [ix, month, today])
+  const tips = useMemo(() => advice(ix, month, today), [ix, month, today])
+  const goalList = useMemo(() => goals(ix, month, today), [ix, month, today])
+  const before = monthsBefore(ix, month)
+  // a typical month needs at least two to be more than last month again
+  const [picked, setBasis] = useState<Basis>('usual')
+  const basis: Basis = before >= 2 ? picked : 'last'
   const hasSpending = b.actual.some((v) => (v ?? 0) > 0) || b.plan > 0
   const hasData = ix.months.includes(month)
   const sparks = (trends[0]?.series.length ?? 0) > 1
@@ -136,23 +146,78 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
 
       {trends.length > 0 && (
         <section class="card">
-          <h2>Categories</h2>
+          <div class="card-head">
+            <h2>
+              Categories
+              {before > 0 && (isCurrent || before === 1) && (
+                <span class="card-sub">
+                  {isCurrent ? ` by day ${dayOfMonth(today)}` : ''}
+                  {before === 1 ? ` vs ${monthName(addMonths(month, -1), { short: true })}` : ''}
+                </span>
+              )}
+            </h2>
+            {before >= 2 && (
+              <div class="pills" role="group" aria-label="Compare with">
+                <button class="pill sm" aria-pressed={basis === 'last'} onClick={() => setBasis('last')}>
+                  vs {monthName(addMonths(month, -1), { short: true })}
+                </button>
+                <button class="pill sm" aria-pressed={basis === 'usual'} onClick={() => setBasis('usual')} title="The middle of the three months before">
+                  vs usual
+                </button>
+              </div>
+            )}
+          </div>
           <div class={`trends${sparks ? '' : ' flat'}`}>
-            {trends.map((t) => (
-              <div class="trend-row" key={t.id}>
-                <span class="trend-name">
-                  {t.name}
-                  {t.overMonths >= 2 && <small class="neg">over {t.overMonths} months</small>}
-                </span>
-                {sparks && <Sparkline values={t.series} highlightLast width={wide ? 112 : narrow ? 44 : 72} />}
-                <span class="num">
-                  {fmt(t.thisMonth, base)}
-                  {t.average > 0 && (
-                    <small>
-                      avg{isCurrent ? ' by now' : ''} {fmt(t.average, base, { bare: true })}
-                    </small>
-                  )}
-                </span>
+            {before > 0 && <TrendRow name="All spending" t={total} basis={basis} base={base} spark={sparks ? <span /> : null} total />}
+            {(before > 0 ? byChange(trends, basis) : trends).map((t) => (
+              <TrendRow
+                key={t.id}
+                name={t.name}
+                tag={t.overMonths >= 2 ? `over ${t.overMonths} months` : ''}
+                t={t}
+                basis={basis}
+                base={base}
+                spark={sparks ? <Sparkline values={t.series} highlightLast width={wide ? 112 : narrow ? 44 : 72} /> : null}
+                compared={before > 0}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tips.items.length > 0 && (
+        <section class="card">
+          <div class="card-head">
+            <h2>What to change</h2>
+            <span class="card-sub">{rangeName(tips.months)}</span>
+          </div>
+          <ul class="insights advice">
+            {tips.items.map((n, i) => (
+              <li key={i} class={n.tone}>
+                {n.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {goalList.length > 0 && (
+        <section class="card">
+          <h2>Goals</h2>
+          <div class="goals">
+            {goalList.map((g) => (
+              <div class="goal" key={g.id}>
+                <div class="goal-top">
+                  <span class="goal-name">{g.name}</span>
+                  <span class="num">
+                    <span class={g.status === 'done' ? 'marked' : ''}>{fmt(g.saved, base)}</span>
+                    <small> of {fmt(g.amount, base, { bare: true })}</small>
+                  </span>
+                </div>
+                <div class="goal-bar" role="progressbar" aria-label={g.name} aria-valuemin={0} aria-valuemax={g.amount} aria-valuenow={g.saved}>
+                  <i class={g.status} style={{ width: `${Math.min(100, (g.saved / g.amount) * 100).toFixed(1)}%` }} />
+                </div>
+                <small class={`goal-line${g.status === 'done' || g.status === 'on' ? ' pos' : ''}`}>{goalLine(g, base, month)}</small>
               </div>
             ))}
           </div>
@@ -162,6 +227,37 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       {(hasData || !!ix.db.notes[month]?.text) && <Reflection month={month} />}
 
       {hasData && <AskClaude today={today} />}
+    </div>
+  )
+}
+
+/** A spending row: this month, and the change against last month or a typical month under it. */
+function TrendRow(props: {
+  name: string
+  t: CatTrend | SpendTrend
+  basis: Basis
+  base: string
+  tag?: string
+  spark?: JSX.Element | null
+  compared?: boolean
+  total?: boolean
+}) {
+  const { t, base } = props
+  const c = change(t, props.basis)
+  // more spending is only a warning once it goes past the plan
+  const tone = c.same ? 'faint' : c.diff < 0 ? 'pos' : t.thisMonth > t.planned ? 'neg' : 'muted'
+  const word = c.then === null ? '' : c.same ? 'same' : c.then === 0 ? 'new' : fmt(c.diff, base, { bare: true, sign: true })
+  return (
+    <div class={`trend-row${props.total ? ' total' : ''}`}>
+      <span class="trend-name">
+        {props.name}
+        {props.tag && <small class="neg">{props.tag}</small>}
+      </span>
+      {props.spark}
+      <span class="num">
+        {fmt(t.thisMonth, base)}
+        {(props.compared ?? true) && word && <small class={tone}>{word}</small>}
+      </span>
     </div>
   )
 }
