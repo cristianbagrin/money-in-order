@@ -1,7 +1,8 @@
+import { balances, netWorth } from './accounts'
 import { daily, expectedTotal, monthView, type Index, type MonthView } from './budget'
 import { addDays, addMonths, dayOfMonth, daysInMonth, monthName, monthOf } from './dates'
-import { advice, byChange, change, goalLine, goals } from './compare'
-import { categoryTrends, plannedOf, savingsRate, spendingTrend, totalPlanned } from './insights'
+import { goalLine, goals, incomeBySource, same, spending, standouts } from './compare'
+import { plannedOf, savingsRate, totalPlanned, wealth } from './insights'
 import { fmt } from './money'
 import { live, RTA, type DB } from './types'
 
@@ -58,6 +59,8 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   out.push('"Ready to assign" is money that has no job yet. "Savings categories" count toward my savings rate ')
   out.push(`(money given to them ÷ income that month; my target is ${pct(s.savingsTarget)}). `)
   out.push('For savings categories, "spent" means money moved out of the budget on purpose (e.g. invested), not consumption.')
+  out.push('Investment accounts are tracked by their value (typed in now and then, usually monthly) and are not part of the budget. ')
+  out.push('Money put into them (spending from a linked savings category, or a move) counts as saved; growth = change in value minus money put in.')
   out.push('')
 
   // ------------------------------------------------ now
@@ -70,6 +73,11 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
       .sort((a, b) => a.order - b.order)
       .map((a) => `${a.name} ${fmt(lastCount.bal[a.id] ?? 0, a.cur)}`)
     out.push(`- Last counted ${lastCount.date}: ${f(lastCount.total)} (${accts.join(', ')})`)
+  }
+  const invest = balances(ix).filter((b) => b.acct.invest)
+  if (invest.length) {
+    out.push(`- Investments: ${invest.map((b) => `${b.acct.name} ${fmt(b.bal, b.acct.cur)}${b.asOf ? ` (value typed ${b.asOf})` : ''}`).join(', ')}`)
+    out.push(`- Net worth (budget money + investments): ${f(netWorth(ix))}`)
   }
   out.push(`- Ready to assign: ${f(view.readyToAssign)}`)
   const full = [1, 2, 3].map((i) => addMonths(current, -i)).filter((m) => ix.months[0] && m >= ix.months[0])
@@ -146,29 +154,50 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
     out.push('')
   }
 
-  // ------------------------------------------------ against a typical month, and what to change
-  const spending = spendingTrend(ix, current, today)
-  if (spending.usual !== null) {
-    const line = (name: string, t: { thisMonth: number; last: number | null; usual: number | null }) => {
-      const c = change(t, 'usual')
-      return `- ${name}: ${f(t.thisMonth)} vs ${f(c.then ?? 0)} (${c.same ? 'about the same' : fmt(c.diff, base, { sign: true })})`
+  // ------------------------------------------------ wealth over time
+  const w = wealth(ix, current, today)
+  if (w && w.points.length > 1) {
+    const hasInvest = w.growth !== null
+    out.push('## Net worth at each month end')
+    out.push(hasInvest ? '| Month | Budget money | Investments | Net worth | Put into investments |' : '| Month | Net worth |')
+    out.push(hasInvest ? '|---|---:|---:|---:|---:|' : '|---|---:|')
+    for (const p of w.points) {
+      const m = `${p.month}${p.month === current ? ' (so far)' : ''}`
+      out.push(hasInvest ? `| ${m} | ${f(p.cash)} | ${f(p.invest)} | ${f(p.total)} | ${f(p.added)} |` : `| ${m} | ${f(p.total)} |`)
     }
-    out.push(`## ${monthName(current)} so far vs a typical month`)
-    out.push(`Typical = median of up to 3 months before, each up to the same point of the month. Biggest changes:`)
-    out.push(line('All spending', spending))
-    const moved = byChange(categoryTrends(ix, current, today, 4), 'usual').filter((t) => t.usual !== null && !change(t, 'usual').same)
-    for (const t of moved.slice(0, 5)) out.push(line(t.name, t))
+    const since = w.points[0].month
+    out.push('')
+    out.push(
+      `Since the end of ${since}: net worth ${fmt(w.change, base, { sign: true })}` +
+        (hasInvest ? `; ${f(w.added)} put into investments, growth ${fmt(w.growth!, base, { sign: true })}.` : '.'),
+    )
     out.push('')
   }
-  const tips = advice(ix, current, today)
-  if (tips.items.length) {
-    out.push(`## What the app suggests from ${tips.months.join(', ')}`)
-    for (const t of tips.items) out.push(`- ${t.text}`)
+
+  // ------------------------------------------------ this month against the usual
+  const sp = spending(ix, current, today)
+  if (sp.usual !== null) {
+    const line = (name: string, now: number, usual: number) =>
+      `- ${name}: ${f(now)} vs ${f(usual)} (${same(now - usual, Math.max(now, usual)) ? 'about the same' : fmt(now - usual, base, { sign: true })})`
+    out.push(`## ${monthName(current)} so far vs usual`)
+    out.push(`Usual = average of ${sp.months.join(', ')}, each counted up to the same point of the month (day ${sp.day}). Biggest changes:`)
+    out.push(line('All spending', sp.spent, sp.usual))
+    const moved = sp.cats
+      .filter((c) => c.usual !== null && !same(c.spent - c.usual, Math.max(c.spent, c.usual)))
+      .sort((a, b) => Math.abs(b.spent - b.usual!) - Math.abs(a.spent - a.usual!))
+    for (const c of moved.slice(0, 5)) out.push(line(c.name, c.spent, c.usual!))
+    for (const n of standouts(ix, sp)) out.push(`- Note: ${n.text}`)
+    out.push('')
+  }
+  const bySource = incomeBySource(ix, current)
+  if (bySource.length) {
+    out.push(`## Income by source, ${monthName(current)} so far`)
+    for (const r of bySource) out.push(`- ${r.name}: ${f(r.amount)}${r.usual !== null ? ` (usual month ${f(r.usual)})` : ''}`)
     out.push('')
   }
   const gs = goals(ix, current, today)
   if (gs.length) {
-    out.push('## Goals and buffers')
+    out.push('## Goals')
     for (const g of gs) {
       out.push(`- ${g.name}: ${f(g.saved)} of ${f(g.amount)}${g.by ? ` by ${g.by}` : ''}, adding about ${f(g.pace)}/month: ${goalLine(g, base, current)}`)
     }
@@ -192,10 +221,12 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
   const firstMonth = months[0]
   const incomes = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) >= firstMonth)
   if (incomes.length) {
+    const srcName = new Map((s.sources ?? []).map((x) => [x.id, x.name]))
     out.push('## Income received')
     for (const t of incomes.slice().reverse()) {
       const orig = t.cur !== base ? ` (${fmt(t.amt, t.cur)})` : ''
-      out.push(`- ${t.date} · ${f(t.base)}${orig}${t.note ? ` · ${t.note}` : ''}`)
+      const src = t.src ? srcName.get(t.src) : undefined
+      out.push(`- ${t.date} · ${f(t.base)}${orig}${src ? ` · ${src}` : ''}${t.note ? ` · ${t.note}` : ''}`)
     }
     out.push('')
   }

@@ -1,4 +1,4 @@
-/* Review's month-against-month cards: the comparison picker, what to change, goals. */
+/* Review: the month in a sentence, where it went, net worth, income, goals. */
 
 .card-head {
   display: flex;
@@ -11,37 +11,168 @@
 .card-head h2 {
   margin-bottom: 0;
 }
-.card-head .pills {
-  gap: 6px;
-}
 .card-sub {
   font-size: 13px;
   font-weight: 450;
   color: var(--ink-3);
 }
 
-/* the change under each amount: green when it went down, red only once it is past the plan */
-.trend-row small.pos {
-  color: var(--green);
+/* ---- the month in one sentence */
+
+.rv-head {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 550;
+  line-height: 1.4;
+  text-wrap: balance;
 }
-.trend-row small.neg {
-  color: var(--red);
-}
-.trend-row small.muted {
-  color: var(--ink-2);
-}
-.trend-row.total .trend-name,
-.trend-row.total .num {
-  font-weight: 650;
+.rv-lines {
+  margin-top: 12px;
 }
 
-.insights.advice {
-  margin: 2px 0 6px;
-  gap: 10px;
+/* ---- ranked bars with a tick for the usual */
+
+/* the key: the same tick the rows carry */
+.rv-key i,
+.rv-tick {
+  background: var(--ink);
+  border-radius: 1px;
 }
-.insights.advice li {
+.rv-key i {
+  display: inline-block;
+  width: 2px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.rv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'name amt' 'bar bar';
+  align-items: center;
+  gap: 6px 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 0 10px;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.rv-rows > .rv-row:first-child {
+  border-top: 0;
+}
+button.rv-row {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.1s ease-out;
+}
+button.rv-row:active {
+  opacity: 0.6;
+}
+@media (hover: hover) {
+  button.rv-row:hover .rv-name {
+    color: var(--pen);
+  }
+}
+.rv-name {
+  grid-area: name;
+  min-width: 0;
+  overflow-wrap: break-word;
+  line-height: 1.25;
+}
+.rv-amt {
+  grid-area: amt;
+  font-size: 14px;
+  text-align: right;
+}
+.rv-amt small {
+  margin-left: 7px;
+  font-size: 12px;
+}
+.rv-track {
+  grid-area: bar;
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--sunk);
+}
+.rv-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--pen);
+  transform-origin: left center;
+  transition: width 0.45s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
+  animation: rv-grow 0.55s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1)) both;
+}
+.rv-tick {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  box-shadow: 0 0 0 1.5px var(--surface);
+  transition: left 0.45s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
+}
+.rv-more {
+  margin: 6px 0 4px;
+}
+
+/* laptop: name, bar and amount on one line */
+@media (min-width: 600px) {
+  .rv-row {
+    grid-template-columns: minmax(0, 180px) minmax(0, 1fr) minmax(150px, auto);
+    grid-template-areas: 'name bar amt';
+    gap: 16px;
+    padding: 8px 0;
+  }
+}
+
+/* ---- net worth */
+
+.rv-big {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 650;
+}
+.rv-big small {
+  font-size: 13px;
+  font-weight: 500;
+}
+.rv-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 12px 0 2px;
+}
+.rv-facts span {
+  display: grid;
+  gap: 1px;
+}
+.rv-facts small {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.rv-facts b {
+  font-size: 15px;
+  font-weight: 600;
+}
+.rv-saved {
+  margin: 14px 0 4px;
+}
+.rv-saved li {
   font-size: 15px;
 }
+
+/* ---- goals */
 
 .goals {
   display: grid;
@@ -91,8 +222,18 @@
   color: var(--green);
 }
 
+@keyframes rv-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .goal-bar i {
+  .rv-fill,
+  .rv-tick,
+  .goal-bar i,
+  button.rv-row {
     transition: none;
+    animation: none;
   }
 }
