@@ -1,6 +1,7 @@
 import { daily, expectedTotal, monthView, type Index, type MonthView } from './budget'
 import { addDays, addMonths, dayOfMonth, daysInMonth, monthName, monthOf } from './dates'
-import { plannedOf, savingsRate, totalPlanned } from './insights'
+import { advice, byChange, change, goalLine, goals } from './compare'
+import { categoryTrends, plannedOf, savingsRate, spendingTrend, totalPlanned } from './insights'
 import { fmt } from './money'
 import { live, RTA, type DB } from './types'
 
@@ -141,6 +142,35 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
         return c ? `${f(plannedOf(c))} / ${f(-c.activity)}` : '—'
       })
       out.push(`| ${esc(cat.name)} | ${cells.join(' | ')} |`)
+    }
+    out.push('')
+  }
+
+  // ------------------------------------------------ against a typical month, and what to change
+  const spending = spendingTrend(ix, current, today)
+  if (spending.usual !== null) {
+    const line = (name: string, t: { thisMonth: number; last: number | null; usual: number | null }) => {
+      const c = change(t, 'usual')
+      return `- ${name}: ${f(t.thisMonth)} vs ${f(c.then ?? 0)} (${c.same ? 'about the same' : fmt(c.diff, base, { sign: true })})`
+    }
+    out.push(`## ${monthName(current)} so far vs a typical month`)
+    out.push(`Typical = median of up to 3 months before, each up to the same point of the month. Biggest changes:`)
+    out.push(line('All spending', spending))
+    const moved = byChange(categoryTrends(ix, current, today, 4), 'usual').filter((t) => t.usual !== null && !change(t, 'usual').same)
+    for (const t of moved.slice(0, 5)) out.push(line(t.name, t))
+    out.push('')
+  }
+  const tips = advice(ix, current, today)
+  if (tips.items.length) {
+    out.push(`## What the app suggests from ${tips.months.join(', ')}`)
+    for (const t of tips.items) out.push(`- ${t.text}`)
+    out.push('')
+  }
+  const gs = goals(ix, current, today)
+  if (gs.length) {
+    out.push('## Goals and buffers')
+    for (const g of gs) {
+      out.push(`- ${g.name}: ${f(g.saved)} of ${f(g.amount)}${g.by ? ` by ${g.by}` : ''}, adding about ${f(g.pace)}/month: ${goalLine(g, base, current)}`)
     }
     out.push('')
   }

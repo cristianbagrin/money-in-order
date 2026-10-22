@@ -1,0 +1,98 @@
+/* Review's month-against-month cards: the comparison picker, what to change, goals. */
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.card-head h2 {
+  margin-bottom: 0;
+}
+.card-head .pills {
+  gap: 6px;
+}
+.card-sub {
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--ink-3);
+}
+
+/* the change under each amount: green when it went down, red only once it is past the plan */
+.trend-row small.pos {
+  color: var(--green);
+}
+.trend-row small.neg {
+  color: var(--red);
+}
+.trend-row small.muted {
+  color: var(--ink-2);
+}
+.trend-row.total .trend-name,
+.trend-row.total .num {
+  font-weight: 650;
+}
+
+.insights.advice {
+  margin: 2px 0 6px;
+  gap: 10px;
+}
+.insights.advice li {
+  font-size: 15px;
+}
+
+.goals {
+  display: grid;
+  gap: 14px;
+  padding: 2px 0 6px;
+}
+.goal-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.goal-name {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.goal-top .num {
+  font-size: 14px;
+}
+.goal-top small {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.goal-bar {
+  height: 6px;
+  margin: 7px 0 5px;
+  border-radius: 999px;
+  background: var(--pen-wash);
+  overflow: hidden;
+}
+.goal-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--pen);
+  transition: width 0.5s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
+}
+.goal-bar i.done {
+  background: var(--green);
+}
+.goal-line {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.goal-line.pos {
+  color: var(--green);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-bar i {
+    transition: none;
+  }
+}
