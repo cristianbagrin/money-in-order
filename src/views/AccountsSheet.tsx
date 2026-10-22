@@ -146,6 +146,9 @@ export function AccountsSheet(props: {
     </div>
   )
 
+  // Closed, there is nothing to work out (while it slides away the sheet keeps what it last showed).
+  if (!props.open) return <Sheet open={false} onClose={props.onClose} children={null} />
+
   const gap = r ? r.diff + r.fx : 0
   const line = (label: string, v: number) => (
     <div class="acc-line">

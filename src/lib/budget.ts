@@ -159,12 +159,24 @@ export function targetNeed(cat: Category, carry: number, assigned: number, month
   return { need: Math.max(0, Math.min(missing, goal) - assigned), goal: Math.min(missing, goal) }
 }
 
+/** Views already worked out for an index: the screens, badges and sheets showing one change all ask for the same month. */
+const views = new WeakMap<Index, Map<string, MonthView>>()
+
 /**
- * The state of the budget in a month.
+ * The state of the budget in a month (shared: don't change what it returns).
  * `current` is the real current month: for it and later months, money already assigned to
  * future months is not ready to assign again.
  */
 export function monthView(ix: Index, month: Month, current: Month): MonthView {
+  let known = views.get(ix)
+  if (!known) views.set(ix, (known = new Map()))
+  const key = `${month}|${current}`
+  let v = known.get(key)
+  if (!v) known.set(key, (v = computeView(ix, month, current)))
+  return v
+}
+
+function computeView(ix: Index, month: Month, current: Month): MonthView {
   const carry = new Map<ID, number>()
   // Ready to assign is one number that is true now: past months show today's figure,
   // and money given to any month (past or future) is no longer available to give again.
