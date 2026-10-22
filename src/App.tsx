@@ -235,9 +235,15 @@ function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
   return (
     <aside class="rail">
       <div class="brand">
-        Money
-        <br />
-        in Order
+        <svg class="brand-mark" viewBox="70 90 372 332" aria-hidden="true">
+          <path d="M84 300 L428 276 L428 380 L84 404 Z" fill="#ffd84d" />
+          <ellipse cx="256" cy="256" rx="104" ry="150" transform="rotate(8 256 256)" fill="none" stroke="currentColor" stroke-width="58" />
+        </svg>
+        <span>
+          Money
+          <br />
+          in Order
+        </span>
       </div>
       <nav>
         {[...TABS, { id: 'settings' as Route, label: 'Settings' }].map((t) => (

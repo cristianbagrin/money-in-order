@@ -1771,6 +1771,14 @@ textarea:focus {
     color: var(--pen);
     line-height: 1.05;
     margin: 0 10px 26px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    flex: none;
   }
   .rail nav {
     display: grid;
