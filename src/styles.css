@@ -968,6 +968,8 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  /* on the right, with or without a caption beside it */
+  margin-left: auto;
 }
 
 .ritual {
