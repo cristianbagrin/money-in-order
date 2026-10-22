@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { monthName } from '../lib/dates'
 import { transactionsCSV } from '../lib/export'
+import { importSheet, loggedIn, readSheetFile, type SheetFile } from '../lib/sheetImport'
 import { refreshRates } from '../lib/rates'
 import { addAccount, changeBase, deleteAccount, restoreBackup, saveAccount, settings, unarchiveCategory, undoable, updateSettings } from '../lib/store'
 import { disableSync } from '../lib/sync'
@@ -14,6 +16,7 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
   const ix = useIndex()
   const s = ix.settings
   const [sound, setSound] = useState(soundOn())
+  const [sheet, setSheet] = useState<SheetFile | null>(null)
 
   return (
     <div>
@@ -122,8 +125,69 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
           <button class="pill" onClick={() => share(`money-in-order-${stamp()}.csv`, transactionsCSV(ix), 'text/csv')}>
             Transactions CSV
           </button>
+          <label class="pill" style={{ cursor: 'pointer' }}>
+            Import sheet
+            <input
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const f = e.currentTarget.files?.[0]
+                e.currentTarget.value = ''
+                const file = f && readSheetFile(await f.text())
+                if (file) setSheet(file)
+                else if (f) {
+                  play('error')
+                  toast('That isn’t a sheet import file')
+                }
+              }}
+            />
+          </label>
         </div>
+        {sheet && <SheetImport file={sheet} onDone={() => setSheet(null)} />}
       </Section>
+    </div>
+  )
+}
+
+/** One-time import of months kept in a spreadsheet (temporary). */
+function SheetImport(props: { file: SheetFile; onDone: () => void }) {
+  const months = props.file.months.map((m) => ({ m: m.month, n: m.txns.length, here: loggedIn(m.month).length }))
+  // Months with entries logged here already are left alone unless chosen.
+  const [chosen, setChosen] = useState(months.filter((x) => !x.here).map((x) => x.m))
+  const toggle = (m: string) => setChosen(chosen.includes(m) ? chosen.filter((x) => x !== m) : [...chosen, m])
+  const replacing = months.filter((x) => x.here && chosen.includes(x.m))
+  return (
+    <div class="card" style={{ marginTop: '10px' }}>
+      <div class="pills">
+        {months.map((x) => (
+          <button key={x.m} class="pill soft" aria-pressed={chosen.includes(x.m)} onClick={() => toggle(x.m)}>
+            {monthName(x.m)} <small>{x.n}</small>
+          </button>
+        ))}
+      </div>
+      {replacing.length > 0 && (
+        <p class="hint">
+          Replaces what you logged here in {replacing.map((x) => `${monthName(x.m)} (${x.here})`).join(' and ')}.
+        </p>
+      )}
+      <div class="cs-foot" style={{ marginTop: '12px' }}>
+        <button class="link" onClick={props.onDone}>
+          Cancel
+        </button>
+        <button
+          class="link"
+          disabled={!chosen.length}
+          onClick={() => {
+            const n = undoable('Imported sheet', () => importSheet(props.file, chosen, replacing.map((x) => x.m)))
+            play('success')
+            toast(`${n} entries imported`, { undo: true })
+            props.onDone()
+          }}
+        >
+          Import
+        </button>
+      </div>
     </div>
   )
 }
