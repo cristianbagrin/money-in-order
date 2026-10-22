@@ -1,17 +1,18 @@
 /* Charts for Review. Marks wear series colors; every piece of text wears ink. */
 
-/* Series colours. The six slice hues are in an order whose neighbours stay apart under every colour-vision
-   deficiency (wrap-around included); grey is everything too small to name. Labels carry identity too. */
+/* Series colours: a calm, slightly dusty set that sits well on the light page. Neighbours alternate warm and
+   cool and light and dark, so they stay apart under colour-vision deficiencies too (wrap-around included);
+   grey is everything too small to name. Labels carry identity as well. */
 :root {
-  --s1: #1d58a8;
-  --s2: #eb6834;
-  --s3: #1baf7a;
-  --s4: #6250d6;
-  --s5: #eda100;
-  --s6: #e87ba4;
-  --s-rest: #c4c9c7;
-  --s-cash: #1d58a8;
-  --s-invest: #1baf7a;
+  --s1: #2f6690;
+  --s2: #e3a857;
+  --s3: #6aa893;
+  --s4: #6a5a9e;
+  --s5: #d9795f;
+  --s6: #8dbad0;
+  --s-rest: #cfd3cf;
+  --s-cash: #2f6690;
+  --s-invest: #6aa893;
 }
 
 .ch {

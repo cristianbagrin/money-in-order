@@ -1,4 +1,4 @@
-/* Review: the month in a sentence, where it went, net worth, age of money, income, goals. */
+/* Review: the month in a sentence, where it went, net worth, income, goals. */
 
 .card-head {
   display: flex;
@@ -145,6 +145,21 @@ button.rv-row:active {
   gap: 6px;
 }
 
+/* ---- the two charts get more room than the text: past the column on a laptop, edge to edge in the card on a phone */
+
+.rv-wide .ch {
+  margin-inline: -6px;
+}
+@media (min-width: 960px) {
+  .rv-wide {
+    margin-inline: clamp(-120px, calc(-28px - (100vw - 960px) / 4), -28px);
+    padding-inline: 24px;
+  }
+  .rv-wide .ch {
+    margin-inline: 0;
+  }
+}
+
 /* ---- where it went: the donut, and beside it (below on phones) every row */
 
 .rv-where {
@@ -152,13 +167,13 @@ button.rv-row:active {
 }
 .rv-split {
   display: grid;
-  gap: 6px;
+  gap: 14px;
 }
 @container (min-width: 560px) {
   .rv-split:not(.flat) {
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     align-items: center;
-    gap: 22px;
+    gap: 32px;
   }
 }
 
@@ -258,40 +273,10 @@ button.rv-row:active {
   align-items: center;
   justify-content: space-between;
   gap: 10px 16px;
-  margin: 14px 0 4px;
+  margin: 18px 0 4px;
 }
 .rv-foot .rv-saved {
   margin: 0;
-}
-
-/* ---- age of money */
-
-.rv-age-body {
-  display: grid;
-  gap: 4px;
-}
-@container (min-width: 520px) {
-  .rv-age-body {
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: end;
-    gap: 28px;
-  }
-}
-.rv-age {
-  container-type: inline-size;
-}
-.rv-age .rv-big {
-  margin: 0;
-}
-.rv-unit {
-  font-size: 18px;
-  font-weight: 560;
-}
-.rv-age-line {
-  margin: 8px 0 4px;
-  font-size: 14.5px;
-  color: var(--ink-2);
-  text-wrap: pretty;
 }
 
 /* ---- net worth */

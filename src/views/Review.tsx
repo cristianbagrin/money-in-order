@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'preact/hooks'
-import { agePoints, budgetAges } from '../lib/age'
+import { useMemo, useState } from 'preact/hooks'
+import { balances, netWorth } from '../lib/accounts'
+import { monthView, type Index } from '../lib/budget'
 import { goalLine, goals, groupSpending, incomeBySource, roundPlan, same, spending, standouts, usualSpending, type CatSpend, type MonthSpend } from '../lib/compare'
-import { monthDiff, monthName, monthOf } from '../lib/dates'
-import { claudeSummary } from '../lib/export'
-import { savedLine, wealth } from '../lib/insights'
+import { dayOfMonth, daysInMonth, monthDiff, monthName, monthOf } from '../lib/dates'
+import { savedLine, savingsRate, wealth } from '../lib/insights'
 import { fmt } from '../lib/money'
-import { setNote } from '../lib/store'
-import type { ID } from '../lib/types'
-import { NetWorthChart, REST, REST_ID, share, slicesOf, Spark, SpendDonut } from '../ui/charts'
+import { expectedIncome, forecast, MAX_AHEAD } from '../lib/plan'
+import type { ID, Target } from '../lib/types'
+import { NetWorthChart, REST, REST_ID, share, slicesOf, SpendDonut } from '../ui/charts'
 import { useIndex } from '../ui/hooks'
 import { IconChevron, toast } from '../ui/kit'
 import { MonthStrip } from '../ui/monthstrip'
@@ -64,7 +64,6 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
   const saved = useMemo(() => savedLine(ix, month, today), [ix, month, today])
   const income = useMemo(() => incomeBySource(ix, month), [ix, month])
   const goalList = useMemo(() => goals(ix, month, today), [ix, month, today])
-  const spends = useMemo(() => budgetAges(ix), [ix])
   const [spentCat, setSpentCat] = useState<ID | null>(null)
   const [all, setAll] = useState(false)
   const [view, setView] = useKept('by', 'cats', VIEWS)
@@ -73,12 +72,11 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
   const [range, setRange] = useKept<Range>('range', 'All', RANGES)
   const hasData = ix.months.includes(month)
 
-  // net worth and the age of money over the chosen stretch, ending with the month shown
+  // net worth over the chosen stretch, ending with the month shown
   const span = month >= first ? monthDiff(first, month) + 1 : 1
   const ranges = RANGES.filter((r) => (r === '1Y' ? span > 12 : r === '2Y' ? span > 24 : span > 12))
   const n = range === '1Y' ? 12 : range === '2Y' && span > 24 ? 24 : span
   const w = useMemo(() => wealth(ix, month, today, n), [ix, month, today, n])
-  const ages = useMemo(() => (w ? agePoints(spends, w.points.map((p) => p.month), today) : []), [spends, w, today])
 
   const groupView = view === 'groups' && groups.length > 1
   const { slices, colors, total } = useMemo(
@@ -135,7 +133,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       )}
 
       {s.cats.length > 0 && (
-        <section class="card rv-where">
+        <section class="card rv-wide rv-where">
           <div class="card-head">
             <h2>Where it went</h2>
             {groups.length > 1 && (
@@ -196,7 +194,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       )}
 
       {w && end && (
-        <section class="card">
+        <section class="card rv-wide">
           <div class="card-head">
             <h2>Net worth</h2>
             {ranges.length > 1 && (
@@ -258,7 +256,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
                 </ul>
               )}
               {props.onCount && (
-                <button class="pill sm" onClick={props.onCount}>
+                <button class="pill sm" onClick={() => updateBalances(ix, props.onCount!)}>
                   Update balances
                 </button>
               )}
@@ -266,8 +264,6 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
           )}
         </section>
       )}
-
-      <AgeCard points={ages} month={month} isCurrent={isCurrent} since={since} />
 
       {income.length > 0 && (
         <section class="card">
@@ -314,9 +310,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
         </section>
       )}
 
-      {(hasData || !!ix.db.notes[month]?.text) && <Reflection month={month} />}
-
-      {hasData && <AskClaude today={today} />}
+      {hasData && <CopyForClaude today={today} />}
 
       <SpentSheet cat={spentCat} month={month} today={today} onClose={() => setSpentCat(null)} />
     </div>
@@ -426,45 +420,6 @@ function SpendRow(props: {
   )
 }
 
-/**
- * How long money sits between coming in and going out, at the end of the month shown (or today),
- * with its trend over the same stretch as net worth and one line on what it means.
- */
-function AgeCard(props: { points: { month: string; days: number | null }[]; month: string; isCurrent: boolean; since: (m: string) => string }) {
-  const { points } = props
-  const now = points[points.length - 1]?.days
-  if (now === null || now === undefined) return null
-  const known = points.filter((p) => p.days !== null)
-  const from = known[0]
-  const change = known.length > 1 ? now - from.days! : 0
-  const days = (d: number) => `${d} ${d === 1 ? 'day' : 'days'}`
-  // (No "months ahead" here: Plan's "Covered N months ahead" is that figure, and two would disagree.)
-  const line = props.isCurrent
-    ? `Money you spend today came in ${days(now)} ago.`
-    : `Money spent at the end of ${monthName(props.month)} had come in ${days(now)} before.`
-  return (
-    <section class="card rv-age">
-      <h2>Age of money</h2>
-      <div class="rv-age-body">
-        <p class="rv-big">
-          <span>
-            <span class="num">{now}</span>
-            <span class="rv-unit"> {now === 1 ? 'day' : 'days'}</span>
-          </span>
-          {change !== 0 && (
-            <small class={`num ${change > 0 ? 'pos' : 'muted'}`}>
-              {change > 0 ? '+' : '−'}
-              {Math.abs(change)} since {props.since(from.month)}
-            </small>
-          )}
-        </p>
-        {known.length > 1 && <Spark values={points.map((p) => p.days)} label={`Age of money from ${days(from.days!)} to ${days(now)}`} />}
-      </div>
-      <p class="rv-age-line">{line}</p>
-    </section>
-  )
-}
-
 function UsualKey(props: { text: string }) {
   return (
     <span class="card-sub rv-key">
@@ -494,62 +449,110 @@ function BarRow(props: { name: string; amount: number; usual: number | null; max
   )
 }
 
-function Reflection(props: { month: string }) {
-  const ix = useIndex()
-  const saved = ix.db.notes[props.month]?.text ?? ''
-  const [text, setText] = useState(saved)
-  useEffect(() => setText(saved), [props.month, saved])
-  return (
-    <section class="section">
-      <h2>Notes on {monthName(props.month)}</h2>
-      <textarea
-        aria-label={`Notes on ${monthName(props.month)}`}
-        placeholder="What went wrong? What went right?"
-        value={text}
-        onInput={(e) => setText(e.currentTarget.value)}
-        onBlur={() => text !== saved && setNote(props.month, text)}
-      />
-    </section>
-  )
+/**
+ * Opens the balance editor (which starts on the first account) and moves to the first investment's value,
+ * since that's what gets typed in now and then. Without an investment account it stays as it opens.
+ */
+function updateBalances(ix: Index, open: () => void) {
+  open()
+  const inv = balances(ix).find((b) => b.acct.invest)
+  if (!inv) return
+  // the sheet puts its own first field up after a moment; this lands just behind it
+  setTimeout(() => {
+    const row = document.querySelector(`[data-acct="${inv.acct.id}"]`)
+    const field = row?.querySelector<HTMLInputElement>('input')
+    if (field) field.focus()
+    else row?.querySelector<HTMLButtonElement>('.acc-amt')?.click()
+  }, 140)
 }
 
-/** One action: copy the summary and open Claude with it. Transactions are left out unless asked for. */
-function AskClaude(props: { today: string }) {
-  const ix = useIndex()
-  const [withTxns, setWithTxns] = useState(false)
+/** A target in a few words: "10,000 a month", "50,000 by 2027-06". */
+function targetWords(t: Target, base: string): string {
+  const amt = fmt(t.amount, base)
+  if (t.kind === 'goal') return `${amt}${t.by ? ` by ${t.by}` : ''}`
+  return `${amt} a month`
+}
 
-  function ask() {
-    const text = claudeSummary(ix, props.today, { months: 6, transactions: withTxns })
-    const q = encodeURIComponent(text)
-    const prefill = q.length < 7000
-    // start the copy and open the tab in the same tap, before anything is awaited (Safari allows neither later)
-    let copied: Promise<void>
-    try {
-      copied = navigator.clipboard.writeText(text)
-    } catch (err) {
-      copied = Promise.reject(err)
+/**
+ * Where things stand, as plain text: no question, no instructions. Just the figures that matter,
+ * short enough to read at a glance and to paste into any chat.
+ */
+export function situationText(ix: Index, today: string): string {
+  const base = ix.settings.base
+  const f = (n: number) => fmt(n, base)
+  const current = monthOf(today)
+  const v = monthView(ix, current, current)
+  const out: string[] = []
+
+  out.push(`Money in Order, ${today} (day ${dayOfMonth(today)} of ${daysInMonth(current)}). Amounts in ${base}.`)
+  out.push('')
+  out.push(`Ready to assign: ${f(v.readyToAssign)}`)
+  const invest = balances(ix).reduce((sum, b) => sum + (b.acct.invest ? b.base : 0), 0)
+  const worth = netWorth(ix)
+  out.push(invest > 0 ? `Net worth: ${f(worth)} (cash ${f(worth - invest)}, investments ${f(invest)})` : `Net worth: ${f(worth)}`)
+  const income = expectedIncome(ix, current)
+  if (income > 0) out.push(`Typical income: ${f(income)} a month`)
+  const ahead = forecast(ix, current).ahead
+  if (ahead > 0) out.push(ahead >= MAX_AHEAD ? 'Covered over 2 years ahead' : `Covered ${ahead} ${ahead === 1 ? 'month' : 'months'} ahead`)
+  out.push('')
+
+  const rate = savingsRate(v)
+  out.push(
+    `${monthName(current, { year: true })} so far: income ${f(v.income)}, assigned ${f(v.assigned)}, spent ${f(v.spent)}, ` +
+      `saved ${f(v.saved)}${rate !== null ? ` (${Math.round(rate * 100)}% of income)` : ''}`,
+  )
+  for (const g of v.groups) {
+    const lines: string[] = []
+    for (const c of g.cats) {
+      const t = c.cat.target
+      const spent = -c.activity
+      if (!c.assigned && !spent && !t && !(c.cat.saving && c.available)) continue
+      const parts = c.cat.saving
+        ? [`${f(c.available)} saved`, ...(c.assigned ? [`${f(c.assigned)} added`] : [])]
+        : [`assigned ${f(c.assigned)}`, `spent ${f(spent)}`]
+      if (t) parts.push(`target ${targetWords(t, base)}`)
+      lines.push(`- ${c.cat.name}: ${parts.join(', ')}`)
     }
-    window.open(prefill ? `https://claude.ai/new?q=${q}` : 'https://claude.ai/new', '_blank', 'noopener')
-    copied.then(
-      () => {
-        play('success')
-        toast(prefill ? 'Copied for Claude' : 'Copied. Paste it into the new chat.')
-      },
-      () => {
-        if (prefill) return
-        play('error')
-        toast('Couldn’t copy')
-      },
-    )
+    if (lines.length) out.push('', g.group.name, ...lines)
   }
+  if (v.overspent.length) out.push('', `Overspent: ${v.overspent.map((c) => `${c.cat.name} ${f(c.available)}`).join(', ')}`)
+  return out.join('\n')
+}
 
+/** Copies text with the clipboard API, or the old way where that's missing or refused (insecure page, older Safari). */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const box = document.createElement('textarea')
+    box.value = text
+    box.setAttribute('readonly', '')
+    box.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+    document.body.appendChild(box)
+    box.select()
+    try {
+      return document.execCommand('copy')
+    } catch {
+      return false
+    } finally {
+      box.remove()
+    }
+  }
+}
+
+/** Puts the situation on the clipboard, ready to paste into Claude (or anywhere). Goes nowhere itself. */
+function CopyForClaude(props: { today: string }) {
+  const ix = useIndex()
+  async function copy() {
+    const ok = await copyText(situationText(ix, props.today))
+    play(ok ? 'success' : 'error')
+    toast(ok ? 'Copied' : 'Couldn’t copy')
+  }
   return (
     <div class="claude">
-      <button class="pill" onClick={ask}>
-        Ask Claude
-      </button>
-      <button class="pill toggle sm" aria-pressed={withTxns} onClick={() => setWithTxns(!withTxns)}>
-        With transactions
+      <button class="pill sm" onClick={copy}>
+        Copy for Claude
       </button>
     </div>
   )

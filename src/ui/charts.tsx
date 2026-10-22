@@ -293,13 +293,13 @@ export function slicesOf(parts: Part[], max = SERIES.length, min = 0.03): { slic
 
 const RING = 0.64 // inner radius, of the outer
 const LEAD = 14 // leader line, ring to label
-const LINE = 32 // one two-line label, with the space under it
+const LINE = 38 // one two-line label, with the space under it
 const NAME_PX = 12
 const DETAIL_PX = 11
 
 /**
  * A donut of the month's spending with the total in its hole. The big slices are labelled beside the ring
- * (name, share, amount), so nothing needs a pointer to read. Tapping a slice opens it; hovering one lights it.
+ * (name and share), so nothing needs a pointer to read. Tapping a slice opens it; hovering one lights it.
  */
 export function SpendDonut(props: {
   slices: Slice[]
@@ -320,12 +320,12 @@ export function SpendDonut(props: {
     a += (s.amount / total) * Math.PI * 2
     return { s, a0, a1: a }
   })
-  const maxW = w < 420 ? 100 : 124
+  const maxW = w < 420 ? 96 : 140
   const labels = arcs
     .filter(({ s }) => s.share >= 0.05)
     .map(({ s, a0, a1 }) => {
       const name = fit(s.name, NAME_PX, maxW, 560)
-      const detail = `${share(s.share)} · ${compact(s.amount)}`
+      const detail = share(s.share)
       const mid = (a0 + a1) / 2
       return { s, name, detail, mid, side: Math.sin(mid) >= 0 ? 1 : -1, width: Math.max(textWidth(name, NAME_PX, 560), figWidth(detail, DETAIL_PX)), y: 0 }
     })
@@ -336,12 +336,13 @@ export function SpendDonut(props: {
   }
   const left = room(-1)
   const right = room(1)
-  let r = Math.min(104, (w - left - right) / 2)
+  const rMax = w >= 460 ? 128 : 108
+  let r = Math.min(rMax, (w - left - right) / 2)
   const labelled = r >= 56 && labels.length > 0
-  if (!labelled) r = Math.min(104, w / 2 - 4)
+  if (!labelled) r = Math.min(rMax, w / 2 - 4)
   const placed = labelled ? labels : []
   const perSide = Math.max(placed.filter((p) => p.side > 0).length, placed.filter((p) => p.side < 0).length)
-  const H = Math.max(Math.round(2 * r + 24), perSide * LINE + 8)
+  const H = Math.max(Math.round(2 * r + 32), perSide * LINE + 12)
   const cx = labelled ? left + r + (w - left - right - 2 * r) / 2 : w / 2
   const cy = H / 2
   const at = (a: number, rad: number): [number, number] => [cx + rad * Math.sin(a), cy - rad * Math.cos(a)]
@@ -421,8 +422,8 @@ export function SpendDonut(props: {
 
 // ---------------------------------------------------------------- net worth over time
 
-const NW_H = 176
-const NW_TOP = 24 // room for the value over the first and last bar
+const NW_H = 240
+const NW_TOP = 28 // room for the value over the first and last bar
 const NW_BOTTOM = 22
 
 /** A column with a rounded top, from `y0` (baseline) up to `y1`. */
@@ -452,7 +453,8 @@ export function NetWorthChart(props: { points: WealthPoint[]; base: string }): J
   const w = useWidth(scrub.ref)
   const x1 = Math.max(x0 + 10, w - gutter)
   const slot = (x1 - x0) / n
-  const bw = slot >= 6 ? Math.min(24, slot * 0.64) : Math.max(1, slot - 1)
+  // columns take about half their slot, so months stay apart even over a long stretch
+  const bw = slot >= 8 ? Math.min(28, slot * 0.54) : Math.max(1, slot * 0.62)
   const X = (k: number) => x0 + slot * (k + 0.5)
   const baseY = NW_H - NW_BOTTOM
   const Y = (v: number) => NW_TOP + (1 - (v - ax.lo) / (ax.hi - ax.lo)) * (baseY - NW_TOP)
