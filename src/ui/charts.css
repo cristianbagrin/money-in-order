@@ -15,9 +15,6 @@
   user-select: none;
   cursor: crosshair;
 }
-.ch-plot.ch-click {
-  cursor: pointer;
-}
 .ch-plot:focus-visible {
   border-radius: 6px;
   box-shadow: 0 0 0 2px var(--surface, #fff), 0 0 0 4px var(--pen, #1d58a8);
@@ -32,7 +29,7 @@
 .ch-t {
   font-family: var(--sans, system-ui, sans-serif);
   font-size: 11px;
-  fill: var(--ink-3, #8e989c);
+  fill: var(--ink-3, #616c73);
 }
 .ch-num {
   font-variation-settings: var(--vs-column, normal);
@@ -44,28 +41,6 @@
 .ch-strong {
   fill: var(--ink-2, #57646b);
 }
-.ch-end {
-  fill: var(--ink, #15242c);
-  font-weight: 600;
-}
-.ch-plan-label {
-  fill: var(--ink-2, #57646b);
-}
-/* the month shown on the page */
-.ch-sel {
-  fill: var(--ink, #15242c);
-  font-weight: 650;
-}
-.ch-saved {
-  fill: var(--ink-2, #57646b);
-}
-/* a ring of surface behind text that sits on lines */
-.ch-halo {
-  paint-order: stroke;
-  stroke: var(--surface, #fff);
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
 
 /* ---- grid */
 
@@ -73,20 +48,6 @@
   stroke: var(--rule, #e7e7e2);
   stroke-width: 1;
   shape-rendering: crispEdges;
-}
-.ch-base {
-  stroke: var(--rule-strong, #d0d0c8);
-  stroke-width: 1;
-  shape-rendering: crispEdges;
-}
-.ch-plan {
-  stroke: var(--ink-4, #8e989c);
-  stroke-width: 1;
-  shape-rendering: crispEdges;
-}
-.ch-pace {
-  stroke: var(--ink-4, #8e989c);
-  stroke-width: 1;
 }
 .ch-guide {
   stroke: var(--ink-4, #8e989c);
@@ -103,98 +64,14 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-.ch-line.over {
-  stroke: var(--red, #c8231f);
-}
 .ch-area {
   fill: var(--pen, #1d58a8);
   opacity: 0.08;
-}
-.ch-area.over {
-  fill: var(--red, #c8231f);
-}
-.ch-prev {
-  fill: none;
-  stroke: var(--ink-4, #8e989c);
-  stroke-width: 1.5;
-  stroke-dasharray: 3 3;
-  stroke-linecap: round;
-}
-.ch-proj {
-  fill: none;
-  stroke: var(--pen, #1d58a8);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
-  stroke-linecap: round;
-}
-.ch-proj.over {
-  stroke: var(--red, #c8231f);
 }
 .ch-dot {
   fill: var(--pen, #1d58a8);
   stroke: var(--surface, #fff);
   stroke-width: 2;
-  paint-order: stroke;
-}
-.ch-dot.over {
-  fill: var(--red, #c8231f);
-}
-.ch-dot.prev {
-  fill: var(--ink-4, #8e989c);
-}
-.ch-dot.proj {
-  fill: var(--surface, #fff);
-  stroke: var(--pen, #1d58a8);
-  stroke-width: 1.5;
-}
-.ch-dot.proj.over {
-  stroke: var(--red, #c8231f);
-}
-
-.ch-bar {
-  fill: var(--pen, #1d58a8);
-  transition: fill 0.15s;
-}
-.ch-bar.hot {
-  fill: var(--pen-deep, #143f7d);
-}
-.ch-hatch-bg {
-  fill: var(--pen-wash, #e5edf8);
-}
-.ch-hatch-line {
-  fill: var(--pen, #1d58a8);
-  opacity: 0.7;
-}
-.ch-ghost {
-  fill: none;
-  stroke: var(--ink-4, #8e989c);
-  stroke-width: 1;
-}
-.ch-income {
-  stroke: var(--green, #0a7f5a);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-.ch-slot {
-  transition: transform 0.35s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
-}
-
-.ch-spark {
-  display: block;
-  flex: none;
-  overflow: visible;
-}
-.ch-spark path {
-  fill: none;
-  stroke: var(--ink-4, #8e989c);
-  stroke-width: 1.5;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.ch-spark circle {
-  fill: var(--pen, #1d58a8);
-  stroke: var(--surface, #fff);
-  stroke-width: 1.5;
   paint-order: stroke;
 }
 
@@ -219,7 +96,7 @@
 }
 .ch-tip-title {
   font-variation-settings: var(--vs-print, normal);
-  color: var(--ink-3, #8e989c);
+  color: var(--ink-3, #616c73);
   margin-bottom: 4px;
 }
 .ch-tip-row {
@@ -239,78 +116,19 @@
 }
 .ch-tip-row span {
   font-variation-settings: var(--vs-print, normal);
-  color: var(--ink-3, #8e989c);
+  color: var(--ink-3, #616c73);
 }
 
-/* series keys: short strokes for lines, a small rounded block for bars */
+/* series keys: a short stroke for a line, none for a plain figure */
 .ch-key {
   display: inline-block;
   flex: none;
   width: 12px;
   height: 2px;
   border-radius: 1px;
-  background: var(--ink-4, #8e989c);
 }
 .ch-key.pen {
   background: var(--pen, #1d58a8);
-}
-.ch-key.red {
-  background: var(--red, #c8231f);
-}
-.ch-key.green {
-  background: var(--green, #0a7f5a);
-}
-.ch-key.dash {
-  height: 0;
-  border-radius: 0;
-  background: none;
-  border-top: 1.5px dashed var(--ink-4, #8e989c);
-}
-.ch-key.dash.pen {
-  border-top-color: var(--pen, #1d58a8);
-}
-.ch-key.dash.red {
-  border-top-color: var(--red, #c8231f);
-}
-.ch-key.ghost {
-  width: 8px;
-  height: 10px;
-  border-radius: 2px 2px 0 0;
-  background: none;
-  box-shadow: inset 0 0 0 1px var(--ink-4, #8e989c);
-}
-.ch-key.pct {
-  width: auto;
-  height: auto;
-  background: none;
-  font-style: normal;
-  font-weight: 650;
-  font-variation-settings: var(--vs-column, normal);
-  color: var(--green, #0a7f5a);
-}
-.ch-key.bar {
-  width: 8px;
-  height: 10px;
-  border-radius: 2px 2px 0 0;
-}
-.ch-key.none {
-  background: none;
-}
-
-.ch-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 6px;
-  font-family: var(--sans, system-ui, sans-serif);
-  font-variation-settings: var(--vs-print, normal);
-  font-size: 11px;
-  color: var(--ink-3, #8e989c);
-}
-.ch-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .ch-sr {
@@ -336,18 +154,10 @@
 .ch-fade {
   animation: ch-fade 0.6s ease-out both;
 }
-.ch-late {
-  animation: ch-fade 0.4s ease-out 0.8s both;
-}
 .ch-pop {
   transform-box: fill-box;
   transform-origin: center;
   animation: ch-pop 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) 0.75s both;
-}
-.ch-grow {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: ch-grow 0.55s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1)) both;
 }
 
 @keyframes ch-draw {
@@ -365,11 +175,6 @@
     transform: scale(0);
   }
 }
-@keyframes ch-grow {
-  from {
-    transform: scaleY(0);
-  }
-}
 @keyframes ch-tip-in {
   from {
     opacity: 0;
@@ -379,17 +184,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ch-draw,
   .ch-fade,
-  .ch-late,
   .ch-pop,
-  .ch-grow,
   .ch-tip {
     animation: none;
   }
   .ch-draw {
     stroke-dashoffset: 0;
-  }
-  .ch-slot,
-  .ch-bar {
-    transition: none;
   }
 }

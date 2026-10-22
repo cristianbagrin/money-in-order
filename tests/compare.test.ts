@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { advice, byChange, change, goalLine, goals, monthsBefore, rangeName, roundPlan, settledMonths } from '../src/lib/compare'
-import { categoryTrends, spendingTrend } from '../src/lib/insights'
+import { goalLine, goals, incomeBySource, roundPlan, spending, standouts, usualMonths } from '../src/lib/compare'
 import * as S from '../src/lib/store'
 import { emptyDB, RTA, type Category, type Target } from '../src/lib/types'
 
+const JUL = '2026-07'
 const AUG = '2026-08'
 const SEP = '2026-09'
 const OCT = '2026-10'
@@ -17,8 +17,8 @@ const u = (major: number) => major * 100
 function spend(date: string, name: string, major: number) {
   S.addTxn({ date, cat: cat(name).id, amt: -u(major), cur: 'TWD' })
 }
-function earn(date: string, major: number) {
-  S.addTxn({ date, cat: RTA, amt: u(major), cur: 'TWD' })
+function earn(date: string, major: number, src?: string) {
+  S.addTxn({ date, cat: RTA, amt: u(major), cur: 'TWD', src })
 }
 function give(month: string, name: string, major: number) {
   S.setAssigned(month, cat(name).id, u(major))
@@ -27,7 +27,7 @@ function target(name: string, t: Target) {
   S.saveCategory({ ...cat(name), target: t })
 }
 const ix = () => S.getIndex()
-const texts = (month: string, today: string) => advice(ix(), month, today).items.map((n) => n.text)
+const texts = (month: string, today: string) => standouts(ix(), spending(ix(), month, today)).map((n) => n.text)
 
 beforeEach(() => {
   S.replaceDB(emptyDB())
@@ -42,143 +42,136 @@ describe('helpers', () => {
     expect(roundPlan(u(1234))).toBe(u(1250))
     expect(roundPlan(u(1234), 'down')).toBe(u(1200))
     expect(roundPlan(u(600))).toBe(u(600))
-    expect(roundPlan(u(17500))).toBe(u(17500))
     expect(roundPlan(0)).toBe(0)
   })
 
-  it('names a run of months', () => {
-    expect(rangeName([AUG, SEP, OCT])).toBe('Aug–Oct')
-    expect(rangeName(['2025-12', '2026-01'])).toBe('Dec 2025–Jan 2026')
-    expect(rangeName([SEP])).toBe('Sep')
-  })
-
-  it('takes only finished months, up to the month shown', () => {
+  it('compares with up to three months before, from the first month with data', () => {
+    expect(usualMonths(ix(), NOV)).toEqual([])
     spend('2026-07-03', 'Living', 100)
-    expect(settledMonths(ix(), NOV, '2026-11-10')).toEqual([AUG, SEP, OCT])
-    expect(settledMonths(ix(), SEP, '2026-11-10')).toEqual(['2026-07', AUG, SEP])
-    expect(settledMonths(ix(), AUG, '2026-11-10')).toEqual(['2026-07', AUG]) // data starts in July
-    expect(settledMonths(ix(), '2026-12', '2026-11-10')).toEqual([])
-    expect(monthsBefore(ix(), NOV)).toBe(3)
-    expect(monthsBefore(ix(), AUG)).toBe(1)
+    expect(usualMonths(ix(), NOV)).toEqual([AUG, SEP, OCT])
+    expect(usualMonths(ix(), SEP)).toEqual([JUL, AUG])
+    expect(usualMonths(ix(), JUL)).toEqual([])
   })
 })
 
-describe('month against month', () => {
-  it('compares a finished month with the one before and with a typical month', () => {
-    give(AUG, 'Living', 15000)
+describe('where it went', () => {
+  it('ranks a finished month by spending, each against the average of the three months before', () => {
     spend('2026-08-05', 'Living', 10000)
     spend('2026-09-05', 'Living', 14000)
-    spend('2026-10-05', 'Living', 11000)
+    spend('2026-10-05', 'Living', 12000)
+    spend('2026-08-06', 'Phone', 600)
+    spend('2026-09-06', 'Phone', 600)
+    spend('2026-10-06', 'Phone', 600)
     spend('2026-11-05', 'Living', 9000)
     spend('2026-11-06', 'Purchases', 3000)
-    const t = categoryTrends(ix(), NOV, '2026-12-02', 6)
-    const living = t.find((x) => x.name === 'Living')!
-    expect(living.last).toBe(u(11000))
-    expect(living.usual).toBe(u(11000)) // median of 10,000, 14,000 and 11,000
-    // Purchases was never used before November: nothing typical to compare with, last month was zero
-    const purchases = t.find((x) => x.name === 'Purchases')!
-    expect(purchases.usual).toBeNull()
-    expect(purchases.last).toBe(0)
-    expect(change(purchases, 'last')).toEqual({ then: 0, diff: u(3000), same: false })
-    expect(change(living, 'usual')).toEqual({ then: u(11000), diff: -u(2000), same: false })
-    // biggest move in money first
-    expect(byChange(t, 'usual').map((x) => x.name)).toEqual(['Living', 'Purchases'])
-    expect(byChange(t, 'last').map((x) => x.name)).toEqual(['Purchases', 'Living'])
-
-    const all = spendingTrend(ix(), NOV, '2026-12-02')
-    expect(all).toEqual({ thisMonth: u(12000), last: u(11000), usual: u(11000), planned: 0 }) // August's plan is long spent
+    spend('2026-11-07', 'Future me', 5000) // kept, not spent
+    const s = spending(ix(), NOV, '2026-12-02')
+    expect(s.running).toBe(false)
+    expect(s.months).toEqual([AUG, SEP, OCT])
+    expect(s.spent).toBe(u(12000))
+    expect(s.usual).toBe(u(12600))
+    expect(s.cats.map((c) => [c.name, c.spent / 100, c.usual === null ? null : c.usual / 100])).toEqual([
+      ['Living', 9000, 12000],
+      ['Purchases', 3000, 0],
+      // nothing this month, but it usually takes a share
+      ['Phone', 0, 600],
+    ])
   })
 
-  it('compares the current month with the same point of the months before', () => {
+  it('has no usual in the first month', () => {
+    give(OCT, 'Living', 15000)
+    spend('2026-10-05', 'Living', 2000)
+    const s = spending(ix(), OCT, '2026-10-15')
+    expect(s).toMatchObject({ running: true, day: 15, spent: u(2000), usual: null, planned: u(15000) })
+    expect(s.cats[0].usual).toBeNull()
+  })
+
+  it('compares a running month with the same point of the months before', () => {
     spend('2026-09-05', 'Living', 1000)
     spend('2026-09-25', 'Living', 9000)
     spend('2026-10-05', 'Living', 2000)
     spend('2026-10-20', 'Living', 9000)
     spend('2026-11-04', 'Living', 1500)
-    const all = spendingTrend(ix(), NOV, '2026-11-15')
-    expect(all.thisMonth).toBe(u(1500))
-    expect(all.last).toBe(u(2000)) // by October 15
-    expect(all.usual).toBe(u(1500)) // the middle of 1,000 and 2,000
-    expect(change(all, 'usual').same).toBe(true)
+    spend('2026-11-20', 'Living', 500) // logged ahead: not "so far"
+    const s = spending(ix(), NOV, '2026-11-15')
+    expect(s.spent).toBe(u(1500))
+    expect(s.usual).toBe(u(1500)) // 1,000 and 2,000 by the middle of the month
   })
 })
 
-describe('advice', () => {
-  /** Three months of the same budget: 60,000 in, Living over its 15,000 every month, Phone well under. */
-  function months(opts: { living?: number; phone?: number; future?: number } = {}) {
+describe('standouts', () => {
+  it('names a category that keeps going over, with what it really costs', () => {
     for (const m of [AUG, SEP, OCT]) {
       earn(`${m}-01`, 60000)
       give(m, 'Living', 15000)
-      give(m, 'Phone', 1000)
-      give(m, 'Future me', opts.future ?? 6000)
-      spend(`${m}-10`, 'Living', opts.living ?? 17200)
-      spend(`${m}-11`, 'Phone', opts.phone ?? 400)
+      spend(`${m}-10`, 'Living', 17200)
     }
-  }
-
-  it('needs two finished months', () => {
-    earn('2026-10-01', 60000)
-    give(OCT, 'Living', 100)
-    spend('2026-10-10', 'Living', 5000)
-    expect(advice(ix(), OCT, '2026-10-15').items).toEqual([])
-    expect(advice(ix(), NOV, '2026-11-10').items).toEqual([])
+    expect(texts(OCT, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000.')
+    // November, still going: the run ends in October until November goes over too
+    give(NOV, 'Living', 15000)
+    spend('2026-11-03', 'Living', 1000)
+    expect(texts(NOV, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000.')
+    // once November plans for what it costs there is nothing to say
+    give(NOV, 'Living', 17500)
+    expect(texts(NOV, '2026-11-10').some((t) => t.includes('went over'))).toBe(false)
   })
 
-  it('suggests plans that fit, what the savings rate could be, and money with no job', () => {
-    months()
-    const r = advice(ix(), NOV, '2026-11-10')
-    expect(r.months).toEqual([AUG, SEP, OCT])
-    // 60,000 − 22,000 assigned, plus Phone's spare 600, less Living's extra 2,500
-    expect(r.free).toBe(u(36100))
-    expect(r.items.map((n) => n.text)).toEqual([
-      'Living went over every month: it costs about NT$17,000, not NT$15,000. Plan NT$17,500.',
-      'Phone used about NT$400 of its NT$1,000 each month. Plan NT$400 and NT$600 a month is free.',
-      'On average you saved 10% of your income; NT$6,000 more a month reaches 20%, and about NT$36,000 a month is left over with these plans.',
-      'NT$114,000 is still in Ready to assign. If you won’t need it this month, give it to Future me.',
-    ])
-    expect(r.items[0].tone).toBe('bad')
-    expect(r.items[1].tone).toBe('good')
-  })
-
-  it('looks back from a past month, without the figure that is only true now', () => {
-    months()
-    const sep = texts(SEP, '2026-11-10')
-    expect(sep).toHaveLength(3)
-    expect(sep[0]).toBe('Living went over every month: it costs about NT$17,000, not NT$15,000. Plan NT$17,500.')
-    expect(sep.some((t) => t.includes('Ready to assign'))).toBe(false)
-  })
-
-  it('says when there is room to save more than the target', () => {
-    months({ living: 14800, phone: 1000, future: 15000 })
-    expect(texts(OCT, '2026-11-10')).toEqual([
-      'On average you saved 25% of your income, above your 20% target, and about NT$29,000 a month is left over. Giving it to Future me would make it 73%.',
-    ])
-  })
-
-  it('is honest when there is no room', () => {
+  it('names the biggest move against the usual, once', () => {
+    for (const m of [AUG, SEP, OCT, NOV]) {
+      give(m, 'Living', 11000)
+      give(m, 'Purchases', 1000)
+    }
     for (const m of [AUG, SEP, OCT]) {
-      earn(`${m}-01`, 30000)
-      give(m, 'Living', 24000)
-      give(m, 'Purchases', 3000)
-      give(m, 'Future me', 3000)
-      spend(`${m}-10`, 'Living', 24000)
-      spend(`${m}-11`, 'Purchases', 3000)
+      spend(`${m}-05`, 'Living', 10000)
+      spend(`${m}-06`, 'Purchases', 1000)
     }
-    expect(texts(OCT, '2026-11-10')).toEqual(['On average you saved 10% of your income. Reaching 20% means spending NT$3,000 less a month.'])
+    spend('2026-11-05', 'Living', 10500)
+    spend('2026-11-06', 'Purchases', 5000)
+    expect(texts(NOV, '2026-12-02')).toEqual(['Purchases was 5 times its usual, NT$5,000.'])
+    expect(standouts(ix(), spending(ix(), NOV, '2026-12-02'))[0].tone).toBe('bad') // past its plan
   })
 
-  it('leaves goals and buffers alone: their money is meant to pile up', () => {
-    target('Trips', { kind: 'goal', amount: u(30000) })
-    for (const m of [AUG, SEP, OCT]) {
-      give(m, 'Trips', 3000)
-      spend(`${m}-11`, 'Trips', 100)
-    }
-    expect(texts(OCT, '2026-11-10')).toEqual([])
+  it('says when a category came in well below usual', () => {
+    for (const m of [AUG, SEP, OCT, NOV]) give(m, 'Living', 10000)
+    for (const m of [AUG, SEP, OCT]) spend(`${m}-05`, 'Living', 10000)
+    spend('2026-11-05', 'Living', 6000)
+    expect(standouts(ix(), spending(ix(), NOV, '2026-12-02'))).toMatchObject([{ tone: 'good', text: 'Living was NT$4,000 below usual.' }])
+  })
+
+  it('stays quiet about small moves', () => {
+    for (const m of [AUG, SEP, OCT, NOV]) give(m, 'Living', 12000)
+    for (const m of [AUG, SEP, OCT]) spend(`${m}-05`, 'Living', 10000)
+    spend('2026-11-05', 'Living', 11000)
+    expect(texts(NOV, '2026-12-02')).toEqual([])
+  })
+})
+
+describe('income by source', () => {
+  it('is empty without sources', () => {
+    earn('2026-10-01', 1000)
+    expect(incomeBySource(ix(), OCT)).toEqual([])
+  })
+
+  it('sums each source against its usual month, the rest as Other', () => {
+    const job = S.addSource('Salary')
+    const side = S.addSource('Clients')
+    S.addSource('Unused')
+    for (const m of [AUG, SEP]) earn(`${m}-01`, 50000, job.id)
+    earn('2026-09-15', 4000, side.id)
+    earn('2026-10-01', 50000, job.id)
+    earn('2026-10-12', 10000, side.id)
+    earn('2026-10-13', 300)
+    S.addTxn({ date: '2026-10-14', cat: RTA, amt: u(999), cur: 'TWD', kind: 'adj' }) // a correction is not income
+    expect(incomeBySource(ix(), OCT)).toEqual([
+      { id: job.id, name: 'Salary', amount: u(50000), usual: u(50000) },
+      { id: side.id, name: 'Clients', amount: u(10000), usual: u(2000) },
+      { id: null, name: 'Other', amount: u(300), usual: 0 },
+    ])
   })
 })
 
 describe('goals', () => {
-  it('shows progress and when a goal gets there', () => {
+  it('shows progress and when a goal gets there; buffers are not goals', () => {
     target('Trips', { kind: 'goal', amount: u(30000), by: '2027-01' })
     target('Emergency', { kind: 'refill', amount: u(10000) })
     target('Other', { kind: 'goal', amount: u(5000) })
@@ -186,12 +179,10 @@ describe('goals', () => {
     give(AUG, 'Emergency', 12000)
     give(AUG, 'Other', 1000)
     const gs = goals(ix(), OCT, '2026-10-15')
+    expect(gs.map((g) => g.name)).toEqual(['Trips', 'Other'])
     const trips = gs.find((g) => g.name === 'Trips')!
     expect(trips).toMatchObject({ saved: u(12000), pace: u(4000), eta: '2027-03', needed: u(6000), status: 'behind' })
     expect(goalLine(trips, 'TWD', OCT)).toBe('NT$6,000 a month to make Jan 2027')
-    const emergency = gs.find((g) => g.name === 'Emergency')!
-    expect(emergency.status).toBe('done')
-    expect(goalLine(emergency, 'TWD', OCT)).toBe('Reached')
     // 1,000 given in August, nothing in September; October, still going, counts once something is given to it
     const other = gs.find((g) => g.name === 'Other')!
     expect(other).toMatchObject({ status: 'open', pace: u(500), eta: '2027-06' })
@@ -199,6 +190,8 @@ describe('goals', () => {
 
     give(NOV, 'Trips', 10000)
     expect(goals(ix(), NOV, '2026-11-15').find((g) => g.name === 'Trips')).toMatchObject({ saved: u(22000), pace: u(6000), status: 'on', eta: '2027-01' })
+    give(NOV, 'Trips', 18000)
+    expect(goalLine(goals(ix(), NOV, '2026-11-15')[0], 'TWD', NOV)).toBe('Reached')
   })
 
   it('does not count the current month before anything was given to it', () => {

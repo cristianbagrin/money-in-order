@@ -1,24 +1,22 @@
-// Month against month for Review: what changed, what the last finished months say to change, and goals.
-// Pure functions over the Index. All amounts are integer minor units in the base currency.
+// A month against its usual for Review: where the money went, what stands out, income by source, goals.
+// "Usual" is the average of the three months before (or as many as there is data for); while a month runs
+// both sides are counted up to the same point of the month. Pure functions over the Index; integer minor units.
 
 import { monthView, type Index, type MonthView } from './budget'
-import { addMonths, monthDiff, monthName, monthOf } from './dates'
-import { median, setAside, wentOver, type CatTrend, type Insight } from './insights'
+import { addMonths, dayOfMonth, daysInMonth, monthDiff, monthName, monthOf } from './dates'
+import { median, plannedOf, setAside, totalPlanned, wentOver } from './insights'
 import { fmt } from './money'
-import type { Category, ID } from './types'
+import { RTA, type ID } from './types'
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0)
-const pct = (x: number) => `${Math.round(x * 100)}%`
 
-/** Up to `n` finished months ending at `month`, or just before it while it is still going. */
-export function settledMonths(ix: Index, month: string, today: string, n = 3): string[] {
-  const current = monthOf(today)
+/** The months `month` is compared with: up to `n` before it, none before the first month with data. */
+export function usualMonths(ix: Index, month: string, n = 3): string[] {
   const first = ix.months[0]
-  if (!first || month > current) return []
-  const end = month < current ? month : addMonths(current, -1)
   const out: string[] = []
-  for (let i = n - 1; i >= 0; i--) {
-    const m = addMonths(end, -i)
+  if (!first) return out
+  for (let i = n; i >= 1; i--) {
+    const m = addMonths(month, -i)
     if (m >= first) out.push(m)
   }
   return out
@@ -33,160 +31,192 @@ export function roundPlan(minor: number, how: 'up' | 'down' | 'near' = 'up'): nu
   return r * step * 100
 }
 
-// ---------------------------------------------------------------- what changed
-
-export type Basis = 'last' | 'usual'
-
-export interface Change {
-  /** the amount compared with, null when there is nothing to compare with */
-  then: number | null
-  diff: number
-  /** too small to call a change */
-  same: boolean
+/** Too small a difference to call a change. */
+export function same(diff: number, scale: number): boolean {
+  return Math.abs(diff) < Math.max(100, Math.abs(scale) * 0.03)
 }
 
-export function change(t: { thisMonth: number; last: number | null; usual: number | null }, basis: Basis): Change {
-  const then = basis === 'last' ? t.last : t.usual
-  if (then === null) return { then, diff: 0, same: true }
-  const diff = t.thisMonth - then
-  return { then, diff, same: Math.abs(diff) < Math.max(100, Math.max(t.thisMonth, then) * 0.03) }
+// ---------------------------------------------------------------- where it went
+
+export interface CatSpend {
+  id: ID
+  name: string
+  /** spent this month (so far), positive */
+  spent: number
+  /** the usual by the same point; null with no earlier month */
+  usual: number | null
+  /** planned spending this month, see plannedOf() */
+  planned: number
+  /** months in a row, newest first, whose own spending pushed it below zero: ending this month, or last month while this one runs and isn't over yet */
+  overMonths: string[]
 }
 
-/** Categories ordered by how much their spending moved against `basis`, the biggest change in money first. */
-export function byChange(trends: CatTrend[], basis: Basis): CatTrend[] {
-  const size = (t: CatTrend) => {
-    const c = change(t, basis)
-    return c.same ? 0 : Math.abs(c.diff)
-  }
-  return [...trends].sort((a, b) => size(b) - size(a) || b.thisMonth - a.thisMonth)
-}
-
-/** How many months before `month` there are to compare with (at most three). */
-export function monthsBefore(ix: Index, month: string): number {
-  const first = ix.months[0]
-  if (!first) return 0
-  return Math.max(0, Math.min(3, monthDiff(first, month)))
-}
-
-// ---------------------------------------------------------------- what to change
-
-export interface Advice extends Insight {
-  cat?: ID
-}
-
-export interface AdviceResult {
-  /** the finished months the advice is drawn from */
+export interface MonthSpend {
+  month: string
+  /** still going: amounts are up to `day`, the usual up to the same point of its months */
+  running: boolean
+  day: number
+  spent: number
+  usual: number | null
+  planned: number
+  /** the months the usual is the average of */
   months: string[]
-  items: Advice[]
-  /** money a month the plans leave unused once the suggested changes are made; null without income to go on */
-  free: number | null
+  /** biggest first; categories with nothing this month only when they usually take a real share */
+  cats: CatSpend[]
 }
 
-/** The savings category most money went to in `views`, for naming where spare money could go. */
-function savingsHome(ix: Index, views: MonthView[]): Category | null {
-  let best: Category | null = null
-  let most = -1
-  for (const c of ix.cats) {
-    if (!c.saving || c.archived) continue
-    const given = views.reduce((s, v) => s + (v.byId.get(c.id)?.assigned ?? 0), 0)
-    if (given > most) [best, most] = [c, given]
+export function spending(ix: Index, month: string, today: string): MonthSpend {
+  const current = monthOf(today)
+  const running = month === current
+  const days = daysInMonth(month)
+  const day = running ? dayOfMonth(today) : days
+  const months = usualMonths(ix, month)
+  // the day of each month that matches `day` of this one, by the share of the month gone
+  const limit = new Map<string, number>([[month, day], ...months.map((m): [string, number] => [m, Math.round((day * daysInMonth(m)) / days)])])
+  const sums = new Map<string, Map<ID, number>>([...limit.keys()].map((m) => [m, new Map()]))
+  const ids = new Set(ix.cats.filter((c) => !c.saving).map((c) => c.id))
+  const from = months[0] ?? month
+  for (const t of ix.txns) {
+    const m = monthOf(t.date)
+    if (m < from) break // newest first
+    if (t.cat === RTA || !ids.has(t.cat)) continue
+    const lim = limit.get(m)
+    if (lim === undefined || dayOfMonth(t.date) > lim) continue
+    const s = sums.get(m)!
+    s.set(t.cat, (s.get(t.cat) ?? 0) - t.base)
   }
-  return best
+  const total = (m: string) => [...sums.get(m)!.values()].reduce((s, v) => s + v, 0)
+  const usualOf = (id: ID | null) => (months.length ? Math.round(mean(months.map((m) => (id ? sums.get(m)!.get(id) ?? 0 : total(m))))) : null)
+  const usualTotal = usualOf(null)
+
+  const views = new Map<string, MonthView>()
+  const viewOf = (m: string) => {
+    let v = views.get(m)
+    if (!v) views.set(m, (v = monthView(ix, m, current)))
+    return v
+  }
+  const view = viewOf(month)
+  const first = ix.months[0] ?? month
+  const overMonths = (id: ID) => {
+    const over = (m: string) => {
+      const c = viewOf(m).byId.get(id)
+      return !!c && wentOver(c)
+    }
+    const out: string[] = []
+    for (let m = running && !over(month) ? addMonths(month, -1) : month; out.length < 6 && m >= first && over(m); m = addMonths(m, -1)) out.push(m)
+    return out
+  }
+
+  const now = sums.get(month)!
+  const cats: CatSpend[] = []
+  for (const cat of ix.cats) {
+    if (cat.saving) continue
+    const spent = now.get(cat.id) ?? 0
+    const usual = usualOf(cat.id)
+    if (spent <= 0 && (cat.archived || !usual || usual < Math.max(100, (usualTotal ?? 0) * 0.02))) continue
+    const cm = view.byId.get(cat.id)
+    cats.push({ id: cat.id, name: cat.name, spent, usual, planned: cm ? plannedOf(cm) : 0, overMonths: overMonths(cat.id) })
+  }
+  cats.sort((a, b) => b.spent - a.spent || (b.usual ?? 0) - (a.usual ?? 0))
+  return { month, running, day, spent: total(month), usual: usualTotal, planned: totalPlanned(view), months, cats }
+}
+
+// ---------------------------------------------------------------- what stands out
+
+export interface Insight {
+  tone: 'good' | 'bad' | 'neutral'
+  text: string
+  cat: ID
 }
 
 /**
- * A few concrete changes the last finished months (up to three, at least two) point to, each with a number:
- * plans that keep proving too small (a plan problem, not a willpower one), plans that keep being too big,
- * and where the savings rate stands against the target given what is left over. Then, in the current month,
- * money still waiting in Ready to assign.
+ * At most two sentences worth reading: a category that keeps going over (with what it really costs, so the plan
+ * can be fixed), then the category that moved most against its usual. Nothing when nothing stands out.
  */
-export function advice(ix: Index, month: string, today: string): AdviceResult {
-  const months = settledMonths(ix, month, today)
-  if (months.length < 2) return { months, items: [], free: null }
-  const current = monthOf(today)
+export function standouts(ix: Index, s: MonthSpend): Insight[] {
   const base = ix.settings.base
   const money = (v: number) => fmt(Math.round(v / 100) * 100, base)
-  const views = months.map((m) => monthView(ix, m, current))
-  const n = months.length
-  const earning = views.filter((v) => v.income > 0)
-  const income = mean(earning.map((v) => v.income))
-  // a change worth a sentence: 1% of income (or 2% of spending without income), never less than one unit
-  const small = Math.max(100, income > 0 ? income * 0.01 : mean(views.map((v) => v.spent)) * 0.02)
+  const is = s.running ? 'is' : 'was'
+  const out: Insight[] = []
 
-  const raises: (Advice & { extra: number })[] = []
-  const trims: (Advice & { spare: number })[] = []
-  for (const cat of ix.cats) {
-    if (cat.saving || cat.archived || setAside(cat)) continue
-    const cms = views.map((v) => v.byId.get(cat.id))
-    const spent = cms.map((c) => (c ? -c.activity : 0))
-    const given = cms.map((c) => c?.assigned ?? 0)
-    const plan = median(given)
-    const over = cms.filter((c) => c && wentOver(c)).length
-    if (over >= 2 && over >= n - 1) {
-      const fit = roundPlan(median(spent))
-      if (fit - plan < small) continue
-      const when = over === n ? 'every month' : `${over} of ${n} months`
-      const text =
-        plan > 0
-          ? `${cat.name} went over ${when}: it costs about ${money(roundPlan(median(spent), 'near'))}, not ${money(plan)}. Plan ${money(fit)}.`
-          : `${cat.name} costs about ${money(roundPlan(median(spent), 'near'))} a month with nothing planned. Plan ${money(fit)}.`
-      raises.push({ tone: 'bad', text, cat: cat.id, extra: fit - plan })
-      continue
-    }
-    // a regular expense that used less than it got, every month
-    if (cms.some((c, i) => !c || given[i] <= 0 || spent[i] <= 0 || spent[i] >= given[i])) continue
-    const fit = roundPlan(Math.max(...spent))
-    const spare = plan - fit
-    if (spare < small) continue
-    trims.push({
-      tone: 'good',
-      text: `${cat.name} used about ${money(roundPlan(median(spent), 'near'))} of its ${money(plan)} each month. Plan ${money(fit)} and ${money(spare)} a month is free.`,
-      cat: cat.id,
-      spare,
-    })
-  }
-  raises.sort((a, b) => b.extra - a.extra)
-  trims.sort((a, b) => b.spare - a.spare)
-
-  const items: Advice[] = [...raises, ...trims].slice(0, 2)
-  const home = savingsHome(ix, views)
-  const homeName = home?.name ?? 'savings'
-
-  // -- savings: the rate over these months, and what the plans leave to raise it
-  let free: number | null = null
-  if (earning.length >= 2) {
-    const changes = raises.length + trims.length > 0
-    const unassigned = mean(earning.map((v) => v.income - v.assigned))
-    free = Math.round(unassigned + trims.reduce((s, t) => s + t.spare, 0) - raises.reduce((s, r) => s + r.extra, 0))
-    const saved = mean(earning.map((v) => v.saved))
-    const target = ix.settings.savingsTarget || 0
-    const rate = saved / income
-    const left = `about ${money(roundPlan(Math.abs(free), 'near') * Math.sign(free))} a month is left over${changes ? ' with these plans' : ''}`
-    if (saved >= 0 && saved <= income) {
-      const lead = `On average you saved ${pct(rate)} of your income`
-      if (target > 0 && rate + 0.005 < target) {
-        const need = income * target - saved
-        if (free >= need) items.push({ tone: 'good', text: `${lead}; ${money(need)} more a month reaches ${pct(target)}, and ${left}.` })
-        else if (free >= small) {
-          items.push({ tone: 'neutral', text: `${lead}; ${left}, which would make it ${pct((saved + free) / income)}. ${pct(target)} needs ${money(need)}.` })
-        } else items.push({ tone: 'bad', text: `${lead}. Reaching ${pct(target)} means spending ${money(need - free)} less a month.` })
-      } else if (free >= small) {
-        const above = target > 0 ? `, above your ${pct(target)} target` : ''
-        items.push({ tone: 'good', text: `${lead}${above}, and ${left}. Giving it to ${homeName} would make it ${pct((saved + free) / income)}.` })
-      } else if (free <= -small) {
-        items.push({ tone: 'bad', text: `Plans that fit need ${money(-free)} a month more than comes in, so spending has to come down.` })
-      }
+  // -- keeps going over: a plan problem, not a willpower one
+  const repeat = s.cats
+    .filter((c) => c.overMonths.length >= 2)
+    .sort((a, b) => b.overMonths.length - a.overMonths.length || b.spent - b.planned - (a.spent - a.planned))[0]
+  if (repeat) {
+    // what it really cost in the finished months it went over, against what it was given
+    const ms = repeat.overMonths.filter((m) => !(s.running && m === s.month))
+    const given = (m: string) => ix.asg.get(m)?.get(repeat.id) ?? 0
+    const cost = roundPlan(mean(ms.map((m) => -(ix.act.get(m)?.get(repeat.id) ?? 0))), 'near')
+    const plan = s.running && given(s.month) > 0 ? given(s.month) : median(ms.map(given))
+    // this month already plans for what it costs: nothing left to say
+    if (!(s.running && plan >= cost && repeat.spent <= repeat.planned)) {
+      const tail = cost - plan < Math.max(100, cost * 0.05) ? '' : `; it costs about ${money(cost)} a month${plan > 0 ? `, not ${money(plan)}` : ''}`
+      out.push({ tone: 'bad', text: `${repeat.name} went over ${repeat.overMonths.length} months in a row${tail}.`, cat: repeat.id })
     }
   }
 
-  // -- money that came in and still has no job (a figure that is true now, so only for the current month)
-  if (month === current && items.length < 4) {
-    const rta = monthView(ix, current, current).readyToAssign
-    if (rta >= Math.max(small * 5, 100)) {
-      items.push({ tone: 'neutral', text: `${money(rta)} is still in Ready to assign. If you won’t need it this month, give it to ${homeName}.` })
+  // -- the biggest move against the usual
+  if (s.usual !== null) {
+    const scale = Math.max(s.usual, s.spent)
+    let best: { c: CatSpend; diff: number } | null = null
+    for (const c of s.cats) {
+      if (c.usual === null || out.some((n) => n.cat === c.id)) continue
+      const diff = c.spent - c.usual
+      // a tenth of the month's spending, and a real change for the category
+      if (Math.abs(diff) < Math.max(100 * 100, scale * 0.1)) continue
+      if (c.usual > 0 && c.spent / c.usual < 1.3 && c.spent / c.usual > 0.7) continue
+      if (!best || Math.abs(diff) > Math.abs(best.diff)) best = { c, diff }
+    }
+    if (best) {
+      const { c, diff } = best
+      const ratio = c.usual ? c.spent / c.usual : Infinity
+      let text: string
+      if (diff < 0) text = `${c.name} ${is} ${money(-diff)} below usual.`
+      else if (c.usual! < 100 * 100 || ratio >= 6) text = `${money(c.spent)} went to ${c.name}, usually next to nothing.`
+      else if (ratio >= 1.9) text = `${c.name} ${is} ${ratio < 2.5 ? 'twice' : `${Math.round(ratio)} times`} its usual, ${money(c.spent)}.`
+      else text = `${c.name} ${is} ${money(diff)} above usual.`
+      out.push({ tone: diff < 0 ? 'good' : c.spent > c.planned ? 'bad' : 'neutral', text, cat: c.id })
     }
   }
-  return { months, items, free }
+  return out
+}
+
+// ---------------------------------------------------------------- income
+
+export interface SourceIncome {
+  /** null: income with no source (or one since deleted) */
+  id: ID | null
+  name: string
+  amount: number
+  /** the average of the usual months, whole months; null with no earlier month */
+  usual: number | null
+}
+
+/** Income per source in `month` against the usual, in the sources' order. Empty without sources or income. */
+export function incomeBySource(ix: Index, month: string): SourceIncome[] {
+  const sources = ix.settings.sources ?? []
+  if (!sources.length || !(ix.income.get(month) ?? 0)) return []
+  const months = usualMonths(ix, month)
+  const known = new Set(sources.map((s) => s.id))
+  const sums = new Map<string, Map<ID | null, number>>([month, ...months].map((m) => [m, new Map()]))
+  const from = months[0] ?? month
+  for (const t of ix.txns) {
+    const m = monthOf(t.date)
+    if (m < from) break // newest first
+    if (t.cat !== RTA || t.kind) continue
+    const s = sums.get(m)
+    if (!s) continue
+    const id = t.src && known.has(t.src) ? t.src : null
+    s.set(id, (s.get(id) ?? 0) + t.base)
+  }
+  const out: SourceIncome[] = []
+  for (const { id, name } of [...sources, { id: null, name: 'Other' }]) {
+    const amount = sums.get(month)!.get(id) ?? 0
+    const usual = months.length ? Math.round(mean(months.map((m) => sums.get(m)!.get(id) ?? 0))) : null
+    if (amount || usual) out.push({ id, name, amount, usual })
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- goals
@@ -207,7 +237,7 @@ export interface GoalProgress {
   status: 'done' | 'on' | 'behind' | 'open'
 }
 
-/** Categories saving toward a goal or keeping a buffer, as of `month`: how far along, and when they get there. */
+/** Categories saving toward a goal, as of `month`: how far along, and when they get there. */
 export function goals(ix: Index, month: string, today: string): GoalProgress[] {
   const current = monthOf(today)
   const first = ix.months[0]
@@ -222,12 +252,12 @@ export function goals(ix: Index, month: string, today: string): GoalProgress[] {
   const out: GoalProgress[] = []
   for (const cat of ix.cats) {
     const t = cat.target
-    if (!t || cat.archived || !setAside(cat) || t.amount <= 0) continue
+    if (!t || t.kind !== 'goal' || cat.archived || !setAside(cat) || t.amount <= 0) continue
     const ms = recent.filter((m) => m !== current || ix.asg.get(m)?.has(cat.id))
     const pace = Math.round(mean(ms.map((m) => (ix.asg.get(m)?.get(cat.id) ?? 0) + (ix.act.get(m)?.get(cat.id) ?? 0))))
     const saved = Math.max(0, view.byId.get(cat.id)?.available ?? 0)
     const missing = t.amount - saved
-    const by = t.kind === 'goal' ? t.by : undefined
+    const by = t.by
     const eta = missing > 0 && pace >= 100 ? addMonths(month, Math.ceil(missing / pace)) : null
     const needed = by && missing > 0 ? Math.ceil(missing / Math.max(1, monthDiff(month, by)) / 100) * 100 : null
     const status = missing <= 0 ? 'done' : by ? (eta && eta <= by ? 'on' : 'behind') : 'open'
@@ -243,14 +273,4 @@ export function goalLine(g: GoalProgress, base: string, month: string): string {
   if (g.status === 'on') return `On pace for ${name(g.by!)}`
   if (g.status === 'behind') return `${fmt(g.needed!, base)} a month to make ${name(g.by!)}`
   return g.eta ? `${name(g.eta)} at this pace` : 'Nothing added lately'
-}
-
-/** "Aug–Oct" for a run of months. */
-export function rangeName(months: string[]): string {
-  if (!months.length) return ''
-  const a = months[0]
-  const b = months[months.length - 1]
-  const year = a.slice(0, 4) !== b.slice(0, 4)
-  const name = (m: string) => monthName(m, { short: true, year })
-  return a === b ? name(a) : `${name(a)}–${name(b)}`
 }

@@ -1,57 +1,44 @@
-import type { JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { daily, monthView } from '../lib/budget'
-import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { advice, byChange, change, goalLine, goals, monthsBefore, rangeName, type Basis } from '../lib/compare'
+import { goalLine, goals, incomeBySource, roundPlan, same, spending, standouts, type MonthSpend } from '../lib/compare'
+import { addMonths, monthName, monthOf } from '../lib/dates'
 import { claudeSummary } from '../lib/export'
-import { burn, categoryTrends, insights, lastDays, monthSeries, spendingTrend, weeks, type CatTrend, type SpendTrend } from '../lib/insights'
+import { savedLine, wealth } from '../lib/insights'
 import { fmt } from '../lib/money'
 import { setNote } from '../lib/store'
-import { BurnChart, DayBars, MonthBars, Sparkline, WeekBars } from '../ui/charts'
-import { useIndex, useMedia } from '../ui/hooks'
+import type { ID } from '../lib/types'
+import { WealthChart } from '../ui/charts'
+import { useIndex } from '../ui/hooks'
 import { IconChevron, toast } from '../ui/kit'
 import { play } from '../ui/sound'
 import '../ui/review.css'
+import { SpentSheet } from './SpentSheet'
 
-export function Review(props: { today: string; month: string; setMonth: (m: string) => void }) {
+/** Rows shown before "Show all": enough for the big ones, short enough to take in at once. */
+const FEW = 7
+
+/** 1st, 2nd, 3rd, 4th … 22nd */
+function ordinal(n: number): string {
+  const k = n % 100 >= 11 && n % 100 <= 13 ? 0 : n % 10
+  return `${n}${k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th'}`
+}
+
+export function Review(props: { today: string; month: string; setMonth: (m: string) => void; onCount?: () => void }) {
   const ix = useIndex()
   const { today, month } = props
   const current = monthOf(today)
   const base = ix.settings.base
   const first = ix.months[0] ?? current
   const isCurrent = month === current
-  const wide = useMedia('(min-width: 960px)')
-  const narrow = useMedia('(max-width: 359px)')
 
-  const notes = useMemo(() => insights(ix, month, today), [ix, month, today])
-  const b = useMemo(() => burn(ix, month, today), [ix, month, today])
-  // six months up to now, or up to five months after the month shown when that is older
-  const months = useMemo(() => {
-    const end = month < addMonths(current, -5) ? addMonths(month, 5) : current
-    const list: string[] = []
-    for (let i = 5; i >= 0; i--) {
-      const m = addMonths(end, -i)
-      if (m >= first) list.push(m)
-    }
-    return monthSeries(ix, list, current)
-  }, [ix, month, current, first])
-  const days = useMemo(() => (isCurrent ? lastDays(ix, today, 14) : []), [ix, today, isCurrent])
-  const allowance = useMemo(() => {
-    const d = daily(ix, monthView(ix, current, current), today)
-    return d && d.available > 0 ? d.allowance : null
-  }, [ix, current, today])
-  const wk = useMemo(() => weeks(ix, today, 8), [ix, today])
-  const trends = useMemo(() => categoryTrends(ix, month, today, 6), [ix, month, today])
-  const total = useMemo(() => spendingTrend(ix, month, today), [ix, month, today])
-  const tips = useMemo(() => advice(ix, month, today), [ix, month, today])
+  const s = useMemo(() => spending(ix, month, today), [ix, month, today])
+  const lines = useMemo(() => standouts(ix, s), [ix, s])
+  const w = useMemo(() => wealth(ix, month, today), [ix, month, today])
+  const saved = useMemo(() => savedLine(ix, month, today), [ix, month, today])
+  const income = useMemo(() => incomeBySource(ix, month), [ix, month])
   const goalList = useMemo(() => goals(ix, month, today), [ix, month, today])
-  const before = monthsBefore(ix, month)
-  // a typical month needs at least two to be more than last month again
-  const [picked, setBasis] = useState<Basis>('usual')
-  const basis: Basis = before >= 2 ? picked : 'last'
-  const hasSpending = b.actual.some((v) => (v ?? 0) > 0) || b.plan > 0
+  const [spentCat, setSpentCat] = useState<ID | null>(null)
+  const [all, setAll] = useState(false)
   const hasData = ix.months.includes(month)
-  const sparks = (trends[0]?.series.length ?? 0) > 1
 
   // Every press moves one month, however fast they come: read and write the month through a ref,
   // not the value this render closed over.
@@ -78,11 +65,14 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // A month picked in the chart opens at the top, so its name is in view.
-  const open = (m: string) => {
-    go(m)
-    window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-  }
+  const compared = s.months.length > 0
+  const by = isCurrent ? ` by the ${ordinal(s.day)}` : ''
+  const max = Math.max(1, ...s.cats.map((c) => Math.max(c.spent, c.usual ?? 0)))
+  const cut = s.cats.length > FEW + 1 && !all
+  const cats = cut ? s.cats.slice(0, FEW) : s.cats
+  const end = w?.points[w.points.length - 1]
+  const period = !!w && w.points.length > 1
+  const incomeMax = Math.max(1, ...income.map((r) => Math.max(r.amount, r.usual ?? 0)))
 
   const atFirst = month <= first
   return (
@@ -104,100 +94,115 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
         )}
       </div>
 
-      {notes.length > 0 ? (
-        <ul class="insights">
-          {notes.map((n, i) => (
-            <li key={i} class={n.tone}>
+      {s.spent > 0 ? <Headline s={s} base={base} /> : isCurrent && <p class="empty">Log a few days of spending and this fills in.</p>}
+
+      {lines.length > 0 && (
+        <ul class="insights rv-lines">
+          {lines.map((n) => (
+            <li key={n.cat} class={n.tone}>
               {n.text}
             </li>
           ))}
         </ul>
-      ) : (
-        !hasSpending && <p class="empty">Log a few days of spending and this fills in.</p>
       )}
 
-      {hasSpending && (
-        <section class="card">
-          <h2>{isCurrent ? 'This month so far' : monthName(month)}</h2>
-          <BurnChart burn={b} base={base} />
-        </section>
-      )}
-
-      {isCurrent && days.some((d) => d.spent > 0) && (
-        <section class="card">
-          <h2>Day to day</h2>
-          <DayBars days={days} allowance={allowance} base={base} today={today} />
-        </section>
-      )}
-
-      {isCurrent && wk.some((w) => w.spent > 0) && (
-        <section class="card">
-          <h2>Week to week</h2>
-          <WeekBars weeks={wk} base={base} />
-        </section>
-      )}
-
-      {months.length > 1 && (
-        <section class="card">
-          <h2>Month to month</h2>
-          <MonthBars points={months} base={base} current={current} selected={month} onSelect={open} />
-        </section>
-      )}
-
-      {trends.length > 0 && (
+      {s.cats.length > 0 && (
         <section class="card">
           <div class="card-head">
-            <h2>
-              Categories
-              {before > 0 && (isCurrent || before === 1) && (
-                <span class="card-sub">
-                  {isCurrent ? ` by day ${dayOfMonth(today)}` : ''}
-                  {before === 1 ? ` vs ${monthName(addMonths(month, -1), { short: true })}` : ''}
-                </span>
-              )}
-            </h2>
-            {before >= 2 && (
-              <div class="pills" role="group" aria-label="Compare with">
-                <button class="pill sm" aria-pressed={basis === 'last'} onClick={() => setBasis('last')}>
-                  vs {monthName(addMonths(month, -1), { short: true })}
-                </button>
-                <button class="pill sm" aria-pressed={basis === 'usual'} onClick={() => setBasis('usual')} title="The middle of the three months before">
-                  vs usual
-                </button>
-              </div>
+            <h2>Where it went</h2>
+            {compared && <UsualKey text={`usual${by}`} />}
+          </div>
+          <div class="rv-rows">
+            {cats.map((c) => {
+              const t = tone(c.spent, c.usual, base, (diff) => (diff < 0 ? 'pos' : c.spent > c.planned ? 'neg' : 'muted'))
+              return (
+                <BarRow
+                  key={c.id}
+                  name={c.name}
+                  amount={c.spent}
+                  usual={c.usual}
+                  max={max}
+                  base={base}
+                  diff={t}
+                  onOpen={() => setSpentCat(c.id)}
+                />
+              )
+            })}
+          </div>
+          {s.cats.length > FEW + 1 && (
+            <button class="pill sm rv-more" onClick={() => setAll(!all)}>
+              {all ? 'Fewer' : `All ${s.cats.length}`}
+            </button>
+          )}
+        </section>
+      )}
+
+      {w && end && (
+        <section class="card">
+          <div class="card-head">
+            <h2>Net worth</h2>
+            {props.onCount && (
+              <button class="pill sm" onClick={props.onCount}>
+                Update balances
+              </button>
             )}
           </div>
-          <div class={`trends${sparks ? '' : ' flat'}`}>
-            {before > 0 && <TrendRow name="All spending" t={total} basis={basis} base={base} spark={sparks ? <span /> : null} total />}
-            {(before > 0 ? byChange(trends, basis) : trends).map((t) => (
-              <TrendRow
-                key={t.id}
-                name={t.name}
-                tag={t.overMonths >= 2 ? `over ${t.overMonths} months` : ''}
-                t={t}
-                basis={basis}
+          <p class="rv-big">
+            <span class="num marked">{fmt(end.total, base)}</span>
+            {period && !same(w.change, end.total) && (
+              <small class={`num ${w.change > 0 ? 'pos' : 'neg'}`}>
+                {fmt(w.change, base, { sign: true })} since {monthName(w.points[0].month, { short: true, year: w.points[0].month.slice(0, 4) !== month.slice(0, 4) })}
+              </small>
+            )}
+          </p>
+          {period && <WealthChart points={w.points} base={base} />}
+          {w.growth !== null && (
+            <div class="rv-facts">
+              <span>
+                <small>Investments</small>
+                <b class="num">{fmt(end.invest, base)}</b>
+              </span>
+              {period && (
+                <span>
+                  <small>Put in</small>
+                  <b class="num">{fmt(w.added, base)}</b>
+                </span>
+              )}
+              {period && (
+                <span>
+                  <small>Growth</small>
+                  <b class={`num${same(w.growth, end.invest) ? '' : w.growth > 0 ? ' pos' : ' neg'}`}>{fmt(w.growth, base, { sign: true })}</b>
+                </span>
+              )}
+            </div>
+          )}
+          {saved && (
+            <ul class="insights rv-saved">
+              <li class={saved.good ? 'good' : ''}>{saved.text}</li>
+            </ul>
+          )}
+        </section>
+      )}
+
+      {income.length > 0 && (
+        <section class="card">
+          <div class="card-head">
+            <h2>Income</h2>
+            {compared && <UsualKey text="usual" />}
+          </div>
+          <div class="rv-rows">
+            {income.map((r) => (
+              <BarRow
+                key={r.id ?? ''}
+                name={r.name}
+                amount={r.amount}
+                usual={r.usual}
+                max={incomeMax}
                 base={base}
-                spark={sparks ? <Sparkline values={t.series} highlightLast width={wide ? 112 : narrow ? 44 : 72} /> : null}
-                compared={before > 0}
+                diff={tone(r.amount, r.usual, base, (diff) => (diff > 0 ? 'pos' : 'muted'))}
               />
             ))}
           </div>
-        </section>
-      )}
-
-      {tips.items.length > 0 && (
-        <section class="card">
-          <div class="card-head">
-            <h2>What to change</h2>
-            <span class="card-sub">{rangeName(tips.months)}</span>
-          </div>
-          <ul class="insights advice">
-            {tips.items.map((n, i) => (
-              <li key={i} class={n.tone}>
-                {n.text}
-              </li>
-            ))}
-          </ul>
         </section>
       )}
 
@@ -227,37 +232,100 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       {(hasData || !!ix.db.notes[month]?.text) && <Reflection month={month} />}
 
       {hasData && <AskClaude today={today} />}
+
+      <SpentSheet cat={spentCat} month={month} today={today} onClose={() => setSpentCat(null)} />
     </div>
   )
 }
 
-/** A spending row: this month, and the change against last month or a typical month under it. */
-function TrendRow(props: {
-  name: string
-  t: CatTrend | SpendTrend
-  basis: Basis
-  base: string
-  tag?: string
-  spark?: JSX.Element | null
-  compared?: boolean
-  total?: boolean
-}) {
-  const { t, base } = props
-  const c = change(t, props.basis)
-  // more spending is only a warning once it goes past the plan
-  const tone = c.same ? 'faint' : c.diff < 0 ? 'pos' : t.thisMonth > t.planned ? 'neg' : 'muted'
-  const word = c.then === null ? '' : c.same ? 'same' : c.then === 0 ? 'new' : fmt(c.diff, base, { bare: true, sign: true })
+/** The month in one sentence: what went out, and how that compares with the usual (or the plan, with no past yet). */
+function Headline(props: { s: MonthSpend; base: string }) {
+  const { s, base } = props
+  const so = s.running ? ' so far' : ''
+  let tail = null
+  if (s.usual !== null) {
+    const diff = s.spent - s.usual
+    const by = s.running ? ` by the ${ordinal(s.day)}` : ''
+    tail = same(diff, Math.max(s.spent, s.usual)) ? (
+      <>, about usual{by}</>
+    ) : (
+      <>
+        ,{' '}
+        <span class={`num ${diff < 0 ? 'pos' : s.spent > s.planned ? 'neg' : ''}`}>{fmt(roundPlan(Math.abs(diff), 'near'), base)}</span>{' '}
+        {diff < 0 ? 'less' : 'more'} than usual{by}
+      </>
+    )
+  } else if (s.planned > 0) {
+    tail = (
+      <>
+        {' '}
+        of <span class="num">{fmt(s.planned, base)}</span> planned
+      </>
+    )
+  }
   return (
-    <div class={`trend-row${props.total ? ' total' : ''}`}>
-      <span class="trend-name">
-        {props.name}
-        {props.tag && <small class="neg">{props.tag}</small>}
+    <p class="rv-head">
+      <span class="num marked">{fmt(s.spent, base)}</span> spent{so}
+      {tail}
+    </p>
+  )
+}
+
+interface Diff {
+  word: string
+  cls: string
+}
+
+/** The change against the usual under an amount: "+NT$1,200", "usual", or nothing with no usual to go on. */
+function tone(amount: number, usual: number | null, base: string, cls: (diff: number) => string): Diff | null {
+  if (usual === null) return null
+  const diff = amount - usual
+  if (same(diff, Math.max(amount, usual))) return { word: 'usual', cls: 'faint' }
+  return { word: fmt(Math.round(diff / 100) * 100, base, { bare: true, sign: true }), cls: cls(diff) }
+}
+
+function UsualKey(props: { text: string }) {
+  return (
+    <span class="card-sub rv-key">
+      <i aria-hidden="true" />
+      {props.text}
+    </span>
+  )
+}
+
+/** A ranked row: name and amount over a bar, with a tick where the usual is. Tappable rows open what's behind them. */
+function BarRow(props: {
+  name: string
+  amount: number
+  usual: number | null
+  max: number
+  base: string
+  diff: Diff | null
+  onOpen?: () => void
+}) {
+  const { amount, usual, max, base, diff } = props
+  const pct = (v: number) => `${Math.min(100, (Math.max(0, v) / max) * 100).toFixed(1)}%`
+  const label = `${props.name}: ${fmt(amount, base)}${usual !== null ? `, usual ${fmt(usual, base)}` : ''}`
+  const body = (
+    <>
+      <span class="rv-name">{props.name}</span>
+      <span class="rv-amt num">
+        {fmt(amount, base)}
+        {diff && <small class={diff.cls}>{diff.word}</small>}
       </span>
-      {props.spark}
-      <span class="num">
-        {fmt(t.thisMonth, base)}
-        {(props.compared ?? true) && word && <small class={tone}>{word}</small>}
+      <span class="rv-track" aria-hidden="true">
+        <i class="rv-fill" style={{ width: pct(amount) }} />
+        {usual !== null && usual > 0 && <i class="rv-tick" style={{ left: pct(usual) }} />}
       </span>
+    </>
+  )
+  return props.onOpen ? (
+    <button class="rv-row" aria-label={label} onClick={props.onOpen}>
+      {body}
+    </button>
+  ) : (
+    <div class="rv-row" aria-label={label} role="group">
+      {body}
     </div>
   )
 }
