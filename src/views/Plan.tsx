@@ -60,12 +60,14 @@ export function Plan(props: {
   const shownRta = useCountUp(rta)
   const rtaRef = useRef<HTMLDivElement>(null)
 
-  // Assigning the last of the money is worth a small celebration (not switching months, nor an income removed).
+  // Landing on exactly zero is worth a small celebration: the last of the money assigned, or an over-assigned
+  // plan put right (assigning less, or income covering it). Not switching months, nor an income removed.
   const was = useRef({ month, sign: rtaSign, assigned: view.assigned })
   useEffect(() => {
     const p = was.current
     was.current = { month, sign: rtaSign, assigned: view.assigned }
-    if (p.month !== month || p.sign <= 0 || rtaSign !== 0 || view.assigned <= p.assigned) return
+    if (p.month !== month || rtaSign !== 0 || p.sign === 0) return
+    if (p.sign > 0 && view.assigned <= p.assigned) return
     play('complete')
     haptic('medium')
     confetti(rtaRef.current)
