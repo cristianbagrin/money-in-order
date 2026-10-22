@@ -3,11 +3,9 @@ import { monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
 import { fmt, shownSign } from './lib/money'
 import { redo } from './lib/store'
-import { joinSync, normalizeCode, syncReady, syncStatus } from './lib/sync'
 import type { ID, Txn } from './lib/types'
 import { useIndex, useSync, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
-import { play } from './ui/sound'
 import { CategorySheet } from './views/CategorySheet'
 import { CountSheet } from './views/CountSheet'
 import { History } from './views/History'
@@ -38,11 +36,6 @@ function isTextField(el: Element): boolean {
   return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|email|url|tel|password|number)$/.test((el as HTMLInputElement).type))
 }
 
-function readJoin(): string | undefined {
-  const m = location.hash.match(/join=([A-Za-z0-9-]+)/)
-  return m ? normalizeCode(m[1]) ?? undefined : undefined
-}
-
 export function App() {
   const ix = useIndex()
   const today = useToday()
@@ -54,9 +47,6 @@ export function App() {
   const [txn, setTxn] = useState<Txn | null>(null)
   const [counting, setCounting] = useState(false)
   const [historyFilter, setHistoryFilter] = useState('all')
-  const joinCode = readJoin()
-  // Re-render when a join link is opened in this tab while it's open (only the hash changes).
-  const [, setJoinSeen] = useState(joinCode)
 
   useEffect(() => {
     const on = () => setRoute(readRoute())
@@ -124,38 +114,11 @@ export function App() {
     if (route !== 'settings') lastMain.current = route
   }, [route])
 
-  useEffect(() => {
-    const on = () => setJoinSeen(readJoin())
-    window.addEventListener('hashchange', on)
-    return () => window.removeEventListener('hashchange', on)
-  }, [])
-
-  // A join link on a device that's already set up works like Settings > Join: the other budget replaces this one.
-  useEffect(() => {
-    if (!joinCode || !ix.settings.ready) return
-    history.replaceState(null, '', '#/today')
-    setJoinSeen(undefined)
-    // Once this tab knows its own code: a link to the budget it already syncs changes nothing.
-    void syncReady.then(() => {
-      if (syncStatus().code === joinCode) return
-      if (!confirm('Use the budget from your other device on this one? What is on this device now is replaced.')) return
-      void joinSync(joinCode).then((r) => {
-        if (r === 'joined') {
-          play('success')
-          toast('Joined')
-        } else {
-          play('error')
-          toast(r === 'missing' ? 'Nothing is stored under that code' : 'Couldn’t reach the server')
-        }
-      })
-    })
-  }, [joinCode, ix.settings.ready])
-
   if (!ix.settings.ready) {
     return (
       <>
         <div class="statusbar" />
-        <Onboarding joinCode={joinCode} onDone={() => setRoute(readRoute())} />
+        <Onboarding onDone={() => setRoute(readRoute())} />
         <Toasts />
       </>
     )

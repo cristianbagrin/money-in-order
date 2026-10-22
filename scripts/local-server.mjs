@@ -14,7 +14,8 @@ await blobs.start()
 globalThis.netlifyBlobsContext = Buffer.from(
   JSON.stringify({ edgeURL: `http://localhost:${BLOBS_PORT}`, uncachedEdgeURL: `http://localhost:${BLOBS_PORT}`, token: 'tok', siteID: 'site' }),
 ).toString('base64')
-const { default: handler } = await import('../netlify/functions/vault.mts')
+const { default: vault } = await import('../netlify/functions/vault.mts')
+const { default: account } = await import('../netlify/functions/account.mts')
 const dist = path.resolve('dist')
 // Same security headers as netlify.toml, so problems show up locally first.
 const HEADERS = {
@@ -27,12 +28,13 @@ const types = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/htm
 http
   .createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost:4174')
-    const m = url.pathname.match(/^\/api\/vault\/([^/]+)$/)
+    const m = url.pathname.match(/^\/api\/(vault|account)\/([^/]+)$/)
     if (m) {
+      const handler = m[1] === 'vault' ? vault : account
       const chunks = []
       for await (const c of req) chunks.push(c)
       const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks)
-      const r = await handler(new Request(url, { method: req.method, headers: req.headers, body }), { params: { id: m[1] } })
+      const r = await handler(new Request(url, { method: req.method, headers: req.headers, body }), { params: { id: m[2] } })
       res.writeHead(r.status, Object.fromEntries(r.headers))
       res.end(req.method === 'HEAD' ? undefined : Buffer.from(await r.arrayBuffer()))
       return

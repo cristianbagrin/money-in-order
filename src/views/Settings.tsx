@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { transactionsCSV } from '../lib/export'
 import { refreshRates } from '../lib/rates'
 import { addAccount, changeBase, deleteAccount, restoreBackup, saveAccount, settings, unarchiveCategory, undoable, updateSettings } from '../lib/store'
-import { disableSync, joinSync, normalizeCode, turnOnSync } from '../lib/sync'
+import { disableSync } from '../lib/sync'
+import { AccountForm } from '../ui/account'
 import { live, type Account, type DB } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
 import { useIndex, useSync } from '../ui/hooks'
@@ -305,72 +306,13 @@ function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => 
 
 function SyncBox() {
   const sync = useSync()
-  const [joining, setJoining] = useState(false)
-  const [joinCode, setJoinCode] = useState('')
-  const [busy, setBusy] = useState(false)
-  const codeInput = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (joining) codeInput.current?.focus()
-  }, [joining])
-
-  if (!sync.code) {
-    const join = async () => {
-      const code = normalizeCode(joinCode)
-      if (!code || busy) return
-      if (!confirm('Use the budget from your other device on this one? What is on this device now is replaced.')) return
-      setBusy(true)
-      const r = await joinSync(code)
-      setBusy(false)
-      if (r === 'joined') {
-        setJoining(false)
-        setJoinCode('')
-        play('success')
-        toast('Joined')
-      } else {
-        play('error')
-        toast(r === 'missing' ? 'Nothing is stored under that code' : 'Couldn’t reach the server')
-      }
-    }
+  // Not signed in. A device still on a sync code from before accounts keeps syncing meanwhile.
+  if (!sync.email) {
     return (
       <Section title="Sync">
-        <div class="pills">
-          <button
-            class="pill"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              await turnOnSync()
-              setBusy(false)
-              play('success')
-            }}
-          >
-            Turn on
-          </button>
-          <button class="pill toggle" aria-pressed={joining} onClick={() => setJoining(!joining)}>
-            Join with code
-          </button>
-        </div>
-        {joining && (
-          <div class="row" style={{ marginTop: '10px' }}>
-            <input
-              type="text"
-              class="grow num"
-              aria-label="Sync code from your other device"
-              spellcheck={false} autocorrect="off"
-              placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-              ref={codeInput}
-              value={joinCode}
-              autocapitalize="characters"
-              onInput={(e) => setJoinCode(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void join()
-                if (e.key === 'Escape') setJoining(false)
-              }}
-            />
-            <button class="pill" disabled={busy || !normalizeCode(joinCode)} onClick={join}>
-              Join
-            </button>
-          </div>
+        <AccountForm />
+        {(navigator as Navigator & { standalone?: boolean }).standalone === false && (
+          <p class="hint">Add this app to your Home Screen first, then sign in there.</p>
         )}
       </Section>
     )
@@ -386,37 +328,21 @@ function SyncBox() {
           : 'On'
   return (
     <Section title="Sync">
-      <p class={sync.state === 'error' ? 'neg' : 'muted'} style={{ margin: '0 0 10px', fontSize: '14px' }}>
-        {status}
-      </p>
-      <div class="code">{sync.code}</div>
-      <div class="pills" style={{ marginTop: '10px' }}>
+      <div class="signed-in">
+        <span class="grow">
+          <b>{sync.email}</b>
+          <small class={sync.state === 'error' ? 'neg' : 'muted'}>{status}</small>
+        </span>
         <button
-          class="pill"
+          class="pill sm"
           onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(sync.code!)
-              toast('Code copied')
-            } catch {
-              toast(sync.code!)
-            }
-          }}
-        >
-          Copy code
-        </button>
-        <button
-          class="pill"
-          onClick={async () => {
-            if (!confirm('Stop syncing on this device? Your data stays here.')) return
+            if (!confirm('Sign out on this device? Your data stays here.')) return
             await disableSync()
           }}
         >
-          Turn off
+          Sign out
         </button>
       </div>
-      {(navigator as Navigator & { standalone?: boolean }).standalone === false && (
-        <p class="hint">Add this app to your Home Screen first, then enter the code there.</p>
-      )}
     </Section>
   )
 }

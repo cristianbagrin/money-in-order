@@ -207,7 +207,7 @@ export function Plan(props: {
           )
         ) : (
           <div class="rta-line">
-            <span class="rta-cap">{rtaSign > 0 ? 'ready to assign, give it all a job' : rtaSign < 0 ? 'more assigned than you have.' : 'every bit has a job.'}</span>
+            <span class="rta-cap">{rtaSign > 0 ? 'ready to assign, give it all a job' : rtaSign < 0 ? 'more assigned than you have' : 'every bit has a job'}</span>
             {!showRitual && (fundPill || repeatPill) && (
               <span class="rta-actions">
                 {fundPill}

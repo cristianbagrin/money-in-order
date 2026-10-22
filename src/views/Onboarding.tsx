@@ -2,8 +2,8 @@ import { useState } from 'preact/hooks'
 import { evalAmount } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
 import { addAccount, getDB, recordCount, seedCategories, settings, today, updateSettings } from '../lib/store'
-import { joinSync, normalizeCode } from '../lib/sync'
 import { RTA } from '../lib/types'
+import { AccountForm } from '../ui/account'
 import { CurrencyPicker } from '../ui/currency'
 import { IconPlus, regroup, toast } from '../ui/kit'
 import { play } from '../ui/sound'
@@ -14,15 +14,14 @@ interface DraftAccount {
   bal: string
 }
 
-export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
-  const [step, setStep] = useState<'welcome' | 'setup' | 'join'>(props.joinCode ? 'join' : 'welcome')
+export function Onboarding(props: { onDone: () => void }) {
+  const [step, setStep] = useState<'welcome' | 'setup' | 'join'>('welcome')
   const [main, setMain] = useState('TWD')
   const [selected, setSelected] = useState<string[]>(['TWD', 'EUR', 'PLN'])
   const [accounts, setAccounts] = useState<DraftAccount[]>([
     { name: 'Cash', cur: 'TWD', bal: '' },
     { name: 'Revolut', cur: 'PLN', bal: '' },
   ])
-  const [code, setCode] = useState(props.joinCode ?? '')
   const [busy, setBusy] = useState(false)
 
   if (step === 'welcome') {
@@ -64,7 +63,7 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
             Set up my budget
           </button>
           <button class="btn soft block" onClick={() => setStep('join')}>
-            I already use it on another device
+            I already have an account
           </button>
         </div>
       </div>
@@ -74,42 +73,18 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
   if (step === 'join') {
     return (
       <div class="welcome">
-        <h1 style={{ fontSize: '34px' }}>Join your other device</h1>
-        <p class="lede">Settings → Sync on your other device shows the code.</p>
-        <input
-          type="text"
-          class="num"
-          style={{ marginTop: '24px' }}
-          aria-label="Sync code"
-          spellcheck={false}
-          autocorrect="off"
-          value={code}
-          placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
-          autocapitalize="characters"
-          onInput={(e) => setCode(e.currentTarget.value)}
-        />
-        <div class="foot">
-          <button
-            class="btn block"
-            disabled={busy || !normalizeCode(code)}
-            onClick={async () => {
-              const c = normalizeCode(code)
-              if (!c) return
-              setBusy(true)
-              const r = await joinSync(c)
-              setBusy(false)
-              if (r === 'joined' && getDB().meta.settings?.ready) {
-                play('success')
-                history.replaceState(null, '', '#/today')
-                props.onDone()
-              } else {
-                play('error')
-                toast(r === 'error' ? 'Couldn’t reach the server' : 'Nothing is stored under that code')
-              }
+        <h1 style={{ fontSize: '34px' }}>Sign in</h1>
+        <div style={{ marginTop: '24px' }}>
+          <AccountForm
+            signInOnly
+            onDone={() => {
+              if (!getDB().meta.settings?.ready) return
+              history.replaceState(null, '', '#/today')
+              props.onDone()
             }}
-          >
-            {busy ? 'Connecting…' : 'Join'}
-          </button>
+          />
+        </div>
+        <div class="foot">
           <button class="btn soft block" onClick={() => setStep('welcome')}>
             Back
           </button>

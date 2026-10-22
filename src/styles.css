@@ -492,6 +492,8 @@ h3 {
 
 input[type='text'],
 input[type='search'],
+input[type='email'],
+input[type='password'],
 input[type='month'],
 input:not([type]),
 textarea {
@@ -1463,16 +1465,30 @@ textarea:focus {
   min-height: 48px;
   border-bottom: 1px solid var(--rule);
 }
-.code {
-  font-variation-settings: var(--vs-column);
-  font-size: 17px;
-  letter-spacing: 0.06em;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  text-align: center;
-  user-select: all;
+.account {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+.account .pills {
+  margin-bottom: 2px;
+}
+.account .pill.solid {
+  justify-self: start;
+}
+.signed-in {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.signed-in b {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.signed-in small {
+  display: block;
+  font-size: 13px;
 }
 
 /* ---------------------------------------------------------------- onboarding */

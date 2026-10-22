@@ -1,11 +1,18 @@
-// End-to-end encrypted sync. The server stores one opaque blob per sync code and never sees the key.
+// End-to-end encrypted sync. The server stores one opaque blob per account and never sees the key.
+//
+// An account is an email and a password. The password, stretched with PBKDF2 (the email is the salt),
+// becomes the account's secret; the vault id and the encryption key are derived from that secret, so
+// the server never sees the password, the secret or the data. Budgets synced before accounts existed
+// used a random 20-character code in place of the secret, and keep working until the device signs in.
 
 import { get, set, update } from 'idb-keyval'
 import { hasNews, merge } from './merge'
 import { dbEpoch, getDB, onLocalChange, persistNow, pullNow, replaceDB, swapDB } from './store'
 import type { DB } from './types'
 
-const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // no 0/O/1/I/L
+/** PBKDF2 rounds: about half a second on a phone, once per sign-in. */
+const ROUNDS = 310_000
+export const MIN_PASSWORD = 8
 const OFFLINE = 'Offline. Changes will sync when you’re back.'
 const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly.'
 /** Unsent changes older than this make the status `stale`. */
@@ -14,7 +21,10 @@ const STALE_AFTER = 10 * 60 * 1000
 export type SyncState = 'off' | 'idle' | 'syncing' | 'offline' | 'error'
 
 interface SyncConfig {
+  /** the account's secret (or, from before accounts, a sync code) */
   code: string
+  /** the account's email; missing for a sync code */
+  email?: string
   rev: string | null
   /** local edits not yet uploaded */
   dirty: boolean
@@ -47,6 +57,7 @@ export function syncStatus() {
     state,
     error: errorMsg,
     code: cfg?.code ?? null,
+    email: cfg?.email ?? null,
     last: cfg?.last ?? 0,
     dirty: cfg?.dirty ?? false,
     /** sync is on but changes made here haven't reached the server for a while */
@@ -86,18 +97,28 @@ function markClean() {
   delete cfg.since
 }
 
-export function newCode(): string {
-  const bytes = new Uint8Array(20)
-  crypto.getRandomValues(bytes)
-  let s = ''
-  for (const b of bytes) s += ALPHABET[b % ALPHABET.length]
-  return s.match(/.{5}/g)!.join('-')
+export function normalizeEmail(s: string): string {
+  return s.trim().toLowerCase()
 }
 
-export function normalizeCode(input: string): string | null {
-  const s = input.toUpperCase().replace(/[^A-Z0-9]/g, '')
-  if (s.length !== 20 || [...s].some((c) => !ALPHABET.includes(c))) return null
-  return s.match(/.{5}/g)!.join('-')
+export function validEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(s))
+}
+
+const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
+
+/** The account's secret, from its password. Slow on purpose, so a password can't be guessed quickly. */
+async function accountSecret(email: string, password: string): Promise<string> {
+  const enc = new TextEncoder()
+  const pw = await crypto.subtle.importKey('raw', enc.encode(password.normalize('NFC')), 'PBKDF2', false, ['deriveBits'])
+  const salt = enc.encode('money-in-order/account/' + normalizeEmail(email))
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: ROUNDS }, pw, 256))
+}
+
+/** Where the server notes that an email has an account (a hash: the server never sees the email). */
+async function emailUrl(email: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('money-in-order/email/' + normalizeEmail(email)))
+  return `/api/account/${hex(digest)}`
 }
 
 async function derive(code: string) {
@@ -105,9 +126,8 @@ async function derive(code: string) {
   const raw = enc.encode(code.replace(/-/g, ''))
   const idHash = await crypto.subtle.digest('SHA-256', new Uint8Array([...enc.encode('money-in-order/id/'), ...raw]))
   const keyHash = await crypto.subtle.digest('SHA-256', new Uint8Array([...enc.encode('money-in-order/key/'), ...raw]))
-  const id = [...new Uint8Array(idHash)].map((b) => b.toString(16).padStart(2, '0')).join('')
   const key = await crypto.subtle.importKey('raw', keyHash, 'AES-GCM', false, ['encrypt', 'decrypt'])
-  return { id, key }
+  return { id: hex(idHash), key }
 }
 
 function b64(bytes: Uint8Array): string {
@@ -183,11 +203,6 @@ async function follow() {
   cfg = saved
   keys = k
   setState('idle')
-}
-
-/** Remember the code after sync is turned off, so turning it back on resumes the same budget. */
-async function rememberCode(code: string) {
-  await set('syncCode', code).catch(() => {})
 }
 
 async function syncOnce(): Promise<void> {
@@ -325,7 +340,6 @@ export async function initSync(opts: { dirty?: boolean } = {}) {
     ready()
   }
   if (!cfg) return
-  void rememberCode(cfg.code)
   // Changes recovered after an interrupted save may not have been uploaded yet.
   if (opts.dirty) markDirty()
   await syncNow()
@@ -336,60 +350,86 @@ export function syncIdle(): Promise<void> {
   return running ?? Promise.resolve()
 }
 
-/** Start syncing with a code. Local data is merged with whatever is stored under the code. */
-export async function enableSync(code: string) {
+/** Start syncing under a secret. Local data is merged with whatever is stored under it. */
+export async function enableSync(code: string, email?: string) {
   const k = await derive(code)
-  cfg = { code, rev: null, dirty: true, since: Date.now(), last: 0, epoch: dbEpoch() }
+  cfg = { code, email, rev: null, dirty: true, since: Date.now(), last: 0, epoch: dbEpoch() }
   keys = k
   await storeCfg()
-  await rememberCode(code)
   wire()
   setState('idle')
   await syncNow()
 }
 
-/** Turn sync on: with the code this device used before (so its other devices keep up), or a new one. */
-export async function turnOnSync() {
-  const prev = (await get('syncCode').catch(() => undefined)) as string | undefined
-  await enableSync((prev && normalizeCode(prev)) || newCode())
+/** Take the budget stored under a secret as it is: this device's own data is replaced, so two budgets never get mixed. */
+async function adopt(code: string, email: string | undefined, res: Response, k: Awaited<ReturnType<typeof derive>>) {
+  const remote = await open(await res.text(), k.key)
+  // A different budget, not a merge: other tabs drop the old one instead of merging it back in.
+  swapDB(remote)
+  cfg = { code, email, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now(), epoch: dbEpoch() }
+  keys = k
+  await storeCfg()
+  await persistNow()
+  wire()
+  setState('idle')
 }
 
 /**
- * Join a budget from another device. If the code has data, this device takes that budget as it is
- * (its own data is replaced, so two budgets never get mixed into duplicates).
+ * Create an account with this device's budget. An email that already has an account is refused, so
+ * nobody ends up with two budgets under one email.
  */
-export async function joinSync(code: string): Promise<'joined' | 'missing' | 'error'> {
+export async function signUp(email: string, password: string): Promise<'created' | 'exists' | 'error'> {
   try {
-    const k = await derive(code)
+    const secret = await accountSecret(email, password)
+    const k = await derive(secret)
+    const url = await emailUrl(email)
+    const [vault, known] = await Promise.all([
+      fetch(`/api/vault/${k.id}`, { method: 'HEAD', cache: 'no-store' }),
+      fetch(url, { method: 'HEAD', cache: 'no-store' }),
+    ])
+    if (vault.status === 200 || known.status === 200) return 'exists'
+    if (vault.status !== 404 || known.status !== 404) return 'error'
+    const put = await fetch(url, { method: 'PUT' })
+    if (put.status === 409) return 'exists'
+    if (!put.ok) return 'error'
+    await enableSync(secret, normalizeEmail(email))
+    return 'created'
+  } catch {
+    return 'error'
+  }
+}
+
+/**
+ * Sign in on this device: the account's budget replaces what is here, once `replace` agrees (it is
+ * asked only when the email and password are right).
+ */
+export async function signIn(
+  email: string,
+  password: string,
+  replace: () => boolean = () => true,
+): Promise<'joined' | 'cancelled' | 'wrong' | 'none' | 'error'> {
+  try {
+    const secret = await accountSecret(email, password)
+    if (cfg?.code === secret) return 'joined'
+    const k = await derive(secret)
     const res = await fetch(`/api/vault/${k.id}`, { cache: 'no-store' })
-    if (res.status === 404) return 'missing'
+    if (res.status === 404) {
+      const known = await fetch(await emailUrl(email), { method: 'HEAD', cache: 'no-store' })
+      return known.status === 200 ? 'wrong' : known.status === 404 ? 'none' : 'error'
+    }
     if (!res.ok) return 'error'
-    const remote = await open(await res.text(), k.key)
-    // A different budget, not a merge: other tabs drop the old one instead of merging it back in.
-    swapDB(remote)
-    cfg = { code, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now(), epoch: dbEpoch() }
-    keys = k
-    await storeCfg()
-    await persistNow()
-    await rememberCode(code)
-    wire()
-    setState('idle')
+    if (!replace()) return 'cancelled'
+    await adopt(secret, normalizeEmail(email), res, k)
     return 'joined'
   } catch {
     return 'error'
   }
 }
 
+/** Stop syncing on this device. Its data stays here. */
 export async function disableSync() {
   cfg = null
   keys = null
   await storeCfg()
   setState('off')
-}
-
-/** Check whether a code has data on the server (used when joining from a second device). */
-export async function codeHasData(code: string): Promise<boolean> {
-  const k = await derive(code)
-  const res = await fetch(`/api/vault/${k.id}`, { method: 'HEAD', cache: 'no-store' })
-  return res.status === 200
 }

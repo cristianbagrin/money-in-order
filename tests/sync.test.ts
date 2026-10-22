@@ -27,7 +27,7 @@ describe('sync status', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval'] })
     const sync = await import('../src/lib/sync')
     const S = await import('../src/lib/store')
-    await sync.enableSync(sync.newCode())
+    await sync.enableSync('ABCDE-FGHJK-MNPQR-STUVW')
     expect(sync.syncStatus()).toMatchObject({ state: 'offline', stale: false })
     expect(sync.syncStatus().error).toBe('Offline. Changes will sync when you’re back.')
     let heard = 0
@@ -42,15 +42,5 @@ describe('sync status', () => {
     off()
     await sync.disableSync()
     expect(sync.syncStatus().stale).toBe(false)
-  })
-
-  it('turning sync off and on again resumes the same code', async () => {
-    const sync = await import('../src/lib/sync')
-    await sync.enableSync('ABCDE-FGHJK-MNPQR-STUVW')
-    await sync.disableSync()
-    expect(sync.syncStatus().code).toBe(null)
-    await sync.turnOnSync()
-    expect(sync.syncStatus().code).toBe('ABCDE-FGHJK-MNPQR-STUVW')
-    await sync.disableSync()
   })
 })

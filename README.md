@@ -17,7 +17,7 @@ devices in sync with end-to-end encryption.
 | **History** | Every transaction, searchable, filterable by category; edit with the same pills as everywhere else. |
 | **Review** | What this month means in plain words, this month vs. your plan, the last six months, weeks, category trends, your notes, and **Copy for Claude**. |
 
-Everything important can be undone for a few seconds (and with ⌘Z on a laptop). Sounds can be switched off in Settings.
+Everything important can be undone for a few seconds (and with ⌘Z on a laptop). Sounds are kept for moments that mean something (logging, a finished plan, mistakes, deletes); they can be switched off in Settings.
 
 ### The rules the math follows
 
@@ -34,16 +34,19 @@ Everything important can be undone for a few seconds (and with ⌘Z on a laptop)
 
 ## Sync and privacy
 
-Turning on sync creates a 20-character code (about 100 bits). The code never leaves your devices; from it they derive
+Sync works with an account: an email and a password (Settings → Sync). The password never leaves your devices. From it they derive
 
-- a **vault id** (`SHA-256("money-in-order/id/" + code)`) that names the blob on the server, and
-- an **AES-GCM key** (`SHA-256("money-in-order/key/" + code)`) that encrypts it.
+- the account's **secret**: `PBKDF2-SHA256(password, salt = "money-in-order/account/" + email, 310,000 rounds)`,
+- a **vault id** (`SHA-256("money-in-order/id/" + secret)`) that names the blob on the server, and
+- an **AES-GCM key** (`SHA-256("money-in-order/key/" + secret)`) that encrypts it.
 
 The server (`netlify/functions/vault.mts`, Netlify Blobs) stores one gzip-then-encrypted blob per vault and only ever sees ciphertext.
+`netlify/functions/account.mts` only notes that a hash of an email has an account, so one email can't get two budgets and a sign-in can say "wrong password".
 Every write must name the revision it was based on, so two devices can't silently overwrite each other: the loser gets `412`, pulls, merges and retries.
 Records carry an update timestamp and tombstones, and merging keeps the newest version of each record, so devices converge whatever order they sync in.
 
-Lose the code and you lose access to the synced copy (each device still has its full local data, and **Review → Your data → Backup** saves a file).
+There is no password reset: the server can't decrypt anything, so a forgotten password means losing the synced copy (each device still has its full local data, and **Settings → Your data → Save backup** saves a file).
+Devices that synced with a 20-character code before accounts existed keep syncing until they sign in.
 
 ## Development
 

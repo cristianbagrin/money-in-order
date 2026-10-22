@@ -61,10 +61,19 @@ function idbOf(dev: Device) {
 
 // The sync server: one blob per id, with revisions.
 const vault = new Map<string, { rev: string; body: string }>()
+const accounts = new Set<string>()
 let revs = 0
 async function server(url: string, init: RequestInit = {}): Promise<Response> {
   const id = url.split('/').pop()!
   const method = init.method ?? 'GET'
+  if (url.startsWith('/api/account/')) {
+    if (method === 'PUT') {
+      if (accounts.has(id)) return new Response(null, { status: 409 })
+      accounts.add(id)
+      return new Response(null, { status: 201 })
+    }
+    return new Response(null, { status: accounts.has(id) ? 200 : 404 })
+  }
   const headers = new Headers(init.headers)
   const cur = vault.get(id)
   if (method !== 'PUT') {
@@ -180,7 +189,6 @@ describe('a budget swapped in one tab', () => {
 
 describe('sync state shared by the tabs of a device', () => {
   const X = 'ABCDE-FGHJK-MNPQR-STUVW'
-  const Y = 'WVUTS-RQPNM-KJHGF-EDCBA'
 
   it('turning sync on or off in one tab holds in the others', async () => {
     seed('laptop3', budget('A'))
@@ -199,12 +207,12 @@ describe('sync state shared by the tabs of a device', () => {
     expect(deviceOf('laptop3').kv.get('sync')).toBe(null)
   })
 
-  it('a tab still holding a budget replaced by a join in another tab never uploads it', async () => {
-    // The phone keeps budget B under code Y.
+  it('a tab still holding a budget replaced by a sign-in in another tab never uploads it', async () => {
+    // The phone keeps budget B in an account.
     seed('phone', budget('B'))
     const phone = await tab('phone')
     await phone.sync.initSync()
-    await phone.sync.enableSync(Y)
+    expect(await phone.sync.signUp('B@example.com ', 'password-b')).toBe('created')
     // The laptop syncs budget A under code X in two tabs.
     seed('laptop4', budget('A'))
     const t1 = await tab('laptop4')
@@ -213,11 +221,11 @@ describe('sync state shared by the tabs of a device', () => {
     await t2.sync.initSync()
     await t1.sync.enableSync(X)
     await t2.sync.syncNow()
-    expect(await t1.sync.joinSync(Y)).toBe('joined')
-    // Tab 2 logs to the old budget before it has heard of the join, then syncs.
+    expect(await t1.sync.signIn('b@example.com', 'password-b')).toBe('joined')
+    // Tab 2 logs to the old budget before it has heard of the sign-in, then syncs.
     t2.S.commit({ txns: [txn('late', 'cA')] })
     await t2.sync.syncNow()
-    expect(t2.sync.syncStatus().code).toBe(Y)
+    expect(t2.sync.syncStatus().email).toBe('b@example.com')
     expect(ids(t2.S.getDB())).toEqual(['tB'])
     t2.S.commit({ txns: [txn('fromLaptop', 'cB')] })
     await t2.sync.syncNow()
@@ -225,5 +233,28 @@ describe('sync state shared by the tabs of a device', () => {
     expect(ids(phone.S.getDB())).toEqual(['fromLaptop', 'tB'])
     await t2.S.persistNow()
     expect(ids(stored('laptop4'))).toEqual(['fromLaptop', 'tB'])
+  })
+})
+
+describe('accounts', () => {
+  it('one account per email; a wrong password or an unknown email is told apart', async () => {
+    seed('acct1', budget('C'))
+    const a = await tab('acct1')
+    await a.sync.initSync()
+    expect(await a.sync.signUp('c@example.com', 'correct horse')).toBe('created')
+    expect(a.sync.syncStatus()).toMatchObject({ email: 'c@example.com', state: 'idle', dirty: false })
+    seed('acct2', budget('D'))
+    const b = await tab('acct2')
+    await b.sync.initSync()
+    expect(await b.sync.signUp('C@example.com', 'another one')).toBe('exists')
+    expect(await b.sync.signIn('c@example.com', 'wrong horse')).toBe('wrong')
+    expect(await b.sync.signIn('nobody@example.com', 'correct horse')).toBe('none')
+    expect(await b.sync.signIn('c@example.com', 'correct horse', () => false)).toBe('cancelled')
+    expect(ids(b.S.getDB())).toEqual(['tD'])
+    expect(await b.sync.signIn('c@example.com', 'correct horse')).toBe('joined')
+    expect(ids(b.S.getDB())).toEqual(['tC'])
+    await b.sync.disableSync()
+    expect(b.sync.syncStatus().email).toBe(null)
+    expect(ids(b.S.getDB())).toEqual(['tC'])
   })
 })

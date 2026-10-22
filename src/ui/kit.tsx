@@ -186,10 +186,11 @@ export function regroup(e: Event, opts: { numbersOnly?: boolean } = {}): string 
     const keep = (t: string, start: boolean) => t.replace(/[^\d.,-]/g, '').replace(/-/g, (m, i) => (start && i === 0 ? m : ''))
     before = keep(before, true)
     after = keep(after, !before)
-    // One decimal point at most: the one nearest the caret stays.
-    if (before.includes('.')) after = after.replace(/\./g, '')
-    else after = after.replace(/\.(?=.*\.)/g, '')
-    before = before.replace(/\.(?=.*\.)/g, '')
+    // One decimal point at most: a second one typed is ignored.
+    let dot = false
+    const once = (t: string) => t.replace(/\./g, (m) => (dot ? '' : ((dot = true), m)))
+    before = once(before)
+    after = once(after)
   }
   const value = groupTyped(before + after)
   // The caret goes after the same number of characters, not counting separators.
