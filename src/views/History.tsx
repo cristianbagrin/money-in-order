@@ -1,6 +1,7 @@
 import { memo } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { dateLabel } from '../lib/dates'
+import { cashAccounts } from '../lib/accounts'
+import { addMonths, dateLabel, monthName, monthOf } from '../lib/dates'
 import { fmt } from '../lib/money'
 import { deleteTxns, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Txn } from '../lib/types'
@@ -8,9 +9,44 @@ import { useIndex } from '../ui/hooks'
 import { IconSearch, toast } from '../ui/kit'
 import { play } from '../ui/sound'
 import { TxnRow } from './TxnSheet'
+import './history.css'
 
 const PAGE = 150
 const NONE: ReadonlySet<ID> = new Set()
+
+/** Names the rows need besides categories: accounts (with currency, for moves), income sources, and whether accounts are tracked. */
+interface Names {
+  acct: Map<ID, { name: string; cur: string }>
+  src: Map<ID, string>
+  track: boolean
+}
+
+type Period = 'all' | 'this' | 'last' | '3m' | 'year' | `m:${string}`
+const PRESETS: { id: Period; label: string }[] = [
+  { id: 'all', label: 'All time' },
+  { id: 'this', label: 'This month' },
+  { id: 'last', label: 'Last month' },
+  { id: '3m', label: 'Last 3 months' },
+  { id: 'year', label: 'This year' },
+]
+
+/** The months a period covers, first to last (inclusive), or null for all time. */
+function monthsOf(p: Period, today: string): [string, string] | null {
+  const m = monthOf(today)
+  if (p === 'this') return [m, m]
+  if (p === 'last') return [addMonths(m, -1), addMonths(m, -1)]
+  if (p === '3m') return [addMonths(m, -2), m]
+  if (p === 'year') return [`${m.slice(0, 4)}-01`, `${m.slice(0, 4)}-12`]
+  if (p.startsWith('m:')) return [p.slice(2), p.slice(2)]
+  return null
+}
+
+function periodLabel(p: Period, today: string): string {
+  const preset = PRESETS.find((x) => x.id === p)
+  if (preset) return preset.label
+  const m = p.slice(2)
+  return monthName(m, { year: m.slice(0, 4) !== today.slice(0, 4) })
+}
 
 interface Day {
   date: string
@@ -19,26 +55,36 @@ interface Day {
 }
 
 /** One day of rows. Memoized, and left unrendered while it is off screen, so thousands of rows stay smooth. */
-const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: string; catById: Map<ID, Category>; plain: boolean; sel: ReadonlySet<ID> | null; onOpen: (t: Txn, e: MouseEvent) => void; onDelete: (t: Txn) => void }) {
-  const { day: d, base, catById } = props
+const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: string; catById: Map<ID, Category>; names: Names; plain: boolean; sel: ReadonlySet<ID> | null; onOpen: (t: Txn, e: MouseEvent) => void; onDelete: (t: Txn) => void }) {
+  const { day: d, base, catById, names } = props
   return (
     <div class="daygrp" style={{ '--n': d.items.length }}>
       <div class="day">
         <span>{dateLabel(d.date, props.today)}</span>
         {d.total !== 0 && <span class="num faint">{fmt(d.total, base)}</span>}
       </div>
-      {d.items.map((t) => (
-        <TxnRow
-          key={t.id}
-          t={t}
-          base={base}
-          catName={t.cat === RTA ? 'Income' : catById.get(t.cat)?.name ?? 'Unknown'}
-          plain={props.plain}
-          selected={!!props.sel?.has(t.id)}
-          onOpen={props.onOpen}
-          onDelete={props.onDelete}
-        />
-      ))}
+      {d.items.map((t) => {
+        const from = t.acct ? names.acct.get(t.acct) : undefined
+        const to = t.to ? names.acct.get(t.to) : undefined
+        const isMove = t.kind === 'move'
+        // Income says its source; with accounts tracked, every row says its account.
+        const extra = isMove ? '' : [t.cat === RTA && t.src ? names.src.get(t.src) : '', names.track ? from?.name : ''].filter(Boolean).join(' · ')
+        return (
+          <TxnRow
+            key={t.id}
+            t={t}
+            base={base}
+            catName={t.cat === RTA ? 'Income' : catById.get(t.cat)?.name ?? 'Unknown'}
+            plain={props.plain}
+            extra={extra}
+            moveLabel={isMove ? `${from?.name ?? 'Account'} → ${to?.name ?? 'Account'}` : undefined}
+            toCur={isMove && to && from && to.cur !== from.cur ? to.cur : undefined}
+            selected={!!props.sel?.has(t.id)}
+            onOpen={props.onOpen}
+            onDelete={props.onDelete}
+          />
+        )
+      })}
     </div>
   )
 })
@@ -48,6 +94,8 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   const base = ix.settings.base
   const { filter } = props
   const [q, setQ] = useState('')
+  const [period, setPeriod] = useState<Period>('all')
+  const [picking, setPicking] = useState(false)
   const [limit, setLimit] = useState(PAGE)
   // The keyboard selection is a transaction, not a position, so it can't drift onto another row when the list changes.
   const [selId, setSelId] = useState<ID | null>(null)
@@ -111,16 +159,26 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
     const needle = q.trim().toLowerCase()
     const digits = needle.replace(/[,\s]/g, '')
     const isNum = /^\d+(\.\d*)?$/.test(digits)
+    const span = monthsOf(period, props.today)
     return ix.txns.filter((t) => {
-      if (filter === 'income' && t.cat !== RTA) return false
-      if (filter !== 'all' && filter !== 'income' && t.cat !== filter) return false
+      if (span) {
+        const m = monthOf(t.date)
+        if (m < span[0] || m > span[1]) return false
+      }
+      if (filter === 'income') {
+        if (t.cat !== RTA || t.kind === 'move') return false
+      } else if (filter.startsWith('acct:')) {
+        if (t.acct !== filter.slice(5) && t.to !== filter.slice(5)) return false
+      } else if (filter.startsWith('src:')) {
+        if (t.src !== filter.slice(4)) return false
+      } else if (filter !== 'all' && t.cat !== filter) return false
       if (!needle) return true
       const cat = t.cat === RTA ? 'income' : ix.catById.get(t.cat)?.name ?? ''
       if ((t.note ?? '').toLowerCase().includes(needle) || cat.toLowerCase().includes(needle)) return true
       // Match the amount as shown (base currency) or as entered, with or without thousands separators.
       return isNum && [t.amt, t.base].some((v) => String(Math.abs(v) / 100).startsWith(digits) || String(Math.round(Math.abs(v) / 100)).startsWith(digits))
     })
-  }, [ix, q, filter])
+  }, [ix, q, filter, period, props.today])
 
   // A new search or filter starts the list over: nothing selected, back to the first page.
   function restart<T>(set: (v: T) => void, v: T) {
@@ -135,6 +193,31 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
     const el = pillsRef.current
     if (el && el.scrollWidth > el.clientWidth) el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
   }, [filter])
+
+  // The period pill opens its choices right under the search; one tap picks and closes.
+  const periodBtn = useRef<HTMLButtonElement>(null)
+  const periodBox = useRef<HTMLDivElement>(null)
+  const monthsRef = useRef<HTMLDivElement>(null)
+  function closePeriods(refocus: boolean, e?: Event) {
+    e?.stopPropagation()
+    setPicking(false)
+    if (refocus) periodBtn.current?.focus()
+  }
+  function choosePeriod(p: Period) {
+    restart(setPeriod, p)
+    closePeriods(true)
+  }
+  useEffect(() => {
+    if (!picking) return
+    // A chosen month is brought into view, where the row scrolls sideways.
+    monthsRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
+    const down = (e: PointerEvent) => {
+      const n = e.target as Node
+      if (!periodBox.current?.contains(n) && !periodBtn.current?.contains(n)) setPicking(false)
+    }
+    document.addEventListener('pointerdown', down, true)
+    return () => document.removeEventListener('pointerdown', down, true)
+  }, [picking])
 
   const shown = useMemo(() => rows.slice(0, limit), [rows, limit])
   cur.current.shown = shown
@@ -236,16 +319,63 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
     return next
   }, [days, selIds])
   const used = ix.cats.filter((c) => !c.archived)
-  const filtered = !!q || filter !== 'all'
+  const sources = ix.settings.sources ?? []
+  const track = !!ix.settings.trackAccounts
+  const cash = track ? cashAccounts(ix) : []
+  // Rows only need names, so the maps are rebuilt only when one changes.
+  const nameKey2 = Object.values(ix.db.accounts).map((a) => (a.d ? '' : `${a.id}:${a.name}:${a.cur}`)).join('|') + '#' + sources.map((s) => s.id + s.name).join('|') + (track ? '#t' : '')
+  const names = useMemo<Names>(
+    () => ({
+      acct: new Map(Object.values(ix.db.accounts).filter((a) => !a.d).map((a) => [a.id, { name: a.name, cur: a.cur }])),
+      src: new Map(sources.map((s) => [s.id, s.name])),
+      track,
+    }),
+    [nameKey2],
+  )
+  // Months to pick from, newest first: the ones with data, up to now.
+  const months = useMemo(() => ix.months.filter((m) => m <= monthOf(props.today)).reverse(), [ix.months, props.today])
+  const filtered = !!q || filter !== 'all' || period !== 'all'
   const total = useMemo(() => (filtered ? rows.reduce((s, t) => s + t.base, 0) : 0), [rows, filtered])
   if (!ix.txns.length) return <p class="empty">Nothing yet.</p>
 
   return (
     <div>
-      <label class="searchbar">
-        <IconSearch />
-        <input ref={searchRef} type="search" aria-label="Search" value={q} onInput={(e) => restart(setQ, e.currentTarget.value)} />
-      </label>
+      <div class="histbar">
+        <label class="searchbar">
+          <IconSearch />
+          <input ref={searchRef} type="search" aria-label="Search" value={q} onInput={(e) => restart(setQ, e.currentTarget.value)} />
+        </label>
+        <button
+          ref={periodBtn}
+          class={`pill${period !== 'all' ? ' picked' : ''}`}
+          aria-haspopup="true"
+          aria-expanded={picking ? 'true' : 'false'}
+          aria-label={`Period: ${periodLabel(period, props.today)}`}
+          onClick={() => setPicking(!picking)}
+        >
+          {periodLabel(period, props.today)}
+        </button>
+      </div>
+      {picking && (
+        <div class="periods" ref={periodBox} onKeyDown={(e) => e.key === 'Escape' && closePeriods(true, e)}>
+          <div class="pills">
+            {PRESETS.map((p) => (
+              <button key={p.id} class="pill sm" aria-pressed={period === p.id} onClick={() => choosePeriod(p.id)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {months.length > 0 && (
+            <div class="pills scroll months" ref={monthsRef}>
+              {months.map((m) => (
+                <button key={m} class="pill sm" aria-pressed={period === `m:${m}`} onClick={() => choosePeriod(`m:${m}`)}>
+                  {monthName(m, { short: true, year: m.slice(0, 4) !== props.today.slice(0, 4) })}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div class="pills scroll filters" ref={pillsRef}>
         <button class="pill sm" aria-pressed={filter === 'all'} onClick={() => restart(props.setFilter, 'all')}>
           All
@@ -253,9 +383,19 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         <button class="pill sm" aria-pressed={filter === 'income'} onClick={() => restart(props.setFilter, 'income')}>
           Income
         </button>
+        {sources.map((s) => (
+          <button key={s.id} class="pill sm" aria-pressed={filter === `src:${s.id}`} onClick={() => restart(props.setFilter, `src:${s.id}`)}>
+            {s.name}
+          </button>
+        ))}
         {used.map((c) => (
           <button key={c.id} class="pill sm" aria-pressed={filter === c.id} onClick={() => restart(props.setFilter, c.id)}>
             {c.name}
+          </button>
+        ))}
+        {cash.map((a) => (
+          <button key={a.id} class="pill sm" aria-pressed={filter === `acct:${a.id}`} onClick={() => restart(props.setFilter, `acct:${a.id}`)}>
+            {a.name}
           </button>
         ))}
       </div>
@@ -265,7 +405,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         </p>
       )}
       {days.map((d) => (
-        <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all'} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} />
+        <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all' && !filter.startsWith('acct:')} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} names={names} />
       ))}
       {!rows.length && <p class="empty">Nothing matches.</p>}
       {rows.length > limit && (

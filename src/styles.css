@@ -1413,10 +1413,11 @@ textarea:focus {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 14px 0 2px;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink-2);
+  padding: 16px 0 2px;
+  font-size: 12px;
+  font-weight: 520;
+  /* a label for the rows below, never mistaken for one of them */
+  color: var(--ink-3);
 }
 .txn-wrap {
   position: relative;

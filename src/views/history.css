@@ -1,0 +1,50 @@
+/* History: search + period pill on one line, the period choices under it. */
+
+.histbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.histbar .searchbar {
+  flex: 1;
+  min-width: 0;
+}
+.histbar > .pill {
+  min-height: 44px;
+  padding: 0 16px;
+}
+.periods {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--sunk);
+  animation: periods-in 0.18s ease-out;
+}
+/* Months run sideways on a phone; with a mouse they wrap, and scroll after two lines. */
+.periods .pills.scroll.months {
+  margin: 0 -10px;
+  padding: 2px 10px;
+}
+@media (hover: hover) and (pointer: fine), (min-width: 960px) {
+  .periods .pills.scroll.months {
+    margin: 0 -4px;
+    padding: 2px 4px;
+    max-height: 78px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+@keyframes periods-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .periods {
+    animation: none;
+  }
+}
