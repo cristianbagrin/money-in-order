@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { goalLine, goals, incomeBySource, roundPlan, spending, standouts, usualMonths } from '../src/lib/compare'
+import { goalLine, goals, groupSpending, incomeBySource, roundPlan, spending, standouts, usualMonths, usualSpending } from '../src/lib/compare'
 import * as S from '../src/lib/store'
 import { emptyDB, RTA, type Category, type Target } from '../src/lib/types'
 
@@ -200,5 +200,41 @@ describe('goals', () => {
     give(OCT, 'Trips', 3000)
     spend('2026-11-02', 'Living', 100)
     expect(goals(ix(), NOV, '2026-11-15')[0].pace).toBe(u(3000))
+  })
+})
+
+describe('by group', () => {
+  it('adds up the categories of each group, biggest first', () => {
+    spend('2026-09-03', 'Living', 9000)
+    spend('2026-10-03', 'Living', 8000)
+    spend('2026-10-04', 'Phone', 500)
+    spend('2026-10-05', 'Purchases', 6000)
+    spend('2026-10-06', 'Trips', 4000)
+    const gs = groupSpending(ix(), spending(ix(), OCT, '2026-10-31'))
+    expect(gs.map((g) => [g.name, g.spent / 100, g.usual === null ? null : g.usual / 100])).toEqual([
+      ['Flexible', 10000, 0],
+      ['Every day', 8000, 9000],
+      ['Fixed', 500, 0],
+    ])
+    expect(gs[0].cats.map((c) => c.name)).toEqual(['Purchases', 'Trips'])
+  })
+})
+
+describe('usual spending', () => {
+  it('takes the middle of the finished months, savings left out', () => {
+    spend('2026-06-03', 'Living', 30000)
+    spend('2026-07-03', 'Living', 31000)
+    spend('2026-08-03', 'Living', 30000)
+    spend('2026-08-04', 'Purchases', 60000) // one big purchase
+    spend('2026-09-03', 'Living', 29000)
+    spend('2026-09-04', 'Emergency', 50000) // savings
+    spend('2026-10-03', 'Living', 90000) // still going: not counted
+    const us = usualSpending(ix(), OCT, '2026-10-15')!
+    expect(us.months).toEqual(['2026-06', '2026-07', '2026-08', '2026-09'])
+    expect(us.month).toBe(u(30500))
+    expect(us.day).toBe(Math.round(u(30500) / 30.5))
+    // a finished month counts itself
+    expect(usualSpending(ix(), SEP, '2026-10-15')!.months).toEqual(['2026-06', '2026-07', '2026-08', '2026-09'])
+    expect(usualSpending(ix(), '2026-06', '2026-06-20')).toBeNull()
   })
 })

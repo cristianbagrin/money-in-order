@@ -121,6 +121,63 @@ export function spending(ix: Index, month: string, today: string): MonthSpend {
   return { month, running, day, spent: total(month), usual: usualTotal, planned: totalPlanned(view), months, cats }
 }
 
+export interface GroupSpend {
+  id: ID
+  name: string
+  spent: number
+  /** null with no earlier month */
+  usual: number | null
+  /** its categories, biggest first */
+  cats: CatSpend[]
+}
+
+/** The month's spending per group, biggest first: the categories of `s.cats`, added up. */
+export function groupSpending(ix: Index, s: MonthSpend): GroupSpend[] {
+  const byId = new Map(ix.groups.map((g) => [g.id, g]))
+  const out = new Map<ID, GroupSpend>()
+  for (const c of s.cats) {
+    // a category whose group is gone counts under the first group, as the plan shows it
+    const group = byId.get(ix.catById.get(c.id)?.group ?? '') ?? ix.groups[0]
+    if (!group) continue
+    let row = out.get(group.id)
+    if (!row) out.set(group.id, (row = { id: group.id, name: group.name, spent: 0, usual: c.usual === null ? null : 0, cats: [] }))
+    row.spent += c.spent
+    if (row.usual !== null && c.usual !== null) row.usual += c.usual
+    row.cats.push(c)
+  }
+  return [...out.values()].sort((a, b) => b.spent - a.spent || (b.usual ?? 0) - (a.usual ?? 0))
+}
+
+export interface UsualSpend {
+  /** a usual month: the middle of the months' totals, so one big purchase doesn't move it */
+  month: number
+  /** the same per day */
+  day: number
+  /** the finished months it comes from */
+  months: string[]
+}
+
+/**
+ * What spending usually comes to, savings left out: over up to `n` finished months up to `month`
+ * (the month itself once it's over). Null without a finished month to go on.
+ */
+export function usualSpending(ix: Index, month: string, today: string, n = 6): UsualSpend | null {
+  const first = ix.months[0]
+  if (!first) return null
+  const months: string[] = []
+  for (let m = month < monthOf(today) ? month : addMonths(month, -1); months.length < n && m >= first; m = addMonths(m, -1)) months.unshift(m)
+  if (!months.length) return null
+  const saving = new Set(ix.cats.filter((c) => c.saving).map((c) => c.id))
+  const totals = months.map((m) => {
+    let s = 0
+    for (const [id, v] of ix.act.get(m) ?? []) if (!saving.has(id)) s -= v
+    return Math.max(0, s)
+  })
+  const mid = median(totals)
+  const days = months.reduce((s, m) => s + daysInMonth(m), 0) / months.length
+  return { month: mid, day: Math.round(mid / days), months }
+}
+
 // ---------------------------------------------------------------- what stands out
 
 export interface Insight {
