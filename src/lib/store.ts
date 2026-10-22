@@ -440,11 +440,19 @@ export function updateTxn(id: ID, patch: Partial<NewTxn>) {
   const old = db.txns[id]
   if (!old) return
   const next: Txn = { ...old, ...patch } as Txn
-  if (patch.amt !== undefined || patch.cur !== undefined) {
-    if (patch.base === undefined) {
-      // Keep the rate the transaction was recorded with if only the amount changed.
-      next.base =
-        next.cur === old.cur && old.amt !== 0 ? Math.round((old.base / old.amt) * next.amt) : toBase(next.amt, next.cur)
+  // The base amount is fixed at the rate of the day the entry was made. Only the amount or the currency
+  // changing can touch it: a note, category, date or account edit leaves it exactly as it was.
+  if (patch.base === undefined && (patch.amt !== undefined || patch.cur !== undefined)) {
+    if (next.cur !== old.cur) {
+      // Another currency is a new conversion, at today's rate.
+      next.base = toBase(next.amt, next.cur)
+    } else if (next.amt === old.amt) {
+      next.base = old.base
+    } else if (old.amt !== 0) {
+      // Same currency, other amount: keep the rate the entry was recorded with.
+      next.base = Math.round((old.base / old.amt) * next.amt)
+    } else {
+      next.base = toBase(next.amt, next.cur)
     }
   }
   for (const k of ['note', 'acct', 'src', 'to', 'toAmt'] as const) if (next[k] === undefined || next[k] === '') delete next[k]

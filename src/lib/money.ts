@@ -60,8 +60,51 @@ export const CURRENCIES: Record<string, CurrencyInfo> = {
 /** Shown first when picking currencies; the rest sit behind "More". */
 export const COMMON_CURRENCIES = ['TWD', 'EUR', 'PLN', 'USD', 'GBP', 'CHF', 'MDL', 'RON', 'UAH', 'JPY']
 
+/** Every currency a traveller might meet, by name (for finding "baht" or "dong" by typing). */
+export const CURRENCY_NAMES: Record<string, string> = {
+  AED: 'UAE dirham', AFN: 'Afghan afghani', ALL: 'Albanian lek', AMD: 'Armenian dram', ANG: 'Netherlands Antillean guilder',
+  AOA: 'Angolan kwanza', ARS: 'Argentine peso', AUD: 'Australian dollar', AWG: 'Aruban florin', AZN: 'Azerbaijani manat',
+  BAM: 'Bosnian mark', BBD: 'Barbadian dollar', BDT: 'Bangladeshi taka', BGN: 'Bulgarian lev', BHD: 'Bahraini dinar',
+  BIF: 'Burundian franc', BMD: 'Bermudian dollar', BND: 'Brunei dollar', BOB: 'Bolivian boliviano', BRL: 'Brazilian real',
+  BSD: 'Bahamian dollar', BTN: 'Bhutanese ngultrum', BWP: 'Botswana pula', BYN: 'Belarusian ruble', BZD: 'Belize dollar',
+  CAD: 'Canadian dollar', CDF: 'Congolese franc', CHF: 'Swiss franc', CLP: 'Chilean peso', CNY: 'Chinese yuan',
+  COP: 'Colombian peso', CRC: 'Costa Rican colon', CUP: 'Cuban peso', CVE: 'Cape Verdean escudo', CZK: 'Czech koruna',
+  DJF: 'Djiboutian franc', DKK: 'Danish krone', DOP: 'Dominican peso', DZD: 'Algerian dinar', EGP: 'Egyptian pound',
+  ERN: 'Eritrean nakfa', ETB: 'Ethiopian birr', EUR: 'Euro', FJD: 'Fijian dollar', FKP: 'Falkland pound',
+  GBP: 'British pound', GEL: 'Georgian lari', GHS: 'Ghanaian cedi', GIP: 'Gibraltar pound', GMD: 'Gambian dalasi',
+  GNF: 'Guinean franc', GTQ: 'Guatemalan quetzal', GYD: 'Guyanese dollar', HKD: 'Hong Kong dollar', HNL: 'Honduran lempira',
+  HTG: 'Haitian gourde', HUF: 'Hungarian forint', IDR: 'Indonesian rupiah', ILS: 'Israeli shekel', INR: 'Indian rupee',
+  IQD: 'Iraqi dinar', IRR: 'Iranian rial', ISK: 'Icelandic krona', JMD: 'Jamaican dollar', JOD: 'Jordanian dinar',
+  JPY: 'Japanese yen', KES: 'Kenyan shilling', KGS: 'Kyrgyzstani som', KHR: 'Cambodian riel', KMF: 'Comorian franc',
+  KRW: 'South Korean won', KWD: 'Kuwaiti dinar', KYD: 'Cayman dollar', KZT: 'Kazakhstani tenge', LAK: 'Lao kip',
+  LBP: 'Lebanese pound', LKR: 'Sri Lankan rupee', LRD: 'Liberian dollar', LSL: 'Lesotho loti', LYD: 'Libyan dinar',
+  MAD: 'Moroccan dirham', MDL: 'Moldovan leu', MGA: 'Malagasy ariary', MKD: 'Macedonian denar', MMK: 'Myanmar kyat',
+  MNT: 'Mongolian tugrik', MOP: 'Macanese pataca', MRU: 'Mauritanian ouguiya', MUR: 'Mauritian rupee', MVR: 'Maldivian rufiyaa',
+  MWK: 'Malawian kwacha', MXN: 'Mexican peso', MYR: 'Malaysian ringgit', MZN: 'Mozambican metical', NAD: 'Namibian dollar',
+  NGN: 'Nigerian naira', NIO: 'Nicaraguan cordoba', NOK: 'Norwegian krone', NPR: 'Nepalese rupee', NZD: 'New Zealand dollar',
+  OMR: 'Omani rial', PAB: 'Panamanian balboa', PEN: 'Peruvian sol', PGK: 'Papua New Guinean kina', PHP: 'Philippine peso',
+  PKR: 'Pakistani rupee', PLN: 'Polish zloty', PYG: 'Paraguayan guarani', QAR: 'Qatari riyal', RON: 'Romanian leu',
+  RSD: 'Serbian dinar', RUB: 'Russian ruble', RWF: 'Rwandan franc', SAR: 'Saudi riyal', SBD: 'Solomon Islands dollar',
+  SCR: 'Seychellois rupee', SDG: 'Sudanese pound', SEK: 'Swedish krona', SGD: 'Singapore dollar', SHP: 'Saint Helena pound',
+  SLE: 'Sierra Leonean leone', SOS: 'Somali shilling', SRD: 'Surinamese dollar', SZL: 'Swazi lilangeni', THB: 'Thai baht',
+  TJS: 'Tajikistani somoni', TMT: 'Turkmenistani manat', TND: 'Tunisian dinar', TOP: 'Tongan paanga', TRY: 'Turkish lira',
+  TTD: 'Trinidad and Tobago dollar', TWD: 'New Taiwan dollar', TZS: 'Tanzanian shilling', UAH: 'Ukrainian hryvnia',
+  UGX: 'Ugandan shilling', USD: 'US dollar', UYU: 'Uruguayan peso', UZS: 'Uzbekistani som', VES: 'Venezuelan bolivar',
+  VND: 'Vietnamese dong', VUV: 'Vanuatu vatu', WST: 'Samoan tala', XAF: 'Central African CFA franc', XCD: 'East Caribbean dollar',
+  XOF: 'West African CFA franc', XPF: 'CFP franc', YER: 'Yemeni rial', ZAR: 'South African rand', ZMW: 'Zambian kwacha',
+}
+
+/** Currencies that have no minor unit in everyday use (beyond the ones listed in CURRENCIES). */
+const WHOLE_ONLY = new Set(['BIF', 'DJF', 'GNF', 'KMF', 'PYG', 'RWF', 'UGX', 'VUV', 'XAF', 'XOF', 'XPF', 'IRR', 'LAK', 'MGA', 'MMK', 'IQD', 'LBP', 'SOS', 'UZS'])
+
 export function cur(code: string): CurrencyInfo {
-  return CURRENCIES[code] ?? { code, symbol: code, suffix: true, decimals: 2 }
+  return CURRENCIES[code] ?? { code, symbol: code, suffix: true, decimals: WHOLE_ONLY.has(code) ? 0 : 2 }
+}
+
+/** Every currency we know, the common ones first, then the ones in the lists, then the rest A to Z. */
+export function allCurrencyCodes(): string[] {
+  const rest = [...new Set([...Object.keys(CURRENCIES), ...Object.keys(CURRENCY_NAMES)])].filter((c) => !COMMON_CURRENCIES.includes(c)).sort()
+  return [...COMMON_CURRENCIES, ...rest]
 }
 
 const groupFmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })

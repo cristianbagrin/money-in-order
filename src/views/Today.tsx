@@ -8,6 +8,7 @@ import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type Account, type ID } from '../lib/types'
 import { DatePill } from '../ui/calendar'
 import { useIndex, useMedia } from '../ui/hooks'
+import { AnyCurrency, CurrencyPill } from '../ui/currency'
 import { Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { haptic, play } from '../ui/sound'
@@ -241,7 +242,9 @@ export function Register(props: { today: string; touch: boolean }) {
   const amount = typed === null ? 0 : inflow ? Math.max(0, typed) : Math.abs(typed)
   const isSum = /\d\s*[+\-−*/×÷]/.test(dr.digits)
   const amountBase = currency === base ? amount : toBase(amount, currency)
-  const currencies = currenciesInUse().filter(hasRate)
+  // The one in use stays among the choices even when it was picked from the full list.
+  const currencies = [...new Set([...currenciesInUse().filter(hasRate), currency])]
+  const [anyCur, setAnyCur] = useState(false)
   const amountRef = useRef<HTMLInputElement>(null)
   const amountBox = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -306,6 +309,11 @@ export function Register(props: { today: string; touch: boolean }) {
     const l = inflow ? now + amountBase : now - amountBase
     // Red is for a real problem: already overspent, or this entry would overspend.
     return { text: fmt(l, base), over: l < 0 }
+  }
+
+  function pickCurrency(next: string) {
+    // A currency without cents can't keep typed cents.
+    setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.replace(/\.\d*/g, '') : dr.digits })
   }
 
   function log(cat: ID, el?: Element | null, src?: ID) {
@@ -477,17 +485,16 @@ export function Register(props: { today: string; touch: boolean }) {
           />
         )}
         {currencies.length > 1 && (
-          <button
-            class={`pill${currency !== base ? ' picked' : ''}`}
-            aria-label={`Currency ${currency}. Tap to change`}
-            onClick={() => {
+          <CurrencyPill
+            code={currency}
+            class={currency !== base ? 'picked' : ''}
+            label={`Currency ${currency}. Tap to change, hold for any currency`}
+            onTap={() => {
               const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
-              // A currency without cents can't keep typed cents.
-              setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.replace(/\.\d*/g, '') : dr.digits })
+              pickCurrency(next)
             }}
-          >
-            {currency}
-          </button>
+            onHold={() => setAnyCur(true)}
+          />
         )}
         <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
       </div>
@@ -535,6 +542,7 @@ export function Register(props: { today: string; touch: boolean }) {
         ))}
       </div>
       {touch && <Keypad value={dr.digits} onChange={(v) => setDraft({ digits: v })} decimals={c.decimals} />}
+      <AnyCurrency open={anyCur} onClose={() => setAnyCur(false)} value={currency} onPick={pickCurrency} />
     </div>
   )
 }
