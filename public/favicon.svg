@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="112" fill="#f6f6f3"/>
-  <path d="M84 300 L428 276 L428 380 L84 404 Z" fill="#ffd84d"/><ellipse cx="256" cy="256" rx="104" ry="150" transform="rotate(8 256 256)" fill="none" stroke="#1d58a8" stroke-width="58"/>
+  <g transform="translate(256 256) scale(1.0) translate(-256 -256)">
+    <path d="M84 302L428 278L428 382L84 406Z" fill="#ffd84d"/>
+    <g transform="rotate(8 256 256)" fill="none" stroke="#0a7f5a" stroke-width="54" stroke-linecap="round">
+      <path d="M340 180C316 138 196 130 182 196C168 258 344 250 338 322C332 396 196 396 168 344"/>
+      <path d="M256 90V140M256 372V422"/>
+    </g>
+  </g>
 </svg>
