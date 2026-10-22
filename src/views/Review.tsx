@@ -438,10 +438,9 @@ function AgeCard(props: { points: { month: string; days: number | null }[]; mont
   const from = known[0]
   const change = known.length > 1 ? now - from.days! : 0
   const days = (d: number) => `${d} ${d === 1 ? 'day' : 'days'}`
-  // a month or more: this month is paid with money that came in before it
-  const ahead = Math.floor(now / 30.4)
+  // (No "months ahead" here: Plan's "Covered N months ahead" is that figure, and two would disagree.)
   const line = props.isCurrent
-    ? `Money you spend today came in ${days(now)} ago${ahead >= 1 ? `: you’re ${ahead === 1 ? 'a month' : `${ahead} months`} ahead.` : '.'}`
+    ? `Money you spend today came in ${days(now)} ago.`
     : `Money spent at the end of ${monthName(props.month)} had come in ${days(now)} before.`
   return (
     <section class="card rv-age">

@@ -30,7 +30,7 @@
   cursor: crosshair;
 }
 .ch-plot:focus-visible {
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   box-shadow: 0 0 0 2px var(--surface, #fff), 0 0 0 4px var(--pen, #1d58a8);
 }
 .ch-plot svg {
