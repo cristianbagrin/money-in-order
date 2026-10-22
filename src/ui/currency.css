@@ -1,0 +1,12 @@
+/* Pills that open every currency when held: no text selection or callout under the finger. */
+.pill.lp {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.anycur {
+  margin-top: 12px;
+}
+.anycur .pill.busy {
+  opacity: 0.55;
+}

@@ -12,6 +12,7 @@ import { currenciesInUse, hasRate } from '../lib/rates'
 import { deleteTxn, undoable, updateTxn, type NewTxn } from '../lib/store'
 import { RTA, type Account, type ID, type Txn } from '../lib/types'
 import { Calendar } from '../ui/calendar'
+import { AnyCurrency, CurrencyPill } from '../ui/currency'
 import { useIndex } from '../ui/hooks'
 import { AmountField, NoteField, toast } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
@@ -120,6 +121,7 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
   const [amount, setAmount] = useState('')
   const [arrived, setArrived] = useState('')
   const [note, setNote] = useState('')
+  const [anyCur, setAnyCur] = useState(false)
 
   // Show what is stored: when the sheet opens, and whenever the record changes underneath it (undo, sync).
   // A field with text typed into it (different from what the record last put there) is left alone;
@@ -183,6 +185,10 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
     if (signed !== tx.amt) change({ amt: signed, ...(toAmt !== undefined ? { toAmt } : {}) }, 'Changed amount')
   }
 
+  function setCurrency(c: string) {
+    if (c !== tx.cur) change({ cur: c }, 'Changed currency')
+  }
+
   function pickAccount(a: Account) {
     change({ acct: tx.acct === a.id ? undefined : a.id }, 'Changed account')
   }
@@ -235,17 +241,7 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
       {!isMove && currencies.length > 1 && (
         <div class="row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
           {currencies.map((c) => (
-            <button
-              key={c}
-              class="pill soft"
-              aria-pressed={tx.cur === c}
-              onClick={() => {
-                if (c === tx.cur) return
-                change({ cur: c }, 'Changed currency')
-              }}
-            >
-              {c}
-            </button>
+            <CurrencyPill key={c} code={c} class="soft" pressed={tx.cur === c} onTap={() => setCurrency(c)} onHold={() => setAnyCur(true)} />
           ))}
         </div>
       )}
@@ -321,6 +317,7 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
           Delete
         </button>
       </div>
+      <AnyCurrency open={anyCur} onClose={() => setAnyCur(false)} value={tx.cur} onPick={setCurrency} />
     </Sheet>
   )
 }
