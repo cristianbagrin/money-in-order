@@ -8,7 +8,7 @@ import { AccountForm, NO_AUTOFILL } from '../ui/account'
 import type { DB, Source } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
 import { useIndex, useSync } from '../ui/hooks'
-import { IconPlus, Section, toast } from '../ui/kit'
+import { IconPlus, Section, toast, useTapAway } from '../ui/kit'
 import { play, setSoundOn, soundOn } from '../ui/sound'
 import { sortKey, useSortable } from '../ui/sortable'
 import '../ui/accounts.css'
@@ -48,9 +48,9 @@ export function Settings(props: { onAccounts: () => void; onBack: () => void }) 
               if (!settings().rates[main]) await refreshRates(true)
               if (!settings().rates[main]) {
                 play('error')
-                return toast('Couldn’t get an exchange rate. Try again online.')
+                return toast('Couldn’t get an exchange rate. Try again online')
               }
-              if (!confirm(`Plan in ${main} from now on? Every amount is converted at today's rate.`)) return
+              if (!confirm(`Plan in ${main} from now on? Every amount is converted at today's rate`)) return
               undoable(`Plan in ${main}`, () => changeBase(main))
               play('success')
               toast(`Your plan is now in ${main}`, { undo: true })
@@ -208,6 +208,7 @@ function Sources() {
     play('drop')
   }
   useSortable(ref, { flow: true, disabled: adding, onDrop: (info) => move(info.id, info.index) })
+  useTapAway(!!editing, () => setOpen(null), (el) => !!el.closest(`.acc-form, [data-sort-id="${open}"]`))
 
   return (
     <>
@@ -290,7 +291,6 @@ function SourceEditor(props: { x: Source; onDone: () => void }) {
         aria-label="Name"
         autocapitalize="words"
         defaultValue={x.name}
-        onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const name = e.currentTarget.value.trim()
           if (!name) e.currentTarget.value = x.name
@@ -348,7 +348,7 @@ function SyncBox() {
       <Section title="Sync">
         <AccountForm />
         {(navigator as Navigator & { standalone?: boolean }).standalone === false && (
-          <p class="hint">Add this app to your Home Screen first, then sign in there.</p>
+          <p class="hint">Add this app to your Home Screen first, then sign in there</p>
         )}
       </Section>
     )
@@ -372,7 +372,7 @@ function SyncBox() {
         <button
           class="pill sm"
           onClick={async () => {
-            if (!confirm('Sign out on this device? Your data stays here.')) return
+            if (!confirm('Sign out on this device? Your data stays here')) return
             await disableSync()
           }}
         >

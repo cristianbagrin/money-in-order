@@ -157,7 +157,16 @@ h3 {
 
 .app {
   min-height: 100dvh;
-  padding-top: env(safe-area-inset-top);
+  padding-top: calc(env(safe-area-inset-top) + var(--top-gap));
+}
+/* iOS blurs a band under the status bar on home-screen apps; on a notched phone the page starts below it */
+:root {
+  --top-gap: 0px;
+}
+@media (max-width: 959px) and (pointer: coarse) {
+  :root {
+    --top-gap: min(16px, env(safe-area-inset-top));
+  }
 }
 
 .main {
@@ -684,7 +693,7 @@ textarea:focus {
   flex-direction: column;
   /* exactly the screen between the status bar and the tab bar: the amount and keypad never scroll away,
      the bubbles scroll inside their own area when there are many */
-  --today-h: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
+  --today-h: calc(100dvh - env(safe-area-inset-top) - var(--top-gap) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
   height: var(--today-h);
 }
 .hero {
@@ -704,7 +713,7 @@ textarea:focus {
 }
 .hero-cap {
   margin-top: 6px;
-  font-size: 15px;
+  font-size: 13px;
   color: var(--ink-2);
 }
 .plan-first {
@@ -798,7 +807,7 @@ textarea:focus {
     text-align: right;
   }
   /* income at the far end of the row, away from the pills that set up the entry */
-  .amountpills .incomebox {
+  .amountpills .incomepill {
     margin-left: auto;
   }
 }
@@ -946,10 +955,12 @@ textarea:focus {
   gap: 8px 10px;
   margin-top: 2px;
 }
+/* one line beside the action, even on a small phone */
 .rta-cap {
-  flex: 1 1 150px;
+  flex: 1 1 auto;
   min-width: 0;
-  font-size: 15px;
+  white-space: nowrap;
+  font-size: 13px;
   line-height: 1.3;
   color: var(--ink-2);
 }
@@ -1056,15 +1067,34 @@ textarea:focus {
   border-radius: var(--r-sm);
 }
 /* Renaming in place: the field is the size of the text it edits, with a little room to type. */
-.grp-name input {
-  width: auto;
-  max-width: 100%;
-  min-height: 0;
-  padding: 1px 6px;
+/* Renaming in place: the field is the size of its text, which a hidden copy of the text measures */
+.fit {
+  display: inline-grid;
+  max-width: calc(100% + 7px);
+  min-width: 0;
   margin-left: -7px;
+  vertical-align: middle;
+}
+.fit::after,
+.fit > input {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 1px 6px;
   font-size: inherit;
   font-weight: inherit;
   line-height: 1.35;
+}
+.fit::after {
+  content: attr(data-text);
+  visibility: hidden;
+  white-space: pre;
+  overflow: hidden;
+  border: 1px solid transparent;
+}
+.fit > input {
+  width: 100%;
   border-radius: var(--r-sm);
 }
 .grp-add {
@@ -1134,21 +1164,6 @@ textarea:focus {
   vertical-align: middle;
   border-radius: var(--r-sm);
 }
-.cname input,
-.cnote input {
-  width: auto;
-  max-width: 100%;
-  min-height: 0;
-  padding: 1px 6px;
-  margin-left: -7px;
-  font-size: inherit;
-  line-height: 1.35;
-  border-radius: var(--r-sm);
-}
-.cname input {
-  font-size: 15px;
-  font-weight: 560;
-}
 .cnote {
   font-size: 12.5px;
   color: var(--ink-3);
@@ -1164,7 +1179,9 @@ textarea:focus {
   gap: 8px;
   min-width: 0;
 }
-.cname-line input {
+.cname-line .fit {
+  font-size: 15px;
+  font-weight: 560;
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -1291,7 +1308,7 @@ textarea:focus {
     line-height: 1;
   }
   .rta-cap {
-    font-size: 14px;
+    font-size: 12.5px;
   }
   .grp {
     margin-top: 3px;

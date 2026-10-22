@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { cashAccounts } from '../lib/accounts'
 import { addMonths, dateLabel, monthName, monthOf } from '../lib/dates'
 import { fmt, SEP } from '../lib/money'
-import { deleteTxns, undoable } from '../lib/store'
+import { deleteTxns, undoable, updateTxn } from '../lib/store'
 import { RTA, type Category, type ID, type Txn } from '../lib/types'
 import { useIndex } from '../ui/hooks'
 import { IconSearch, toast } from '../ui/kit'
+import { useSortable } from '../ui/sortable'
 import { play } from '../ui/sound'
 import { TxnRow } from './TxnSheet'
 import './history.css'
@@ -65,28 +66,30 @@ const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: 
         <span>{dateLabel(d.date, props.today)}</span>
         {d.total !== 0 && <span class="num faint">{fmt(d.total, base)}</span>}
       </div>
-      {d.items.map((t) => {
-        const from = t.acct ? names.acct.get(t.acct) : undefined
-        const to = t.to ? names.acct.get(t.to) : undefined
-        const isMove = t.kind === 'move'
-        // Income says its source; with accounts tracked, every row says its account.
-        const extra = isMove ? '' : [t.cat === RTA && t.src ? names.src.get(t.src) : '', names.track ? from?.name : '', t.rep ? names.rep.get(t.rep) : ''].filter(Boolean).join(SEP)
-        return (
-          <TxnRow
-            key={t.id}
-            t={t}
-            base={base}
-            catName={t.cat === RTA ? 'Income' : catById.get(t.cat)?.name ?? 'Unknown'}
-            plain={props.plain}
-            extra={extra}
-            moveLabel={isMove ? `${from?.name ?? 'Account'} → ${to?.name ?? 'Account'}` : undefined}
-            toCur={isMove && to && from && to.cur !== from.cur ? to.cur : undefined}
-            selected={!!props.sel?.has(t.id)}
-            onOpen={props.onOpen}
-            onDelete={props.onDelete}
-          />
-        )
-      })}
+      <div data-sort-group={d.date}>
+        {d.items.map((t) => {
+          const from = t.acct ? names.acct.get(t.acct) : undefined
+          const to = t.to ? names.acct.get(t.to) : undefined
+          const isMove = t.kind === 'move'
+          // Income says its source; with accounts tracked, every row says its account.
+          const extra = isMove ? '' : [t.cat === RTA && t.src ? names.src.get(t.src) : '', names.track ? from?.name : '', t.rep ? names.rep.get(t.rep) : ''].filter(Boolean).join(SEP)
+          return (
+            <TxnRow
+              key={t.id}
+              t={t}
+              base={base}
+              catName={t.cat === RTA ? 'Income' : catById.get(t.cat)?.name ?? 'Unknown'}
+              plain={props.plain}
+              extra={extra}
+              moveLabel={isMove ? `${from?.name ?? 'Account'} → ${to?.name ?? 'Account'}` : undefined}
+              toCur={isMove && to && from && to.cur !== from.cur ? to.cur : undefined}
+              selected={!!props.sel?.has(t.id)}
+              onOpen={props.onOpen}
+              onDelete={props.onDelete}
+            />
+          )
+        })}
+      </div>
     </div>
   )
 })
@@ -329,6 +332,24 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
     [nameKey2],
   )
   // Months to pick from, newest first: the ones with data, up to now.
+  // Drag a row onto another day's card to move it to that day (with the rows selected along with it).
+  const listRef = useRef<HTMLDivElement>(null)
+  useSortable(listRef, {
+    groupSelector: '[data-sort-group]',
+    onDrop: (info) => {
+      const date = info.toGroup
+      if (!date || date === info.fromGroup) return
+      const { ids } = cur.current
+      const moving = ids.has(info.id) ? ix.txns.filter((t) => ids.has(t.id) && t.date !== date) : ix.txns.filter((t) => t.id === info.id)
+      if (!moving.length) return
+      undoable(moving.length > 1 ? `Moved ${moving.length} entries` : 'Moved entry', () => {
+        for (const t of moving) updateTxn(t.id, { date })
+      })
+      play('drop')
+      toast(`Moved ${moving.length > 1 ? `${moving.length} entries ` : ''}to ${dateLabel(date, props.today)}`, { undo: true })
+    },
+  })
+
   const months = useMemo(() => ix.months.filter((m) => m <= monthOf(props.today)).reverse(), [ix.months, props.today])
   // The broad views (this month, all time) show the rows alone; a narrower one says what it adds up to.
   const filtered = !!q || filter !== 'all' || (period !== 'all' && period !== 'this')
@@ -338,7 +359,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       {label}
     </button>
   )
-  if (!ix.txns.length) return <p class="empty">Nothing yet.</p>
+  if (!ix.txns.length) return <p class="empty">Nothing yet</p>
 
   return (
     <div>
@@ -400,12 +421,14 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
           <span class="num">{fmt(total, base, { sign: total > 0 })}</span>
         </p>
       )}
-      {days.map((d) => (
-        <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all' && !filter.startsWith('acct:')} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} names={names} />
-      ))}
+      <div ref={listRef}>
+        {days.map((d) => (
+          <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all' && !filter.startsWith('acct:')} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} names={names} />
+        ))}
+      </div>
       {!rows.length && (
         <div class="empty histempty">
-          <p>Nothing matches.</p>
+          <p>Nothing matches</p>
           {period !== 'all' && (
             <button class="pill sm" onClick={() => restart(setPeriod, 'all' as Period)}>
               All time

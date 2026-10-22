@@ -21,7 +21,7 @@ import {
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID, type Month } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
-import { caretToEnd, IconGear, IconPlus, NO_AUTOFILL, primeKeyboard, regroup, toast, useCalc } from '../ui/kit'
+import { caretToEnd, IconGear, IconPlus, markCaret, NO_AUTOFILL, primeKeyboard, regroup, takeCaret, toast, useCalc } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { confetti } from '../ui/confetti'
 import { haptic, play } from '../ui/sound'
@@ -289,7 +289,7 @@ export function Plan(props: {
                     role="button"
                     tabIndex={0}
                     aria-label={`Rename ${g.group.name}`}
-                    onClick={() => (primeKeyboard(), setEditingGroup(g.group.id))}
+                    onClick={(e) => (markCaret(e), primeKeyboard(), setEditingGroup(g.group.id))}
                     onKeyDown={onActivate(() => setEditingGroup(g.group.id))}
                   >
                     {g.group.name}
@@ -412,12 +412,16 @@ function Outlook(props: { fc: Forecast; current: Month }) {
 function InlineInput(props: { value: string; label: string; onDone: (v: string | null, enter: boolean) => void; placeholder?: string; plain?: boolean }) {
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
-  // As wide as what it holds (and a little room to type), like the text it replaces.
-  const fit = (v: string) => Math.max(4, v.length, props.placeholder?.length ?? 0) + 2
-  const [size, setSize] = useState(() => fit(props.value))
+  // As wide as what it holds (and a little room to type), like the text it replaces: a hidden copy of the
+  // text sizes it, so it fits in every browser and font (the size attribute guesses by average letters).
+  const [text, setText] = useState(props.value)
+  // The caret goes where the text was pressed (the end when it opened otherwise), never a select-all.
   useEffect(() => {
-    ref.current?.focus()
-    ref.current?.select()
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const at = Math.min(takeCaret() ?? el.value.length, el.value.length)
+    el.setSelectionRange(at, at)
   }, [])
   // A layout cleanup runs before the input leaves the DOM (and fires its blur); a passive one would run too late.
   useLayoutEffect(
@@ -432,24 +436,25 @@ function InlineInput(props: { value: string; label: string; onDone: (v: string |
     props.onDone(v, enter)
   }
   return (
-    <input
-      ref={ref}
-      type="text"
-      aria-label={props.label}
-      placeholder={props.placeholder}
-      defaultValue={props.value}
-      size={size}
-      {...NO_AUTOFILL}
-      onInput={(e) => setSize(fit(e.currentTarget.value))}
-      spellcheck={props.plain ? false : undefined}
-      autocorrect={props.plain ? 'off' : undefined}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={(e) => finish(e.currentTarget.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') finish(e.currentTarget.value, true)
-        if (e.key === 'Escape') finish(null)
-      }}
-    />
+    <span class="fit" data-text={`${text || props.placeholder || ''}\u00a0\u00a0`}>
+      <input
+        ref={ref}
+        type="text"
+        aria-label={props.label}
+        placeholder={props.placeholder}
+        defaultValue={props.value}
+        {...NO_AUTOFILL}
+        onInput={(e) => setText(e.currentTarget.value)}
+        spellcheck={props.plain ? false : undefined}
+        autocorrect={props.plain ? 'off' : undefined}
+        onClick={(e) => e.stopPropagation()}
+        onBlur={(e) => finish(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') finish(e.currentTarget.value, true)
+          if (e.key === 'Escape') finish(null)
+        }}
+      />
+    </span>
   )
 }
 
@@ -572,7 +577,7 @@ function CatRow(props: {
                 tabIndex={0}
                 aria-label={`Rename ${cat.name}`}
                 aria-keyshortcuts="Delete"
-                onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('name'))}
+                onClick={(e) => !swipe.swallow(e) && (markCaret(e), primeKeyboard(), props.setEditing('name'))}
                 onKeyDown={(e) => {
                   // Delete on a focused name deletes the row, as a swipe does on a phone.
                   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -616,7 +621,7 @@ function CatRow(props: {
               class="cnote"
               role="button"
               tabIndex={0}
-              onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('note'))}
+              onClick={(e) => !swipe.swallow(e) && (markCaret(e), primeKeyboard(), props.setEditing('note'))}
               onKeyDown={onActivate(() => props.setEditing('note'))}
             >
               {cat.note}

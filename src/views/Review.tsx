@@ -107,7 +107,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
         <MonthStrip month={month} current={current} setMonth={props.setMonth} min={first < current ? first : current} max={current} at={5} />
       </div>
 
-      {s.spent > 0 ? <Headline s={s} base={base} /> : isCurrent && <p class="empty">Log a few days of spending and this fills in.</p>}
+      {s.spent > 0 ? <Headline s={s} base={base} /> : isCurrent && <p class="empty">Log a few days of spending and this fills in</p>}
 
       {usual && usual.month > 0 && (
         <div class="rv-facts rv-usual">
