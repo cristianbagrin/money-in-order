@@ -1,18 +1,29 @@
-import { Fragment } from 'preact'
+import { Fragment, type ComponentChildren } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { assignedInMonth, averageSpent, monthView, spentInMonth, type CatMonth } from '../lib/budget'
+import { investAccounts } from '../lib/accounts'
+import { assignedInMonth, averageSpent, monthView, type CatMonth } from '../lib/budget'
 import { addMonths, monthName } from '../lib/dates'
-import { evalAmount, fmt } from '../lib/money'
-import { archiveCategory, categoryHasHistory, deleteCategory, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
+import { evalAmount, fmt, roundFor } from '../lib/money'
+import { suggestions } from '../lib/plan'
+import { archiveCategory, categoryHasHistory, deleteCategory, getIndex, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
-import { useIndex } from '../ui/hooks'
-import { regroup, toast } from '../ui/kit'
+import { useIndex, useToday } from '../ui/hooks'
+import { caretToEnd, regroup, toast, useCalc } from '../ui/kit'
 import { useCountUp } from '../ui/motion'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
+import { SpentSheet } from './SpentSheet'
+
+let pendingDelete: ID | null = null
+
+/** Open the category's sheet straight at its delete choice (a swipe on a row with history). Call before opening it. */
+export function askToDelete(id: ID) {
+  pendingDelete = id
+}
 
 export function CategorySheet(props: { catId: ID | null; month: string; current: string; onClose: () => void; onHistory: (id: ID) => void }) {
   const ix = useIndex()
+  const today = useToday()
   const { month, current } = props
   const base = ix.settings.base
   const cat = props.catId ? ix.catById.get(props.catId) ?? null : null
@@ -20,27 +31,38 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
   const cm = cat ? view.byId.get(cat.id) : undefined
   const available = cm?.available ?? 0
   const shown = useCountUp(available)
+  const [deleting, setDeleting] = useState(false)
+  const [spentOpen, setSpentOpen] = useState(false)
+  useEffect(() => {
+    setDeleting(!!props.catId && pendingDelete === props.catId)
+    pendingDelete = null
+    setSpentOpen(false)
+  }, [props.catId])
 
   if (!cat) return <Sheet open={false} onClose={props.onClose} children={null} />
 
   const assigned = cm?.assigned ?? 0
   const spent = -(cm?.activity ?? 0)
   const carry = cm?.carry ?? 0
+  const prev = addMonths(month, -1)
 
   function assign(v: number) {
     if (!cat || v === assigned) return
     undoable(`Assigned ${cat.name}`, () => setAssigned(month, cat.id, v))
   }
 
-  const prev = addMonths(month, -1)
+  // One-tap amounts for Assigned; never one that is already there.
   const quick: { label: string; value: number }[] = []
   const offer = (label: string, value: number) => {
     if (value > 0 && value !== assigned && !quick.some((q) => q.value === value)) quick.push({ label, value })
   }
-  if (cm && cm.need > 0) offer(cat.target ? 'Target' : 'Clear it', assigned + cm.need)
+  if (cm && cm.goal > 0) offer(cat.target ? 'Target' : 'Clear it', cm.goal)
+  if (cat.saving) {
+    // Savings: its share of the month's savings target (spending from it isn't a cost to repeat).
+    const s = month >= current ? suggestions(ix, month, current).find((x) => x.cat === cat.id) : undefined
+    if (s) offer('Savings share', s.want)
+  } else offer('Usual', roundFor(base, averageSpent(ix, cat.id, month, 3)))
   offer('Last month', assignedInMonth(ix, cat.id, prev))
-  offer('Spent last month', spentInMonth(ix, cat.id, prev))
-  offer('Average', averageSpent(ix, cat.id, month))
 
   const sources = view.cats.filter((c) => c.cat.id !== cat.id && c.available > 0).sort((a, b) => b.available - a.available)
   function cover(from: ID, have: number) {
@@ -52,17 +74,57 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
     toast(`${fmt(amt, base)} from ${name}`, { undo: true })
   }
 
-  // One line of what happened: only the parts that aren't zero (assigned always).
-  const parts = [`${fmt(assigned, base)} assigned`]
-  if (spent) parts.push(`${fmt(spent, base)} spent`)
-  if (carry) parts.push(`${fmt(carry, base, { sign: true })} from ${monthName(prev, { short: true })}`)
+  const prevShort = monthName(prev, { short: true })
+  const invest = cat.saving ? investAccounts(ix) : []
 
   return (
     <Sheet open onClose={props.onClose} title={cat.name}>
       <div class={`cs-avail ${available < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : available > 0 ? 'pos' : 'faint'}`}>
         <span class={`marked${available < 0 ? ' neg' : ''}`}>{fmt(shown, base)}</span>
       </div>
-      <p class="cs-line">{parts.join(' · ')}</p>
+
+      {/* How the big number comes about: Assigned (editable) ± what came over from last month − Spent. */}
+      <div class="cs-math">
+        <label class="cs-fig">
+          <span class="cs-fig-l">Assigned</span>
+          <AssignedField value={assigned} base={base} label={`Assigned to ${cat.name}`} onCommit={assign} />
+        </label>
+        {carry !== 0 && (
+          <>
+            <span class="cs-op" aria-hidden="true">
+              {carry > 0 ? '+' : '−'}
+            </span>
+            <span class="cs-fig">
+              <span class="cs-fig-l">{carry > 0 ? `Left from ${prevShort}` : `Over in ${prevShort}`}</span>
+              <span class="num">{fmt(Math.abs(carry), base, { bare: true })}</span>
+            </span>
+          </>
+        )}
+        <span class="cs-op" aria-hidden="true">
+          {spent < 0 ? '+' : '−'}
+        </span>
+        <button class="cs-fig cs-spent" onClick={() => setSpentOpen(true)} aria-label={`${fmt(spent, base)} spent. Show`}>
+          <span class="cs-fig-l">{spent < 0 ? 'Refunded' : 'Spent'}</span>
+          <span class="num">{fmt(Math.abs(spent), base, { bare: true })}</span>
+        </button>
+      </div>
+
+      {quick.length > 0 && (
+        <div class="pills cs-quick">
+          {quick.map((q) => (
+            <button
+              key={q.label}
+              class="pill sm"
+              onClick={() => {
+                assign(q.value)
+                toast(`${fmt(q.value, base)} assigned`, { undo: true })
+              }}
+            >
+              {q.label} <small>{fmt(q.value, base)}</small>
+            </button>
+          ))}
+        </div>
+      )}
 
       {available < 0 && (
         <div class="cover">
@@ -83,23 +145,6 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
         </div>
       )}
 
-      {quick.length > 0 && (
-        <div class="pills cs-quick">
-          {quick.map((q) => (
-            <button
-              key={q.label}
-              class="pill"
-              onClick={() => {
-                assign(q.value)
-                toast(`${fmt(q.value, base)} assigned`, { undo: true })
-              }}
-            >
-              {q.label} <small>{fmt(q.value, base)}</small>
-            </button>
-          ))}
-        </div>
-      )}
-
       <TargetEditor cat={cat} cm={cm} base={base} month={month} />
 
       <div class="pills cs-toggles">
@@ -107,47 +152,204 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
         <Toggle cat={cat} field="saving" label="Savings" />
       </div>
 
+      {invest.length > 0 && (
+        <PillRow label="Goes into">
+          {[{ id: '', name: 'None' }, ...invest].map((a) => (
+            <button
+              key={a.id}
+              class="pill sm soft"
+              aria-pressed={(cat.acct ?? '') === a.id}
+              onClick={() => {
+                if ((cat.acct ?? '') === a.id) return
+                const next: Category = { ...cat }
+                if (a.id) next.acct = a.id
+                else delete next.acct
+                undoable('Changed where savings go', () => saveCategory(next))
+              }}
+            >
+              {a.name}
+            </button>
+          ))}
+        </PillRow>
+      )}
+
       <div class="cs-foot">
         <button class="link" onClick={() => props.onHistory(cat.id)}>
           History
         </button>
-        {cat.archived ? (
-          <button
-            class="link"
-            onClick={() => {
-              undoable(`Brought back ${cat.name}`, () => unarchiveCategory(cat.id))
-              play('success')
-            }}
-          >
-            Bring back
-          </button>
-        ) : categoryHasHistory(cat.id) ? (
-          <button
-            class="link"
-            onClick={() => {
-              undoable(`Archived ${cat.name}`, () => archiveCategory(cat.id, current, current))
-              play('delete')
-              props.onClose()
-              toast(`${cat.name} archived`, { undo: true })
-            }}
-          >
-            Archive
-          </button>
-        ) : (
-          <button
-            class="link"
-            onClick={() => {
-              undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id))
-              play('delete')
-              props.onClose()
-              toast(`${cat.name} deleted`, { undo: true })
-            }}
-          >
+        <span class="cs-foot-r">
+          {cat.archived ? (
+            <button
+              class="link"
+              onClick={() => {
+                undoable(`Brought back ${cat.name}`, () => unarchiveCategory(cat.id))
+                play('success')
+              }}
+            >
+              Bring back
+            </button>
+          ) : (
+            categoryHasHistory(cat.id) && (
+              <button
+                class="link"
+                onClick={() => {
+                  undoable(`Archived ${cat.name}`, () => archiveCategory(cat.id, current, current))
+                  play('delete')
+                  props.onClose()
+                  toast(`${cat.name} archived`, { undo: true })
+                }}
+              >
+                Archive
+              </button>
+            )
+          )}
+          <button class="link red" aria-expanded={deleting} onClick={() => (deleting ? setDeleting(false) : startDelete(cat, setDeleting, props.onClose))}>
             Delete
           </button>
-        )}
+        </span>
       </div>
+      {deleting && <DeleteStep cat={cat} onCancel={() => setDeleting(false)} onDone={props.onClose} />}
+
+      <SpentSheet cat={spentOpen ? cat.id : null} month={month} today={today} onClose={() => setSpentOpen(false)} />
     </Sheet>
+  )
+}
+
+/** A labelled row of pills ("Goes into  None  Vanguard"). */
+function PillRow(props: { label: string; children: ComponentChildren }) {
+  return (
+    <div class="cs-row">
+      <span class="cs-row-l">{props.label}</span>
+      <div class="pills">{props.children}</div>
+    </div>
+  )
+}
+
+/** The Assigned amount, edited right here: commits on Enter or leaving the field, Esc puts it back. */
+function AssignedField(props: { value: number; base: string; label: string; onCommit: (v: number) => void }) {
+  const { value, base } = props
+  const show = (v: number) => (v ? fmt(v, base, { bare: true }) : '')
+  const [text, setText] = useState(show(value))
+  const focused = useRef(false)
+  const abandoned = useRef(false)
+  const calc = useCalc()
+  // A quick pill, an undo or a sync changed it: show the new amount unless it's being typed over.
+  useEffect(() => {
+    if (!focused.current) setText(show(value))
+  }, [value, base])
+  return (
+    <>
+      <input
+        class="cs-asg num"
+        type="text"
+        autocomplete="off"
+        {...calc.field}
+        aria-label={props.label}
+        placeholder="0"
+        value={text}
+        style={{ '--len': Math.max(1, text.length) }}
+        onFocus={(e) => {
+          focused.current = true
+          abandoned.current = false
+          caretToEnd(e.currentTarget)
+        }}
+        onInput={(e) => {
+          abandoned.current = false
+          setText(regroup(e))
+        }}
+        onBlur={(e) => {
+          focused.current = false
+          if (abandoned.current) {
+            abandoned.current = false
+            return setText(show(value))
+          }
+          const raw = e.currentTarget.value
+          const v = raw.trim() === '' ? 0 : evalAmount(raw, base)
+          if (v === null) return setText(show(value))
+          setText(show(v))
+          props.onCommit(v)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+          // Esc abandons what was typed; the sheet closes as usual.
+          else if (e.key === 'Escape') {
+            abandoned.current = true
+            setText(show(value))
+          }
+        }}
+      />
+      {calc.pad()}
+    </>
+  )
+}
+
+/**
+ * Delete from the footer: an unused category just goes; one with only money given to it goes and the
+ * money returns to Ready to assign; one with transactions asks where they go (the step below).
+ */
+function startDelete(cat: Category, setDeleting: (v: boolean) => void, close: () => void) {
+  if (!categoryHasHistory(cat.id)) {
+    undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id))
+  } else if (!txnsOf(cat.id).length) {
+    undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id, { dropTxns: true }))
+  } else return setDeleting(true)
+  play('delete')
+  close()
+  toast(`${cat.name} deleted`, { undo: true })
+}
+
+function txnsOf(id: ID) {
+  return getIndex().txns.filter((t) => t.cat === id)
+}
+
+/** "Move its 12 transactions to" another category, or delete them too (which changes your total money). */
+function DeleteStep(props: { cat: Category; onCancel: () => void; onDone: () => void }) {
+  const { cat } = props
+  const ix = useIndex()
+  const base = ix.settings.base
+  const txns = useMemo(() => ix.txns.filter((t) => t.cat === cat.id), [ix, cat.id])
+  const others = ix.cats.filter((c) => c.id !== cat.id && !c.archived)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => ref.current?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }), [])
+
+  function into(to: Category) {
+    undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id, { into: to.id }))
+    play('delete')
+    props.onDone()
+    toast(`${cat.name} deleted, its history is in ${to.name}`, { undo: true })
+  }
+  function dropAll() {
+    // Deleting spending gives that money back (and income takes it away): your total changes.
+    const change = -txns.reduce((s, t) => s + t.base, 0)
+    const n = txns.length
+    if (!confirm(`Delete ${cat.name} and its ${n} ${n === 1 ? 'transaction' : 'transactions'}? Your total money changes by ${fmt(change, base, { sign: true })}.`)) return
+    undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id, { dropTxns: true }))
+    play('delete')
+    props.onDone()
+    toast(`${cat.name} and its history deleted`, { undo: true })
+  }
+
+  return (
+    <div class="cs-del" ref={ref}>
+      <p>
+        Move its {txns.length} {txns.length === 1 ? 'transaction' : 'transactions'} to
+      </p>
+      <div class="pills">
+        {others.map((c) => (
+          <button key={c.id} class="pill sm" onClick={() => into(c)}>
+            {c.name}
+          </button>
+        ))}
+      </div>
+      <div class="cs-del-foot">
+        <button class="link red" onClick={dropAll}>
+          Delete them too
+        </button>
+        <button class="link" onClick={props.onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -193,6 +395,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
   // A kind just picked without an amount: the field takes focus so the amount can be typed right away.
   const focusNext = useRef(false)
   const fieldRef = useRef<HTMLInputElement>(null)
+  const calc = useCalc()
   useEffect(() => {
     if (!focusNext.current) return
     focusNext.current = false
@@ -222,7 +425,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
     save(t.kind === 'goal' ? { ...t, amount: v } : { kind: t.kind, amount: v })
   }
 
-  // The goal's pace: what this month asks for, the same figure as the Target pill and Fund targets.
+  // The goal's pace: what this month asks for, the same figure as the Target pill and Fill in.
   let pace = ''
   if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? '' : 'Goal reached.'
 
@@ -239,14 +442,12 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
                 ref={fieldRef}
                 class="cs-target"
                 type="text"
-                inputMode="decimal"
+                autocomplete="off"
+                {...calc.field}
                 aria-label="Target amount"
                 placeholder="0"
                 value={amountStr}
-                onFocus={(e) => {
-                  const el = e.currentTarget
-                  requestAnimationFrame(() => document.activeElement === el && el.select())
-                }}
+                onFocus={(e) => caretToEnd(e.currentTarget)}
                 onInput={(e) => setAmountStr(regroup(e))}
                 onBlur={(e) => commit(e.currentTarget.value)}
                 onKeyDown={(e) => {
@@ -262,6 +463,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
           </Fragment>
         ))}
       </div>
+      {calc.pad()}
       {t?.kind === 'goal' && (
         <div class="pills scroll" style={{ marginTop: '10px' }} ref={monthsRef}>
           <button class="pill sm soft" aria-pressed={!t.by} onClick={() => save({ kind: 'goal', amount: t.amount })}>
