@@ -81,7 +81,8 @@ button.rv-row:active {
 .rv-name {
   grid-area: name;
   min-width: 0;
-  overflow-wrap: break-word;
+  /* (anywhere, not break-word: a name too long for its row has to shrink inside the spend row's flex box) */
+  overflow-wrap: anywhere;
   line-height: 1.25;
 }
 .rv-amt {

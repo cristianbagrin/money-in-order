@@ -1571,6 +1571,9 @@ textarea:focus {
   font-size: 12.5px;
   line-height: 1.2;
   color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .txn-amt {
   text-align: right;
