@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { goalLine, goals, incomeBySource, roundPlan, same, spending, standouts, type MonthSpend } from '../lib/compare'
-import { monthName, monthOf } from '../lib/dates'
+import { agePoints, budgetAges } from '../lib/age'
+import { goalLine, goals, groupSpending, incomeBySource, roundPlan, same, spending, standouts, usualSpending, type CatSpend, type MonthSpend } from '../lib/compare'
+import { monthDiff, monthName, monthOf } from '../lib/dates'
 import { claudeSummary } from '../lib/export'
 import { savedLine, wealth } from '../lib/insights'
 import { fmt } from '../lib/money'
 import { setNote } from '../lib/store'
 import type { ID } from '../lib/types'
-import { WealthChart } from '../ui/charts'
+import { NetWorthChart, REST, REST_ID, share, slicesOf, Spark, SpendDonut } from '../ui/charts'
 import { useIndex } from '../ui/hooks'
-import { toast } from '../ui/kit'
+import { IconChevron, toast } from '../ui/kit'
 import { MonthStrip } from '../ui/monthstrip'
 import { play } from '../ui/sound'
 import '../ui/review.css'
@@ -23,6 +24,31 @@ function ordinal(n: number): string {
   return `${n}${k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th'}`
 }
 
+/** A choice remembered on this device only. */
+function useKept<T extends string>(key: string, initial: T, valid: readonly T[]): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const saved = localStorage.getItem(`money-in-order/review/${key}`) as T | null
+      return saved && valid.includes(saved) ? saved : initial
+    } catch {
+      return initial
+    }
+  })
+  const set = (next: T) => {
+    setV(next)
+    try {
+      localStorage.setItem(`money-in-order/review/${key}`, next)
+    } catch {
+      // storage blocked: remembered until the page closes
+    }
+  }
+  return [v, set]
+}
+
+const VIEWS = ['cats', 'groups'] as const
+const RANGES = ['1Y', '2Y', 'All'] as const
+type Range = (typeof RANGES)[number]
+
 export function Review(props: { today: string; month: string; setMonth: (m: string | ((prev: string) => string)) => void; onCount?: () => void }) {
   const ix = useIndex()
   const { today, month } = props
@@ -33,22 +59,49 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
 
   const s = useMemo(() => spending(ix, month, today), [ix, month, today])
   const lines = useMemo(() => standouts(ix, s), [ix, s])
-  const w = useMemo(() => wealth(ix, month, today), [ix, month, today])
+  const usual = useMemo(() => usualSpending(ix, month, today), [ix, month, today])
+  const groups = useMemo(() => groupSpending(ix, s), [ix, s])
   const saved = useMemo(() => savedLine(ix, month, today), [ix, month, today])
   const income = useMemo(() => incomeBySource(ix, month), [ix, month])
   const goalList = useMemo(() => goals(ix, month, today), [ix, month, today])
+  const spends = useMemo(() => budgetAges(ix), [ix])
   const [spentCat, setSpentCat] = useState<ID | null>(null)
   const [all, setAll] = useState(false)
+  const [view, setView] = useKept('by', 'cats', VIEWS)
+  const [openGroup, setOpenGroup] = useState<ID | null>(null)
+  const [hot, setHot] = useState<string | null>(null)
+  const [range, setRange] = useKept<Range>('range', 'All', RANGES)
   const hasData = ix.months.includes(month)
 
-  const compared = s.months.length > 0
+  // net worth and the age of money over the chosen stretch, ending with the month shown
+  const span = month >= first ? monthDiff(first, month) + 1 : 1
+  const ranges = RANGES.filter((r) => (r === '1Y' ? span > 12 : r === '2Y' ? span > 24 : span > 12))
+  const n = range === '1Y' ? 12 : range === '2Y' && span > 24 ? 24 : span
+  const w = useMemo(() => wealth(ix, month, today, n), [ix, month, today, n])
+  const ages = useMemo(() => (w ? agePoints(spends, w.points.map((p) => p.month), today) : []), [spends, w, today])
+
+  const groupView = view === 'groups' && groups.length > 1
+  const { slices, colors, total } = useMemo(
+    () => slicesOf(groupView ? groups.map((g) => ({ id: g.id, name: g.name, amount: g.spent })) : s.cats.map((c) => ({ id: c.id, name: c.name, amount: c.spent }))),
+    [groupView, groups, s],
+  )
+  const rows = groupView ? groups : s.cats
+  const cut = rows.length > FEW + 1 && !all
+  const shown = cut ? rows.slice(0, FEW) : rows
+  const top = Math.max(1, ...rows.map((r) => r.spent))
+  const sliceOf = (id: ID) => (colors.get(id) === REST && slices.some((x) => x.id === REST_ID) ? REST_ID : id)
   const by = isCurrent ? ` by the ${ordinal(s.day)}` : ''
-  const max = Math.max(1, ...s.cats.map((c) => Math.max(c.spent, c.usual ?? 0)))
-  const cut = s.cats.length > FEW + 1 && !all
-  const cats = cut ? s.cats.slice(0, FEW) : s.cats
+  const openSlice = (id: string) => {
+    if (id === REST_ID) setAll(true)
+    else if (groupView) setOpenGroup(openGroup === id ? null : id)
+    else setSpentCat(id)
+  }
+
   const end = w?.points[w.points.length - 1]
   const period = !!w && w.points.length > 1
+  const invested = !!w && w.points.some((p) => p.invest > 0)
   const incomeMax = Math.max(1, ...income.map((r) => Math.max(r.amount, r.usual ?? 0)))
+  const since = (m: string) => monthName(m, { short: true, year: m.slice(0, 4) !== month.slice(0, 4) })
 
   return (
     <div>
@@ -57,6 +110,19 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       </div>
 
       {s.spent > 0 ? <Headline s={s} base={base} /> : isCurrent && <p class="empty">Log a few days of spending and this fills in.</p>}
+
+      {usual && usual.month > 0 && (
+        <div class="rv-facts rv-usual">
+          <span>
+            <small>Usual day</small>
+            <b class="num">{fmt(roundPlan(usual.day, 'near'), base)}</b>
+          </span>
+          <span>
+            <small>Usual month</small>
+            <b class="num">{fmt(roundPlan(usual.month, 'near'), base)}</b>
+          </span>
+        </div>
+      )}
 
       {lines.length > 0 && (
         <ul class="insights rv-lines">
@@ -69,33 +135,63 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
       )}
 
       {s.cats.length > 0 && (
-        <section class="card">
+        <section class="card rv-where">
           <div class="card-head">
             <h2>Where it went</h2>
-            {compared && <UsualKey text={`usual${by}`} />}
+            {groups.length > 1 && (
+              <div class="pills rv-pick" role="group" aria-label="Show by">
+                <button class="pill sm" aria-pressed={!groupView} onClick={() => setView('cats')}>
+                  Categories
+                </button>
+                <button class="pill sm" aria-pressed={groupView} onClick={() => setView('groups')}>
+                  Groups
+                </button>
+              </div>
+            )}
           </div>
-          <div class="rv-rows">
-            {cats.map((c) => {
-              const t = tone(c.spent, c.usual, base, (diff) => (diff < 0 ? 'pos' : c.spent > c.planned ? 'neg' : 'muted'))
-              return (
-                <BarRow
-                  key={c.id}
-                  name={c.name}
-                  amount={c.spent}
-                  usual={c.usual}
-                  max={max}
-                  base={base}
-                  diff={t}
-                  onOpen={() => setSpentCat(c.id)}
-                />
-              )
-            })}
+          <div class={`rv-split${total > 0 ? '' : ' flat'}`}>
+            {total > 0 && <SpendDonut slices={slices} total={total} base={base} hot={hot} onHot={setHot} onOpen={openSlice} />}
+            <div class="rv-rows" onPointerLeave={() => setHot(null)}>
+              {shown.map((r) => {
+                const color = colors.get(r.id) ?? REST
+                const row = { name: r.name, amount: r.spent, share: total > 0 && r.spent > 0 ? r.spent / total : null, color, top, base, hot: !!hot && sliceOf(r.id) === hot }
+                const onHot = () => setHot(sliceOf(r.id))
+                if (!groupView) {
+                  const c = r as CatSpend
+                  return <SpendRow key={r.id} {...row} diff={catDiff(c, base, by)} onHot={onHot} onOpen={() => setSpentCat(r.id)} />
+                }
+                const g = groups.find((x) => x.id === r.id)!
+                const open = openGroup === g.id
+                return (
+                  <div key={g.id} class={open ? 'rv-group open' : 'rv-group'}>
+                    <SpendRow {...row} diff={diff(g.spent, g.usual, base, by, () => 'muted')} onHot={onHot} expanded={open} onOpen={() => setOpenGroup(open ? null : g.id)} />
+                    {open &&
+                      g.cats.map((c) => (
+                        <SpendRow
+                          key={c.id}
+                          child
+                          name={c.name}
+                          amount={c.spent}
+                          share={total > 0 && c.spent > 0 ? c.spent / total : null}
+                          color={color}
+                          top={top}
+                          base={base}
+                          hot={false}
+                          diff={catDiff(c, base, by)}
+                          onHot={onHot}
+                          onOpen={() => setSpentCat(c.id)}
+                        />
+                      ))}
+                  </div>
+                )
+              })}
+              {rows.length > FEW + 1 && (
+                <button class="pill sm rv-more" onClick={() => setAll(!all)}>
+                  {all ? 'Fewer' : `All ${rows.length}`}
+                </button>
+              )}
+            </div>
           </div>
-          {s.cats.length > FEW + 1 && (
-            <button class="pill sm rv-more" onClick={() => setAll(!all)}>
-              {all ? 'Fewer' : `All ${s.cats.length}`}
-            </button>
-          )}
         </section>
       )}
 
@@ -103,25 +199,41 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
         <section class="card">
           <div class="card-head">
             <h2>Net worth</h2>
-            {props.onCount && (
-              <button class="pill sm" onClick={props.onCount}>
-                Update balances
-              </button>
+            {ranges.length > 1 && (
+              <div class="pills rv-pick" role="group" aria-label="Over">
+                {ranges.map((r) => (
+                  <button key={r} class="pill sm" aria-pressed={r === range || (r === 'All' && !ranges.includes(range))} onClick={() => setRange(r)}>
+                    {r}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           <p class="rv-big">
             <span class="num marked">{fmt(end.total, base)}</span>
             {period && !same(w.change, end.total) && (
               <small class={`num ${w.change > 0 ? 'pos' : 'neg'}`}>
-                {fmt(w.change, base, { sign: true })} since {monthName(w.points[0].month, { short: true, year: w.points[0].month.slice(0, 4) !== month.slice(0, 4) })}
+                {fmt(w.change, base, { sign: true })}
+                {w.points[0].total > 0 && ` · ${w.change > 0 ? '+' : '−'}${Math.round((Math.abs(w.change) / w.points[0].total) * 100)}%`}
+                <span class="rv-since"> since {since(w.points[0].month)}</span>
               </small>
             )}
           </p>
-          {period && <WealthChart points={w.points} base={base} />}
-          {w.growth !== null && (
+          {period && <NetWorthChart points={w.points} base={base} />}
+          {invested && (
             <div class="rv-facts">
               <span>
-                <small>Investments</small>
+                <small>
+                  <i class="rv-sw cash" aria-hidden="true" />
+                  Cash
+                </small>
+                <b class="num">{fmt(end.cash, base)}</b>
+              </span>
+              <span>
+                <small>
+                  <i class="rv-sw invest" aria-hidden="true" />
+                  Investments
+                </small>
                 <b class="num">{fmt(end.invest, base)}</b>
               </span>
               {period && (
@@ -130,7 +242,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
                   <b class="num">{fmt(w.added, base)}</b>
                 </span>
               )}
-              {period && (
+              {period && w.growth !== null && (
                 <span>
                   <small>Growth</small>
                   <b class={`num${same(w.growth, end.invest) ? '' : w.growth > 0 ? ' pos' : ' neg'}`}>{fmt(w.growth, base, { sign: true })}</b>
@@ -138,19 +250,30 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
               )}
             </div>
           )}
-          {saved && (
-            <ul class="insights rv-saved">
-              <li class={saved.good ? 'good' : ''}>{saved.text}</li>
-            </ul>
+          {(saved || props.onCount) && (
+            <div class="rv-foot">
+              {saved && (
+                <ul class="insights rv-saved">
+                  <li class={saved.good ? 'good' : ''}>{saved.text}</li>
+                </ul>
+              )}
+              {props.onCount && (
+                <button class="pill sm" onClick={props.onCount}>
+                  Update balances
+                </button>
+              )}
+            </div>
           )}
         </section>
       )}
+
+      <AgeCard points={ages} month={month} isCurrent={isCurrent} since={since} />
 
       {income.length > 0 && (
         <section class="card">
           <div class="card-head">
             <h2>Income</h2>
-            {compared && <UsualKey text="usual" />}
+            {s.months.length > 0 && <UsualKey text="usual" />}
           </div>
           <div class="rv-rows">
             {income.map((r) => (
@@ -236,6 +359,8 @@ function Headline(props: { s: MonthSpend; base: string }) {
 interface Diff {
   word: string
   cls: string
+  /** the same in words, for screen readers */
+  said?: string
 }
 
 /** The change against the usual under an amount: "+NT$1,200", "usual", or nothing with no usual to go on. */
@@ -244,6 +369,101 @@ function tone(amount: number, usual: number | null, base: string, cls: (diff: nu
   const diff = amount - usual
   if (same(diff, Math.max(amount, usual))) return { word: 'usual', cls: 'faint' }
   return { word: fmt(Math.round(diff / 100) * 100, base, { bare: true, sign: true }), cls: cls(diff) }
+}
+
+/** A change against the usual worth a glance (a tenth of the amount or more), or nothing. */
+function diff(amount: number, usual: number | null, base: string, by: string, cls: (diff: number) => string): Diff | null {
+  if (usual === null) return null
+  const d = amount - usual
+  if (same(d, Math.max(amount, usual)) || Math.abs(d) < Math.max(amount, usual) * 0.1) return null
+  const word = `${fmt(Math.round(d / 100) * 100, base, { bare: true, sign: true })} vs usual`
+  return { word, cls: cls(d), said: `${fmt(Math.abs(Math.round(d / 100) * 100), base)} ${d < 0 ? 'less' : 'more'} than usual${by}` }
+}
+
+const catDiff = (c: CatSpend, base: string, by: string) => diff(c.spent, c.usual, base, by, (d) => (d < 0 ? 'pos' : c.spent > c.planned ? 'neg' : 'muted'))
+
+/**
+ * A row of the breakdown: name, amount and share, with a bar in the slice's colour under the name.
+ * A group's row opens its categories; a category's opens what the money went on.
+ */
+function SpendRow(props: {
+  name: string
+  amount: number
+  share: number | null
+  color: string
+  top: number
+  base: string
+  diff: Diff | null
+  hot: boolean
+  child?: boolean
+  expanded?: boolean
+  onHot: () => void
+  onOpen: () => void
+}) {
+  const { amount, base, diff } = props
+  const width = `${Math.min(100, (Math.max(0, amount) / props.top) * 100).toFixed(1)}%`
+  const label = `${props.name}: ${fmt(amount, base)}${props.share !== null ? `, ${share(props.share)}` : ''}${diff?.said ? `, ${diff.said}` : ''}`
+  return (
+    <button
+      class={`rv-row rv-spend${props.child ? ' child' : ''}${props.hot ? ' hot' : ''}`}
+      style={{ '--c': props.color }}
+      aria-label={label}
+      aria-expanded={props.expanded}
+      onClick={props.onOpen}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && props.onHot()}
+    >
+      <span class="rv-name">
+        {props.name}
+        {props.expanded !== undefined && <IconChevron dir="down" />}
+      </span>
+      <span class="rv-amt num">{fmt(amount, base)}</span>
+      <span class="rv-pct num">{props.share !== null ? share(props.share) : ''}</span>
+      <span class="rv-bar" aria-hidden="true">
+        <i style={{ width }} />
+      </span>
+      {diff && <small class={`rv-diff num ${diff.cls}`}>{diff.word}</small>}
+    </button>
+  )
+}
+
+/**
+ * How long money sits between coming in and going out, at the end of the month shown (or today),
+ * with its trend over the same stretch as net worth and one line on what it means.
+ */
+function AgeCard(props: { points: { month: string; days: number | null }[]; month: string; isCurrent: boolean; since: (m: string) => string }) {
+  const { points } = props
+  const now = points[points.length - 1]?.days
+  if (now === null || now === undefined) return null
+  const known = points.filter((p) => p.days !== null)
+  const from = known[0]
+  const change = known.length > 1 ? now - from.days! : 0
+  const days = (d: number) => `${d} ${d === 1 ? 'day' : 'days'}`
+  // a month or more: this month is paid with money that came in before it
+  const ahead = Math.floor(now / 30.4)
+  const line = props.isCurrent
+    ? `Money you spend today came in ${days(now)} ago${ahead >= 1 ? `: you’re ${ahead === 1 ? 'a month' : `${ahead} months`} ahead.` : '.'}`
+    : `Money spent at the end of ${monthName(props.month)} had come in ${days(now)} before.`
+  return (
+    <section class="card rv-age">
+      <h2>Age of money</h2>
+      <div class="rv-age-body">
+        <p class="rv-big">
+          <span>
+            <span class="num">{now}</span>
+            <span class="rv-unit"> {now === 1 ? 'day' : 'days'}</span>
+          </span>
+          {change !== 0 && (
+            <small class={`num ${change > 0 ? 'pos' : 'muted'}`}>
+              {change > 0 ? '+' : '−'}
+              {Math.abs(change)} since {props.since(from.month)}
+            </small>
+          )}
+        </p>
+        {known.length > 1 && <Spark values={points.map((p) => p.days)} label={`Age of money from ${days(from.days!)} to ${days(now)}`} />}
+      </div>
+      <p class="rv-age-line">{line}</p>
+    </section>
+  )
 }
 
 function UsualKey(props: { text: string }) {
@@ -255,21 +475,13 @@ function UsualKey(props: { text: string }) {
   )
 }
 
-/** A ranked row: name and amount over a bar, with a tick where the usual is. Tappable rows open what's behind them. */
-function BarRow(props: {
-  name: string
-  amount: number
-  usual: number | null
-  max: number
-  base: string
-  diff: Diff | null
-  onOpen?: () => void
-}) {
+/** A ranked row: name and amount over a bar, with a tick where the usual is. */
+function BarRow(props: { name: string; amount: number; usual: number | null; max: number; base: string; diff: Diff | null }) {
   const { amount, usual, max, base, diff } = props
   const pct = (v: number) => `${Math.min(100, (Math.max(0, v) / max) * 100).toFixed(1)}%`
   const label = `${props.name}: ${fmt(amount, base)}${usual !== null ? `, usual ${fmt(usual, base)}` : ''}`
-  const body = (
-    <>
+  return (
+    <div class="rv-row" aria-label={label} role="group">
       <span class="rv-name">{props.name}</span>
       <span class="rv-amt num">
         {fmt(amount, base)}
@@ -279,15 +491,6 @@ function BarRow(props: {
         <i class="rv-fill" style={{ width: pct(amount) }} />
         {usual !== null && usual > 0 && <i class="rv-tick" style={{ left: pct(usual) }} />}
       </span>
-    </>
-  )
-  return props.onOpen ? (
-    <button class="rv-row" aria-label={label} onClick={props.onOpen}>
-      {body}
-    </button>
-  ) : (
-    <div class="rv-row" aria-label={label} role="group">
-      {body}
     </div>
   )
 }

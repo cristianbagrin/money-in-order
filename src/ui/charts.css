@@ -1,5 +1,19 @@
 /* Charts for Review. Marks wear series colors; every piece of text wears ink. */
 
+/* Series colours. The six slice hues are in an order whose neighbours stay apart under every colour-vision
+   deficiency (wrap-around included); grey is everything too small to name. Labels carry identity too. */
+:root {
+  --s1: #1d58a8;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #6250d6;
+  --s5: #eda100;
+  --s6: #e87ba4;
+  --s-rest: #c4c9c7;
+  --s-cash: #1d58a8;
+  --s-invest: #1baf7a;
+}
+
 .ch {
   position: relative;
   min-width: 0;
@@ -84,7 +98,7 @@
   pointer-events: none;
   white-space: nowrap;
   padding: 7px 10px 8px;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--surface, #fff);
   border: 1px solid var(--rule, #e7e7e2);
   box-shadow: 0 6px 20px rgba(21, 36, 44, 0.08), 0 1px 3px rgba(21, 36, 44, 0.06);
@@ -144,7 +158,99 @@
   border: 0;
 }
 
+/* ---- where the money went */
+
+.ch-donut svg {
+  display: block;
+  overflow: visible;
+  margin: 0 auto;
+}
+.ch-slice {
+  cursor: pointer;
+  transition: opacity 0.15s ease-out;
+}
+/* the 2px gap between slices is the card's own surface */
+.ch-slice.gap {
+  stroke: var(--surface, #fff);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.ch-slice.dim,
+.ch-callout.dim {
+  opacity: 0.3;
+}
+.ch-callout {
+  cursor: pointer;
+  transition: opacity 0.15s ease-out;
+}
+.ch-leader {
+  fill: none;
+  stroke: var(--ink-4, #8e989c);
+  stroke-width: 1;
+}
+.ch-label {
+  font-family: var(--sans, system-ui, sans-serif);
+  font-variation-settings: var(--vs-print, normal);
+  font-size: 12px;
+  font-weight: 560;
+  fill: var(--ink, #15242c);
+}
+.ch-total {
+  font-family: var(--sans, system-ui, sans-serif);
+  font-variation-settings: var(--vs-column, normal);
+  font-weight: 650;
+  fill: var(--ink, #15242c);
+}
+
+/* ---- net worth columns */
+
+.ch-cash {
+  fill: var(--s-cash);
+}
+.ch-invest {
+  fill: var(--s-invest);
+}
+.ch-plot g.dim {
+  opacity: 0.45;
+}
+.ch-key.box {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-sm);
+}
+.ch-key.cash {
+  background: var(--s-cash);
+}
+.ch-key.invest {
+  background: var(--s-invest);
+}
+
+.ch-spark svg {
+  display: block;
+  overflow: visible;
+}
+
 /* ---- motion */
+
+.ch-grow {
+  animation: ch-grow 0.7s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1)) both;
+}
+.ch-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ch-spin 0.6s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1)) both;
+}
+@keyframes ch-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes ch-spin {
+  from {
+    opacity: 0;
+    transform: rotate(-30deg) scale(0.9);
+  }
+}
 
 .ch-draw {
   stroke-dasharray: 1;
@@ -185,8 +291,14 @@
   .ch-draw,
   .ch-fade,
   .ch-pop,
+  .ch-grow,
+  .ch-spin,
   .ch-tip {
     animation: none;
+  }
+  .ch-slice,
+  .ch-callout {
+    transition: none;
   }
   .ch-draw {
     stroke-dashoffset: 0;

@@ -1,4 +1,5 @@
 import { balances, netWorth } from './accounts'
+import { ageAt, budgetAges } from './age'
 import { daily, expectedTotal, monthView, type Index, type MonthView } from './budget'
 import { addDays, addMonths, dayOfMonth, daysInMonth, monthName, monthOf } from './dates'
 import { goalLine, goals, incomeBySource, same, spending, standouts } from './compare'
@@ -89,6 +90,10 @@ export function claudeSummary(ix: Index, today: string, opts: { months: number; 
           `so all my money would last about ${(total / avgSpent).toFixed(1)} months`,
       )
     }
+  }
+  const age = ageAt(budgetAges(ix), today)
+  if (age !== null) {
+    out.push(`- Age of money: ${Math.round(age)} days (money spent lately came in that long before, on average; investing doesn't count)`)
   }
   if (d) {
     out.push(

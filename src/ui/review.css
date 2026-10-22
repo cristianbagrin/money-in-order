@@ -1,4 +1,4 @@
-/* Review: the month in a sentence, where it went, net worth, income, goals. */
+/* Review: the month in a sentence, where it went, net worth, age of money, income, goals. */
 
 .card-head {
   display: flex;
@@ -132,6 +132,168 @@ button.rv-row:active {
   }
 }
 
+/* ---- usual spending, under the sentence */
+
+.rv-usual {
+  margin-top: 10px;
+}
+
+/* ---- pill pairs in a card's head: categories / groups, the range */
+
+.rv-pick {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+/* ---- where it went: the donut, and beside it (below on phones) every row */
+
+.rv-where {
+  container-type: inline-size;
+}
+.rv-split {
+  display: grid;
+  gap: 6px;
+}
+@container (min-width: 560px) {
+  .rv-split:not(.flat) {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 22px;
+  }
+}
+
+.rv-row.rv-spend {
+  grid-template-columns: minmax(0, 1fr) auto 3.2em;
+  grid-template-areas: 'name amt pct' 'bar diff diff';
+  gap: 5px 10px;
+  padding: 9px 0 9px;
+  border-radius: 0;
+}
+.rv-spend .rv-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rv-spend .rv-name svg {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform 0.2s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
+}
+.rv-spend[aria-expanded='true'] .rv-name svg {
+  transform: rotate(180deg);
+}
+.rv-pct {
+  grid-area: pct;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-align: right;
+}
+.rv-bar {
+  grid-area: bar;
+  align-self: center;
+  height: 6px;
+}
+.rv-bar i {
+  display: block;
+  min-width: 6px;
+  height: 100%;
+  border-radius: var(--r-sm);
+  background: var(--c, var(--pen));
+  transform-origin: left center;
+  transition: width 0.45s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1));
+  animation: rv-grow 0.55s var(--ease, cubic-bezier(0.2, 0.9, 0.25, 1)) both;
+}
+.rv-diff {
+  grid-area: diff;
+  justify-self: end;
+  font-size: 12px;
+  line-height: 1;
+}
+/* a group's categories, tucked under it */
+.rv-spend.child {
+  padding-left: 14px;
+  border-top-style: dashed;
+  min-height: 40px;
+}
+.rv-spend.child .rv-name {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.rv-spend.child .rv-bar i {
+  opacity: 0.45;
+}
+.rv-group + .rv-group > .rv-spend:first-child {
+  border-top: 1px solid var(--rule);
+}
+.rv-rows > .rv-group:first-child > .rv-spend:first-child {
+  border-top: 0;
+}
+/* the row whose slice the pointer is on */
+.rv-spend.hot .rv-name {
+  color: var(--pen);
+}
+
+/* ---- net worth */
+
+.rv-since {
+  color: var(--ink-3);
+}
+.rv-sw {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: var(--r-sm);
+  vertical-align: 0;
+}
+.rv-sw.cash {
+  background: var(--s-cash);
+}
+.rv-sw.invest {
+  background: var(--s-invest);
+}
+.rv-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 14px 0 4px;
+}
+.rv-foot .rv-saved {
+  margin: 0;
+}
+
+/* ---- age of money */
+
+.rv-age-body {
+  display: grid;
+  gap: 4px;
+}
+@container (min-width: 520px) {
+  .rv-age-body {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+    gap: 28px;
+  }
+}
+.rv-age {
+  container-type: inline-size;
+}
+.rv-age .rv-big {
+  margin: 0;
+}
+.rv-unit {
+  font-size: 18px;
+  font-weight: 560;
+}
+.rv-age-line {
+  margin: 8px 0 4px;
+  font-size: 14.5px;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
 /* ---- net worth */
 
 .rv-big {
@@ -230,6 +392,7 @@ button.rv-row:active {
 
 @media (prefers-reduced-motion: reduce) {
   .rv-fill,
+  .rv-bar i,
   .rv-tick,
   .goal-bar i,
   button.rv-row {
