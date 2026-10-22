@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { daily, expectedTotal, fundingPlan, monthView, targetNeed } from '../src/lib/budget'
+import { daily, expectedTotal, monthView, targetNeed } from '../src/lib/budget'
 import { merge, hasNews } from '../src/lib/merge'
 import { fmt, keypadToMinor, parseAmount, convert } from '../src/lib/money'
 import * as S from '../src/lib/store'
@@ -129,20 +129,6 @@ describe('targets', () => {
     expect(targetNeed(cat({ kind: 'goal', amount: 3000000, by: '2026-12' }), 3000000, 0, OCT).need).toBe(0)
   })
 
-  it('fund targets fills in budget order until money runs out', () => {
-    const living = catByName('Living')
-    const phone = catByName('Phone')
-    S.saveCategory({ ...living, target: { kind: 'refill', amount: 600000 } })
-    S.saveCategory({ ...phone, target: { kind: 'monthly', amount: 60000 } })
-    S.addTxn({ date: '2026-10-01', cat: RTA, amt: 620000, cur: 'TWD' })
-    const plan = fundingPlan(monthView(S.getIndex(), OCT, OCT))
-    expect(plan).toEqual([
-      { cat: living.id, amount: 600000 },
-      { cat: phone.id, amount: 20000 },
-    ])
-    S.fundTargets(OCT, OCT)
-    expect(monthView(S.getIndex(), OCT, OCT).readyToAssign).toBe(0)
-  })
 })
 
 describe('daily allowance', () => {

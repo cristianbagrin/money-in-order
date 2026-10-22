@@ -68,20 +68,15 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
             {!b.tracked && b.asOf && ` · ${a.invest ? 'updated' : 'counted'} ${dayText(b.asOf, props.today)}`}
           </span>
         </span>
-        <div class="count-box">
-          <AmountField
-            class={`count-amt${invalid(a) ? ' bad' : ''}`}
-            label={`${a.name} balance in ${a.cur}`}
-            value={vals[a.id] ?? ''}
-            onInput={(v) => setVals((all) => ({ ...all, [a.id]: v }))}
-          />
-          {/* The balance kept, until something is typed. */}
-          {!typed(a.id) && (
-            <span class="count-ph num" aria-hidden="true">
-              {fmt(b.bal, a.cur, { bare: true })}
-            </span>
-          )}
-        </div>
+        <AmountField
+          class={`count-amt${invalid(a) ? ' bad' : ''}`}
+          label={`${a.name} balance in ${a.cur}`}
+          cur={a.cur}
+          // the balance kept, until something is typed
+          placeholder={fmt(b.bal, a.cur, { bare: true })}
+          value={vals[a.id] ?? ''}
+          onInput={(v) => setVals((all) => ({ ...all, [a.id]: v }))}
+        />
       </div>
     )
   }

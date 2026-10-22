@@ -1,6 +1,6 @@
 import { balances } from './accounts'
-import { buildIndex, DEFAULT_SETTINGS, fundingPlan, monthView, settingsOf, type Index } from './budget'
-import { addMonths, isoDate, monthOf } from './dates'
+import { buildIndex, DEFAULT_SETTINGS, monthView, settingsOf, type Index } from './budget'
+import { isoDate, monthOf } from './dates'
 import { edit, repair, same } from './merge'
 import { convert, type Rates } from './money'
 import {
@@ -490,28 +490,6 @@ export function moveMoney(month: Month, from: ID, to: ID, amt: number) {
   const recs: Assign[] = []
   if (from !== RTA) recs.push(assignRec(month, from, assignedOf(month, from) - amt))
   if (to !== RTA) recs.push(assignRec(month, to, assignedOf(month, to) + amt))
-  commit({ assigns: recs })
-}
-
-/** Give every category with a target what it still needs, as far as Ready to Assign allows. */
-export function fundTargets(month: Month, current: Month): number {
-  const view = monthView(getIndex(), month, current)
-  const plan = fundingPlan(view)
-  if (!plan.length) return 0
-  commit({ assigns: plan.map((p) => assignRec(month, p.cat, assignedOf(month, p.cat) + p.amount)) })
-  return plan.reduce((s, p) => s + p.amount, 0)
-}
-
-/** Copy last month's assigned amounts into a month where nothing is assigned yet. */
-export function repeatLastMonth(month: Month) {
-  const prev = addMonths(month, -1)
-  const ix = getIndex()
-  const recs: Assign[] = []
-  for (const [cat, amt] of ix.asg.get(prev) ?? []) {
-    const c = ix.catById.get(cat)
-    if (!c || c.archived || amt <= 0) continue
-    recs.push(assignRec(month, cat, assignedOf(month, cat) + amt))
-  }
   commit({ assigns: recs })
 }
 

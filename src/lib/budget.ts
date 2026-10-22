@@ -284,20 +284,6 @@ export function daily(ix: Index, view: MonthView, today: string): Daily | null {
   }
 }
 
-/** Plan to fund targets from Ready to Assign, in budget order, until the money runs out. */
-export function fundingPlan(view: MonthView): { cat: ID; amount: number }[] {
-  let left = view.readyToAssign
-  const plan: { cat: ID; amount: number }[] = []
-  for (const c of view.cats) {
-    if (left <= 0) break
-    if (c.need <= 0) continue
-    const amount = Math.min(c.need, left)
-    plan.push({ cat: c.cat.id, amount })
-    left -= amount
-  }
-  return plan
-}
-
 /** Average monthly spending in a category over the `n` months before `month` that had any activity. */
 export function averageSpent(ix: Index, cat: ID, month: Month, n = 3): number {
   let total = 0

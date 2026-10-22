@@ -225,10 +225,10 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
 
   return (
     <Sheet open onClose={props.onClose} title={title}>
-      <AmountField label="Amount" value={amount} onInput={setAmount} onCommit={commitAmount} />
+      <AmountField label="Amount" cur={tx.cur} value={amount} onInput={setAmount} onCommit={commitAmount} />
       {mixed && (
         <div class="row" style={{ marginTop: '8px', gap: '8px', alignItems: 'center' }}>
-          <AmountField label="Arrived" class="grow" value={arrived} onInput={setArrived} onCommit={commitArrived} />
+          <AmountField label="Arrived" cur={to!.cur} class="grow" value={arrived} onInput={setArrived} onCommit={commitArrived} />
           <span class="faint">{to!.cur}</span>
         </div>
       )}

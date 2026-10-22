@@ -1349,27 +1349,18 @@ textarea:focus {
   display: block;
   font-size: 12px;
 }
-.count-box {
-  position: relative;
-  flex: none;
-  width: 52%;
-}
 .count-head {
   margin: 18px 0 0;
   font-size: 13px;
   font-weight: 650;
   color: var(--ink-2);
 }
-/* the balance kept, where the typed one goes */
-.count-ph {
-  position: absolute;
-  top: 50%;
-  right: 40px;
-  transform: translateY(-50%);
-  font-size: 22px;
-  font-weight: 560;
+.amountfield.count-amt {
+  flex: none;
+  width: 52%;
+}
+.amountfield.count-amt input::placeholder {
   color: var(--ink-3);
-  pointer-events: none;
 }
 .amountfield.count-amt input {
   min-height: 46px;

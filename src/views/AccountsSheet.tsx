@@ -289,12 +289,12 @@ function MoveMoney(props: { accounts: Account[]; today: Day; onDone: () => void 
       <span class="acc-lab">To</span>
       {pills('to')}
       <div class="acc-move-amt">
-        <AmountField label={`Amount in ${f.cur}`} class="acc-field" value={amount} onInput={(v) => (setAmount(v), setArrived(null))} autoFocus />
+        <AmountField label={`Amount in ${f.cur}`} cur={f.cur} class="acc-field" value={amount} onInput={(v) => (setAmount(v), setArrived(null))} autoFocus />
         <span class="acc-cur">{f.cur}</span>
       </div>
       {differ && (
         <div class="acc-move-amt">
-          <AmountField label={`Arrived in ${t.cur}`} class="acc-field" value={shownArrived} onInput={setArrived} />
+          <AmountField label={`Arrived in ${t.cur}`} cur={t.cur} class="acc-field" value={shownArrived} onInput={setArrived} />
           <span class="acc-cur">{t.cur}</span>
         </div>
       )}
