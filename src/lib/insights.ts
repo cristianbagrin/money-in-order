@@ -10,7 +10,7 @@ import type { Category } from './types'
 /** Money kept toward a goal or a buffer, not meant to be spent this month. */
 export function setAside(cat: Category): boolean {
   const t = cat.target
-  return !!t && (t.kind === 'goal' || (t.kind === 'refill' && !cat.daily))
+  return !!t && (t.kind === 'goal' || ((t.kind === 'topup' || t.kind === 'refill') && !cat.daily))
 }
 
 /**

@@ -97,7 +97,8 @@ export function MonthStrip(props: {
               onClick={() => props.setMonth(clamp(m))}
             >
               {monthName(m, { short: true })}
-              {m.slice(0, 4) !== thisYear && <small>’{m.slice(2, 4)}</small>}
+              {/* the year, small in the corner, where it changes (or starts the row) and isn't this one */}
+              {m.slice(0, 4) !== thisYear && (m.endsWith('-01') || m === months[0]) && <small>’{m.slice(2, 4)}</small>}
             </button>
           )
         })}

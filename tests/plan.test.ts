@@ -53,7 +53,7 @@ describe('expected income', () => {
 describe('suggestions', () => {
   it('targets first, overspending cleared, usual costs less what is already there', () => {
     history()
-    S.saveCategory({ ...cat('Phone'), target: { kind: 'monthly', amount: 60000 } })
+    S.saveCategory({ ...cat('Phone'), target: { kind: 'topup', amount: 60000 } })
     expect(want(OCT, 'Phone')).toMatchObject({ base: 60000, want: 60000 })
     expect(want(OCT, 'Living').want).toBe(1500000)
     // Living carried 0 (assigned = spent); with 5,000 left from September it asks for 10,000.
@@ -78,7 +78,7 @@ describe('suggestions', () => {
 
   it('a coming month stands on its own: targets, savings and usual costs', () => {
     history()
-    S.saveCategory({ ...cat('Phone'), target: { kind: 'monthly', amount: 60000 } })
+    S.saveCategory({ ...cat('Phone'), target: { kind: 'topup', amount: 60000 } })
     S.setAssigned(OCT, cat('Living').id, 9000000) // lots left in October doesn't make January cheaper
     const jan = '2027-01'
     expect(want(jan, 'Living').want).toBe(1500000)
@@ -90,7 +90,7 @@ describe('suggestions', () => {
 describe('fill', () => {
   it('assigns by priority as far as the money goes', () => {
     history()
-    S.saveCategory({ ...cat('Phone'), target: { kind: 'monthly', amount: 60000 } })
+    S.saveCategory({ ...cat('Phone'), target: { kind: 'topup', amount: 60000 } })
     const list = suggestions(S.getIndex(), OCT, OCT)
     const total = list.reduce((s, x) => s + extraOf(x), 0)
     // Phone 600, Future me 12,000, Living 15,000, Purchases 3,000 overspent in September + 3,000 usual
@@ -139,6 +139,21 @@ describe('forecast', () => {
     expect(after.months[1].need).toBe(before.months[1].need - 1500000)
     expect(after.months[2].left).toBe(before.months[2].left) // the same money, planned earlier
     expect(after.ahead).toBeGreaterThan(0)
+  })
+
+  it('counts the whole months the money in hand already pays for, without income', () => {
+    history()
+    const f = forecast(S.getIndex(), OCT, 6)
+    // 105,000 to assign; October still needs 33,000, leaving 72,000: two 30,000 months.
+    expect(f.ahead).toBe(2)
+    expect(f.until).toBe('2026-12')
+    expect(f.months.map((m) => m.covered)).toEqual([true, true, true, false, false, false])
+    // Money given to November already is in hand all the same.
+    S.setAssigned(NOV, cat('Living').id, 1500000)
+    expect(forecast(S.getIndex(), OCT, 6).ahead).toBe(2)
+    // Spending it shortens the reach.
+    spend('2026-10-03', 'Purchases', 2000000) // 17,000 over what October planned for it
+    expect(forecast(S.getIndex(), OCT, 6).ahead).toBe(1)
   })
 
   it('runs out when plans outgrow income', () => {

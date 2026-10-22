@@ -115,13 +115,17 @@ describe('budget math', () => {
 describe('targets', () => {
   const cat = (target: Category['target']): Category => ({ id: 'x', u: 0, name: 'x', group: 'g', order: 0, target })
 
-  it('monthly: the full amount every month, plus any debt', () => {
-    expect(targetNeed(cat({ kind: 'monthly', amount: 60000 }), 20000, 0, OCT)).toEqual({ need: 60000, goal: 60000 })
+  it('monthly: have the amount each month; leftovers count, overspending is made up', () => {
+    expect(targetNeed(cat({ kind: 'monthly', amount: 100000 }), 20000, 0, OCT)).toEqual({ need: 80000, goal: 80000 })
+    expect(targetNeed(cat({ kind: 'monthly', amount: 600000 }), 700000, 0, OCT).need).toBe(0)
     expect(targetNeed(cat({ kind: 'monthly', amount: 60000 }), -10000, 30000, OCT)).toEqual({ need: 40000, goal: 70000 })
   })
-  it('refill: top up to the amount', () => {
-    expect(targetNeed(cat({ kind: 'refill', amount: 600000 }), 228800, 0, OCT)).toEqual({ need: 371200, goal: 371200 })
-    expect(targetNeed(cat({ kind: 'refill', amount: 600000 }), 700000, 0, OCT).need).toBe(0)
+  it('top up: the same amount every month, whatever came over', () => {
+    expect(targetNeed(cat({ kind: 'topup', amount: 200000 }), 50000, 0, OCT)).toEqual({ need: 200000, goal: 200000 })
+    // over by 1,164 in September: October still asks for 2,000, not 3,164
+    expect(targetNeed(cat({ kind: 'topup', amount: 200000 }), -116400, 216400, OCT)).toEqual({ need: 0, goal: 200000 })
+    // the older name reads the same
+    expect(targetNeed(cat({ kind: 'refill', amount: 200000 }), -116400, 0, OCT)).toEqual({ need: 200000, goal: 200000 })
   })
   it('goal by date: spread over the months left', () => {
     const r = targetNeed(cat({ kind: 'goal', amount: 3000000, by: '2026-12' }), 0, 0, OCT)

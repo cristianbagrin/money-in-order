@@ -374,7 +374,7 @@ function Toggle(props: { cat: Category; field: 'daily' | 'saving'; label: string
 const KINDS: [Target['kind'] | 'none', string][] = [
   ['none', 'None'],
   ['monthly', 'Monthly'],
-  ['refill', 'Top up'],
+  ['topup', 'Top up'],
   ['goal', 'Goal'],
 ]
 
@@ -414,7 +414,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
     focusNext.current = !amount
     if (k === 'none') save(undefined)
     else if (k === 'goal') save({ kind: 'goal', amount })
-    else save({ kind: k as 'monthly' | 'refill', amount })
+    else save({ kind: k as 'monthly' | 'topup', amount })
   }
   function commit(raw: string) {
     if (!t) return
@@ -428,6 +428,19 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
   // The goal's pace: what this month asks for, the same figure as the Target pill and Fill in.
   let pace = ''
   if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? '' : 'Goal reached.'
+  // Monthly and Top up differ only in what came over from last month: say what that means this month.
+  else if (t && t.amount > 0 && cm && !cat.archived) {
+    const carry = cm.carry
+    const prev = monthName(addMonths(month, -1))
+    if (t.kind === 'topup') pace = `Adds ${fmt(t.amount, base)} every month, whatever came over.`
+    else if (t.kind === 'monthly')
+      pace =
+        carry > 0
+          ? `${fmt(carry, base)} came over from ${prev}, so ${fmt(cm.goal, base)} tops it up.`
+          : carry < 0
+            ? `${fmt(-carry, base)} over in ${prev}, so it needs ${fmt(cm.goal, base)}.`
+            : 'What’s left at the end of the month counts toward the next.'
+  }
 
   return (
     <section class="section">

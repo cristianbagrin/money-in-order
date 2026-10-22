@@ -45,8 +45,9 @@
 .plan-save.done .plan-save-line b {
   color: var(--green);
 }
-.plan-save-line .faint {
-  font-size: 12.5px;
+.plan-save-line > .num {
+  color: var(--ink-2);
+  font-size: 13px;
 }
 .plan-save-bar {
   height: 4px;
@@ -65,67 +66,19 @@
 
 /* ---------------------------------------------------------------- coming months */
 
-.outlook {
-  margin-top: 12px;
-}
-.outlook-months {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 4px;
-}
-/* a month: its name over a short bar (planned green, covered pale green, short red) */
-.outlook-m {
-  position: relative;
-  min-height: 34px;
-  padding: 4px 0 9px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-3);
-  transition:
-    background 0.15s,
-    transform 0.1s;
-}
-.outlook-m::after {
-  content: '';
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 4px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--green-wash);
-}
-.outlook-m.funded::after {
-  background: var(--green);
-}
-.outlook-m.short {
-  color: var(--red);
-}
-.outlook-m.short::after {
-  background: var(--red);
-}
-.outlook-m[aria-current] {
-  color: var(--ink);
-  background: var(--sunk);
-}
-.outlook-m.short[aria-current] {
-  color: var(--red);
-}
-.outlook-m:active {
-  transform: scale(0.95);
-}
-@media (hover: hover) {
-  .outlook-m:hover {
-    background: var(--sunk);
-  }
-}
 .outlook-line {
-  margin: 4px 0 0;
+  display: block;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 13px;
+  text-align: left;
   color: var(--ink-2);
+}
+button.outlook-line {
+  cursor: pointer;
 }
 .outlook-line.neg {
   color: var(--red);

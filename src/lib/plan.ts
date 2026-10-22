@@ -86,8 +86,12 @@ export function suggestions(ix: Index, month: Month, current: Month): Suggestion
     let base: number
     if (!future) base = c.goal // includes overspending carried in
     else if (!t) base = 0
-    else if (t.kind === 'monthly') base = t.amount
-    else if (t.kind === 'refill') base = Math.min(t.amount, usual(ix, cat.id, anchor))
+    else if (t.kind === 'topup' || t.kind === 'refill') base = t.amount
+    else if (t.kind === 'monthly') {
+      // What a month uses up and has to be filled again (all of it, with nothing spent lately to go by).
+      const u = usual(ix, cat.id, anchor)
+      base = u > 0 ? Math.min(t.amount, u) : t.amount
+    }
     else base = targetNeed(cat, c.carry, 0, month).goal
     const s: Suggestion = { cat: cat.id, want: base, base, assigned: c.assigned, saving: !!cat.saving }
     if (cat.saving) savers.push({ s, c })
@@ -157,50 +161,81 @@ export interface ForecastMonth {
   month: Month
   /** what the month's plan still needs */
   need: number
-  /** money left once this month's plan is met (negative: short by that much) */
+  /** money left once this month's plan is met, counting the usual income (negative: short by that much) */
   left: number
   /** nothing more to assign: the month is fully planned already */
   funded: boolean
+  /** paid for by money already in hand, no income needed */
+  covered: boolean
 }
 
 export interface Forecast {
   months: ForecastMonth[]
-  /** the first month whose plan the money doesn't cover */
+  /** the first month whose plan the money doesn't cover, counting the usual income */
   runsOut: Month | null
   /** a typical month's plan */
   typical: number
-  /** money set aside for coming months (assigned to them, plus ready to assign), in typical months */
+  /** whole months after this one whose plans the money in hand already pays for */
   ahead: number
+  /** the last of those months */
+  until: Month | null
   income: number
 }
 
+/** How far "months ahead" looks. */
+export const MAX_AHEAD = 24
+
 /**
- * The coming months: start from Ready to assign (plus income still expected this month), add the
- * usual income each month and take away what each month's plan still needs.
+ * The coming months, two ways.
+ * With income: start from Ready to assign (plus income still expected this month), add the usual
+ * income each month and take away what each month's plan still needs; where that goes below zero
+ * the plan outgrows the income.
+ * Without: the money in hand (Ready to assign plus what is already given to coming months), once
+ * this month's plan is met, pays for one whole month's plan after another; `ahead` is how many.
  */
 export function forecast(ix: Index, current: Month, n = 6): Forecast {
   const income = expectedIncome(ix, current)
   const now = monthView(ix, current, current)
   let money = now.readyToAssign + Math.max(0, income - now.income)
+  let hand = now.readyToAssign
+  for (const [m, a] of ix.asg) {
+    if (m <= current) continue
+    for (const [id, v] of a) if (!ix.catById.get(id)?.archived) hand += v
+  }
   const months: ForecastMonth[] = []
   let runsOut: Month | null = null
   let typical = 0
-  for (let i = 0; i < n; i++) {
+  let ahead = 0
+  let until: Month | null = null
+  let paying = true
+  for (let i = 0; i < Math.max(n, MAX_AHEAD + 1); i++) {
+    if (i >= n && !paying) break
     const m = addMonths(current, i)
     const list = suggestions(ix, m, current)
     const need = list.reduce((s, x) => s + extraOf(x), 0)
     if (i === 1) typical = list.reduce((s, x) => s + x.want, 0)
+    // This month needs what isn't assigned yet, and at least what clears its overspending; a coming month
+    // needs its whole plan (what's given to it already is in hand).
+    const cost =
+      i === 0
+        ? list.reduce((s, x) => s + Math.max(extraOf(x), -(now.byId.get(x.cat)?.available ?? 0)), 0)
+        : list.reduce((s, x) => s + Math.max(x.want, x.assigned), 0)
+    let covered = false
+    if (paying && hand >= cost && (i === 0 || cost > 0)) {
+      hand -= cost
+      covered = true
+      if (i > 0) {
+        ahead = i
+        until = m
+      }
+    } else paying = false
+    if (i >= n) continue
     if (i > 0) money += income
-    money -= need
-    months.push({ month: m, need, left: money, funded: need === 0 })
+    money -= i === 0 ? cost : need
+    months.push({ month: m, need, left: money, funded: need === 0, covered })
     if (money < 0 && !runsOut) runsOut = m
   }
-  let set = Math.max(0, now.readyToAssign)
-  for (const [m, a] of ix.asg) {
-    if (m <= current) continue
-    for (const [id, v] of a) if (!ix.catById.get(id)?.archived) set += v
-  }
-  return { months, runsOut, typical, ahead: typical > 0 ? set / typical : 0, income }
+  return { months, runsOut, typical, ahead, until, income }
 }
 
 /** Categories that have ever had money or transactions: deleting them needs a choice about their history. */

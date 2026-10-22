@@ -41,9 +41,12 @@
     transform 0.12s;
 }
 .mstrip-m small {
-  font-size: 10.5px;
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 9.5px;
   font-weight: 560;
-  margin-left: 1px;
+  color: var(--ink-3);
 }
 .mstrip-m.past {
   color: var(--ink-4);

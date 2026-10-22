@@ -48,7 +48,10 @@ function bump(map: Map<Month, Map<ID, number>>, m: Month, id: ID, v: number) {
 export function buildIndex(db: DB): Index {
   const groups = live(db.groups).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
   const gOrder = new Map(groups.map((g, i) => [g.id, i]))
-  const cats = live(db.cats).sort(
+  // An older app version's 'refill' target is a top-up.
+  const cats = live(db.cats)
+    .map((c) => (c.target?.kind === 'refill' ? { ...c, target: { kind: 'topup' as const, amount: c.target.amount } } : c))
+    .sort(
     (a, b) => (gOrder.get(a.group) ?? 99) - (gOrder.get(b.group) ?? 99) || a.order - b.order || a.name.localeCompare(b.name),
   )
   const catById = new Map(cats.map((c) => [c.id, c]))
@@ -141,14 +144,13 @@ export function targetNeed(cat: Category, carry: number, assigned: number, month
   const t = cat.target
   const debt = Math.max(0, -carry)
   if (!t) return { need: debt > 0 ? Math.max(0, debt - assigned) : 0, goal: debt }
+  // Monthly: the month has the amount to spend, so what came over counts and overspending is made up.
   if (t.kind === 'monthly') {
-    const goal = t.amount + debt
-    return { need: Math.max(0, goal - assigned), goal }
-  }
-  if (t.kind === 'refill') {
     const goal = Math.max(0, t.amount - carry)
     return { need: Math.max(0, goal - assigned), goal }
   }
+  // Top up: the same amount every month, whatever came over; an overspent month heals as the next ones add to it.
+  if (t.kind === 'topup' || t.kind === 'refill') return { need: Math.max(0, t.amount - assigned), goal: t.amount }
   // goal: spread what's missing over the months left
   const missing = t.amount - carry
   if (missing <= 0) return { need: 0, goal: 0 }
@@ -227,6 +229,13 @@ export function monthView(ix: Index, month: Month, current: Month): MonthView {
     need: cats.reduce((s, c) => s + c.need, 0),
     overspent: cats.filter((c) => c.available < 0),
   }
+}
+
+/** Money given to months after `current`: what makes Ready to assign negative when a coming month is planned ahead of its income. */
+export function assignedAhead(ix: Index, current: Month): number {
+  let s = 0
+  for (const [m, a] of ix.asg) if (m > current) for (const v of a.values()) s += v
+  return s
 }
 
 /** Total money the budget believes exists right now (= Ready to Assign + everything available). */

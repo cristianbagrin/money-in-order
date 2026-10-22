@@ -228,10 +228,19 @@ function typeInto(el: HTMLInputElement, value: string, caret: number, inputType:
 
 /** Enter on the field, as the keyboard would press it; a field that has no use for it just lets go. */
 function pressEnter(el: HTMLInputElement) {
-  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-  el.dispatchEvent(ev)
-  if (!ev.defaultPrevented && document.activeElement === el) el.blur()
+  letGo = true
+  try {
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    el.dispatchEvent(ev)
+    if (!ev.defaultPrevented && document.activeElement === el) el.blur()
+  } finally {
+    letGo = false
+  }
 }
+
+/** When the keypad was last touched, and whether the field is meant to let go now (Done, Next, a one-tap amount). */
+let padTouchedAt = 0
+let letGo = false
 
 /**
  * Our keypad for an amount field on touch screens: the system keyboard stays away (inputMode none)
@@ -248,7 +257,16 @@ export function useCalc() {
       onFocusCapture: (e: FocusEvent) => {
         if (touch) setEl(e.target as HTMLInputElement)
       },
-      onBlurCapture: () => setEl(null),
+      onBlurCapture: (e: FocusEvent) => {
+        // A tap on the keypad must never take the focus away (iOS can, from the touch's own mouse events):
+        // the field gets it straight back and the keypad stays. Focus moving to another field is real.
+        const input = e.target as HTMLInputElement
+        if (touch && !letGo && !e.relatedTarget && Date.now() - padTouchedAt < 700) {
+          setTimeout(() => input.isConnected && document.activeElement !== input && input.focus({ preventScroll: true }))
+          return
+        }
+        setEl(null)
+      },
     },
     /** the keypad while its field has focus; options can be a function, worked out only then */
     pad: (opts: PadOpts | (() => PadOpts) = {}) => el && <CalcPad input={el} {...(typeof opts === 'function' ? opts() : opts)} />,
@@ -330,8 +348,42 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
   const sum = isSum(value) ? evalAmount(value, code) : null
   const hint = props.hint && !value.trim() ? props.hint : null
 
+  // Everything here acts on pointer-down. Cancelling the touch as well keeps iOS from following up with the
+  // mouse events and click that would move the focus off the field and close the keypad after one key.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const stop = (e: TouchEvent) => e.cancelable && e.preventDefault()
+    // A tap anywhere else is a real goodbye, however soon after a key.
+    const away = (e: PointerEvent) => {
+      if (!el.contains(e.target as Node)) padTouchedAt = 0
+    }
+    el.addEventListener('touchstart', stop, { passive: false })
+    document.addEventListener('pointerdown', away, true)
+    return () => {
+      el.removeEventListener('touchstart', stop)
+      document.removeEventListener('pointerdown', away, true)
+    }
+  }, [])
+  const act = (fn: () => void) => ({
+    onPointerDown: (e: PointerEvent) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      fn()
+    },
+    // a click with no pointer before it comes from the keyboard
+    onClick: (e: MouseEvent) => e.detail === 0 && fn(),
+  })
+
   return createPortal(
-    <div class={`calc${still ? ' still' : ''}`} ref={ref} onPointerDown={(e) => e.preventDefault()}>
+    <div
+      class={`calc${still ? ' still' : ''}`}
+      ref={ref}
+      onPointerDown={(e) => {
+        padTouchedAt = Date.now()
+        e.preventDefault()
+      }}
+    >
       <div class="calc-bar">
         {sum !== null ? (
           <span class="calc-sum num">= {fmt(sum, code)}</span>
@@ -339,18 +391,18 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
           <button
             type="button"
             class="pill sm"
-            onClick={() => {
+            {...act(() => {
               const v = groupTyped(String(hint.value / 100))
               typeInto(input, v, v.length, 'insertText', v)
               pressEnter(input)
-            }}
+            })}
           >
             {hint.label} <small>{fmt(hint.value, code, { bare: true })}</small>
           </button>
         ) : (
           <span />
         )}
-        <button type="button" class="calc-done" onClick={() => pressEnter(input)}>
+        <button type="button" class="calc-done" {...act(() => pressEnter(input))}>
           {props.next ? 'Next' : 'Done'}
         </button>
       </div>

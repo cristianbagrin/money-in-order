@@ -1,9 +1,9 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { expectedTotal, monthView, type CatMonth, type Index } from '../lib/budget'
+import { assignedAhead, expectedTotal, monthView, type CatMonth, type Index } from '../lib/budget'
 import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
 import { evalAmount, fmt, groupTyped, shownSign } from '../lib/money'
-import { catsWithHistory, extraOf, fillPlan, forecast, savingsGoal, suggestions, type Forecast, type Suggestion } from '../lib/plan'
+import { catsWithHistory, extraOf, fillPlan, forecast, MAX_AHEAD, savingsGoal, suggestions, type Forecast, type Suggestion } from '../lib/plan'
 import {
   addCategory,
   addGroup,
@@ -50,10 +50,9 @@ function assignedAll(ix: Index): number {
   return s
 }
 
-/** Assign a month's suggestions as far as Ready to assign goes, as one undoable step. Returns what was added. */
+/** Assign all of a month's suggestions, money to spare or not (income still to come covers it), as one undoable step. Returns what was added. */
 function fillMonth(month: Month, current: Month, label: string): number {
-  const ix = getIndex()
-  const plan = fillPlan(suggestions(ix, month, current), monthView(ix, month, current).readyToAssign)
+  const plan = fillPlan(suggestions(getIndex(), month, current), Infinity)
   if (!plan.length) return 0
   undoable(label, () => {
     for (const p of plan) setAssigned(month, p.cat, p.amount)
@@ -145,25 +144,27 @@ export function Plan(props: {
   })
 
   const setMonth = props.setMonth
+  // Under each coming month: planned in full, paid for by money in hand, or short even with the usual income.
   const markOf = (m: Month): MonthMark | undefined => {
     const f = fc.months.find((x) => x.month === m)
-    return !f ? undefined : f.left < 0 ? 'short' : f.funded ? 'planned' : 'covered'
+    if (!f) return m > current && fc.until && m <= fc.until ? 'covered' : undefined
+    return f.left < 0 ? 'short' : f.funded ? 'planned' : f.covered ? 'covered' : undefined
   }
   const markLabel = (m: Month) => {
+    const k = markOf(m)
     const f = fc.months.find((x) => x.month === m)
-    return !f ? undefined : f.left < 0 ? `short ${fmt(-f.left, base)}` : f.funded ? 'planned' : 'covered'
+    return k === 'short' && f ? `short ${fmt(-f.left, base)}` : k
   }
 
   const allAssigned = () => shownSign(monthView(getIndex(), month, current).readyToAssign, base) === 0
 
-  /** Fill in a month's plan (this one, or the next as a head start). */
-  function fill(m: Month = month) {
-    const ahead = m !== month
-    const amt = fillMonth(m, current, ahead ? `Head start for ${monthName(m)}` : 'Filled in the plan')
+  /** Fill in the month's plan. */
+  function fill() {
+    const amt = fillMonth(month, current, 'Filled in the plan')
     if (!amt) return
     if (!allAssigned()) play('success') // otherwise the celebration plays
     flash(rtaRef.current, 'pulse-once')
-    toast(ahead ? `${fmt(amt, base)} set aside for ${monthName(m)}` : `${fmt(amt, base)} assigned`, { undo: true })
+    toast(`${fmt(amt, base)} assigned`, { undo: true })
   }
 
   /** Delete a category from its row: an unused one goes (undoable); one with history asks what happens to it. */
@@ -187,22 +188,15 @@ export function Plan(props: {
     if (enter) requestAnimationFrame(() => listRef.current?.querySelector<HTMLInputElement>(`[data-sort-id="${c.id}"] .casg`)?.focus())
   }
 
-  // The one obvious action: fill this month in; once it is full and money is left, give the next month a head start.
-  const canFill = planning && toFill > 0 && rtaSign > 0
-  const nextMonth = addMonths(month, 1)
-  const nextNeed = fc.months.find((f) => f.month === nextMonth)?.need ?? 0
-  const fillPill = canFill ? (
-    <button class="pill solid sm" onClick={() => fill()}>
-      Fill in <small>{fmt(Math.min(toFill, rta), base)}</small>
+  // Below zero only because coming months are planned before their income arrives: not a mistake, no red.
+  const over = rtaSign < 0 && shownSign(rta + assignedAhead(ix, current), base) < 0
+
+  // The one obvious action: fill the month in, with the money there or ahead of the income that will pay for it.
+  const canFill = planning && toFill > 0
+  const fillPill = canFill && (
+    <button class={`pill sm${rtaSign > 0 ? ' solid' : ''}`} onClick={() => fill()}>
+      Fill in <small>{fmt(toFill, base)}</small>
     </button>
-  ) : (
-    planning &&
-    rtaSign > 0 &&
-    nextNeed > 0 && (
-      <button class="pill sm" onClick={() => fill(nextMonth)}>
-        Head start for {monthName(nextMonth)} <small>{fmt(Math.min(nextNeed, rta), base)}</small>
-      </button>
-    )
   )
 
   return (
@@ -216,8 +210,8 @@ export function Plan(props: {
       </div>
 
       <section class="rta">
-        <div class="rta-num" ref={rtaRef} style={{ color: rtaSign < 0 ? 'var(--red)' : rtaSign > 0 ? 'var(--green)' : 'var(--pen)' }}>
-          <span class={`marked${rtaSign < 0 ? ' neg' : ''}`}>{fmt(shownRta, base)}</span>
+        <div class="rta-num" ref={rtaRef} style={{ color: over ? 'var(--red)' : rtaSign > 0 ? 'var(--green)' : 'var(--pen)' }}>
+          <span class={`marked${over ? ' neg' : ''}`}>{fmt(shownRta, base)}</span>
         </div>
         {empty ? (
           // The routine below already lists these steps.
@@ -233,12 +227,14 @@ export function Plan(props: {
           )
         ) : (
           <div class="rta-line">
-            <span class="rta-cap">{rtaSign > 0 ? 'ready to assign, give it all a job' : rtaSign < 0 ? 'more assigned than you have' : 'every bit has a job'}</span>
+            <span class="rta-cap">
+              {rtaSign > 0 ? 'ready to assign, give it all a job' : over ? 'more assigned than you have' : rtaSign < 0 ? 'planned ahead of income' : 'every bit has a job'}
+            </span>
             {!showRitual && fillPill && <span class="rta-actions">{fillPill}</span>}
           </div>
         )}
         {planning && !empty && <Saving ix={ix} month={month} current={current} saved={view.saved} />}
-        {planning && !empty && <Outlook fc={fc} month={month} base={base} onMonth={props.setMonth} />}
+        {planning && !empty && <Outlook fc={fc} current={current} base={base} onMonth={props.setMonth} />}
       </section>
 
       {showRitual && ritual && (
@@ -250,7 +246,7 @@ export function Plan(props: {
           fill={
             canFill && (
               <button class="pill sm" onClick={() => fill()}>
-                Fill in <small>{fmt(Math.min(toFill, rta), base)}</small>
+                Fill in <small>{fmt(toFill, base)}</small>
               </button>
             )
           }
@@ -363,7 +359,7 @@ export function Plan(props: {
   )
 }
 
-/** The month's savings against the target: "Saving NT$9,000 of NT$12,000", a thin bar, the share of income. */
+/** The month's savings against what it should save: "Saving NT$9,000", the month's amount at the end of a thin bar. */
 function Saving(props: { ix: Index; month: Month; current: Month; saved: number }) {
   const { ix, month } = props
   const base = ix.settings.base
@@ -375,9 +371,10 @@ function Saving(props: { ix: Index; month: Month; current: Month; saved: number 
       <div class="plan-save-line">
         <span>
           Saving <b class="num">{fmt(Math.max(0, props.saved), base)}</b>
-          {!done && <> of {fmt(goal, base)}</>}
         </span>
-        <span class="faint">{Math.round(ix.settings.savingsTarget * 100)}% of income</span>
+        <span class="num" aria-label={`of ${fmt(goal, base)} this month`}>
+          {fmt(goal, base)}
+        </span>
       </div>
       <div class="plan-save-bar" aria-hidden="true">
         <span style={{ width: `${Math.min(100, Math.max(0, (props.saved / goal) * 100))}%` }} />
@@ -387,47 +384,31 @@ function Saving(props: { ix: Index; month: Month; current: Month; saved: number 
 }
 
 /**
- * How the coming months play out: one chip per month (planned, covered by what's expected, or short),
- * tap one to go there, and one line saying where the money runs out or how far it reaches.
+ * One line on the coming months (their marks sit under the month strip): where the usual income stops
+ * covering the plan, or how many months the money in hand already pays for.
  */
-function Outlook(props: { fc: Forecast; month: Month; base: string; onMonth: (m: Month) => void }) {
+function Outlook(props: { fc: Forecast; current: Month; base: string; onMonth: (m: Month) => void }) {
   const { fc, base } = props
   if (fc.typical <= 0) return null
   const short = fc.runsOut ? fc.months.find((m) => m.month === fc.runsOut)! : null
-  const last = fc.months[fc.months.length - 1]
-  const ahead = Math.floor(fc.ahead * 10) / 10
+  if (short)
+    return (
+      <button class="outlook-line neg" onClick={() => props.onMonth(short.month)}>
+        Short <span class="num">{fmt(-short.left, base)}</span> in {monthName(short.month)}
+      </button>
+    )
+  if (!fc.until || fc.ahead < 1) return null
+  const until = monthName(fc.until, { year: fc.until.slice(0, 4) !== props.current.slice(0, 4) })
   return (
-    <div class="outlook">
-      <div class="outlook-months" role="group" aria-label="Coming months">
-        {fc.months.map((m) => {
-          const state = m.left < 0 ? 'short' : m.funded ? 'funded' : 'covered'
-          const label = state === 'short' ? `short ${fmt(-m.left, base)}` : state === 'funded' ? 'planned' : 'covered'
-          return (
-            <button
-              key={m.month}
-              class={`outlook-m ${state}`}
-              aria-current={m.month === props.month ? 'true' : undefined}
-              aria-label={`${monthName(m.month)}: ${label}`}
-              onClick={() => props.onMonth(m.month)}
-            >
-              {monthName(m.month, { short: true })}
-            </button>
-          )
-        })}
-      </div>
-      <p class={`outlook-line${short ? ' neg' : ''}`}>
-        {short ? (
-          <>
-            Short <span class="num">{fmt(-short.left, base)}</span> in {monthName(short.month)}
-          </>
-        ) : (
-          <>
-            Covered through {monthName(last.month)}
-            {ahead >= 1 && <span class="faint"> · {ahead} {ahead === 1 ? 'month' : 'months'} ahead</span>}
-          </>
-        )}
-      </p>
-    </div>
+    <p class="outlook-line">
+      {fc.ahead >= MAX_AHEAD ? (
+        <>Covered over 2 years ahead</>
+      ) : (
+        <>
+          Covered {fc.ahead} {fc.ahead === 1 ? 'month' : 'months'} ahead <span class="faint">(until {until})</span>
+        </>
+      )}
+    </p>
   )
 }
 
@@ -439,6 +420,9 @@ function Outlook(props: { fc: Forecast; month: Month; base: string; onMonth: (m:
 function InlineInput(props: { value: string; label: string; onDone: (v: string | null, enter: boolean) => void; placeholder?: string; plain?: boolean }) {
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
+  // As wide as what it holds (and a little room to type), like the text it replaces.
+  const fit = (v: string) => Math.max(4, v.length, props.placeholder?.length ?? 0) + 2
+  const [size, setSize] = useState(() => fit(props.value))
   useEffect(() => {
     ref.current?.focus()
     ref.current?.select()
@@ -462,6 +446,8 @@ function InlineInput(props: { value: string; label: string; onDone: (v: string |
       aria-label={props.label}
       placeholder={props.placeholder}
       defaultValue={props.value}
+      size={size}
+      onInput={(e) => setSize(fit(e.currentTarget.value))}
       spellcheck={props.plain ? false : undefined}
       autocorrect={props.plain ? 'off' : undefined}
       onClick={(e) => e.stopPropagation()}

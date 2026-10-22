@@ -1017,10 +1017,17 @@ textarea:focus {
   cursor: text;
   border-radius: 4px;
 }
+/* Renaming in place: the field is the size of the text it edits, with a little room to type. */
 .grp-name input {
-  min-height: 30px;
-  padding: 2px 8px;
-  font-size: 16px;
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  padding: 1px 6px;
+  margin-left: -7px;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1.35;
+  border-radius: var(--r-sm);
 }
 .grp-add {
   width: 28px;
@@ -1091,10 +1098,18 @@ textarea:focus {
 }
 .cname input,
 .cnote input {
-  min-height: 32px;
-  padding: 2px 8px;
-  font-size: 16px; /* 16px keeps iOS from zooming */
-  border-radius: 8px;
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  padding: 1px 6px;
+  margin-left: -7px;
+  font-size: inherit;
+  line-height: 1.35;
+  border-radius: var(--r-sm);
+}
+.cname input {
+  font-size: 15px;
+  font-weight: 560;
 }
 .cnote {
   font-size: 12.5px;
@@ -1105,9 +1120,6 @@ textarea:focus {
   cursor: text;
   border-radius: 4px;
 }
-.cnote input {
-  min-height: 30px;
-}
 .cname-line {
   display: flex;
   align-items: center;
@@ -1115,7 +1127,7 @@ textarea:focus {
   min-width: 0;
 }
 .cname-line input {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .cnote-add {
@@ -1298,12 +1310,14 @@ textarea:focus {
   gap: 6px;
 }
 /* the target amount: a small field right after the pressed kind, taking what the line has left */
+/* fits 100,000 */
 .cs-kinds input {
-  flex: 0 1 120px;
-  min-width: 96px;
+  flex: none;
+  width: calc(7ch + 22px);
   min-height: 30px;
-  padding: 2px 10px;
+  padding: 0 10px;
   border-radius: 999px;
+  font-size: 15px;
   text-align: right;
   font-variation-settings: var(--vs-column);
   letter-spacing: -0.03em;

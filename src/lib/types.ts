@@ -22,8 +22,9 @@ export type Stamps = Record<string, number>
 export const RTA = 'rta'
 
 export type Target =
-  | { kind: 'monthly'; amount: number } // set aside this much every month
-  | { kind: 'refill'; amount: number } // top the category up to this much
+  | { kind: 'monthly'; amount: number } // have this much each month: what's left over counts toward it, overspending is made up
+  | { kind: 'topup'; amount: number } // add this much every month, whatever came over
+  | { kind: 'refill'; amount: number } // the old name of 'topup', read as it (see buildIndex)
   | { kind: 'goal'; amount: number; by?: Month } // reach this total, optionally by a month
 
 export interface Group extends Rec {

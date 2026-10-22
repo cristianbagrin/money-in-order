@@ -20,8 +20,8 @@ function rateText(v: MonthView): string {
 function targetText(ix: Index, id: string, base: string): string {
   const t = ix.catById.get(id)?.target
   if (!t) return ''
-  if (t.kind === 'monthly') return `${fmt(t.amount, base)}/month`
-  if (t.kind === 'refill') return `top up to ${fmt(t.amount, base)}`
+  if (t.kind === 'monthly') return `${fmt(t.amount, base)} each month (leftovers count)`
+  if (t.kind === 'topup' || t.kind === 'refill') return `add ${fmt(t.amount, base)} every month`
   return `save ${fmt(t.amount, base)}${t.by ? ` by ${t.by}` : ''}`
 }
 
