@@ -1,0 +1,91 @@
+/* The month row at the top of Plan and Review: ‹ Sep Oct Nov … › with the chosen month pressed. */
+
+.mstrip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  margin-left: -10px;
+}
+.mstrip-arrow {
+  width: 34px;
+  height: 40px;
+}
+.mstrip-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.mstrip-row {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr));
+  gap: 2px;
+}
+/* a month: its name over a short mark (planned green, covered pale green, short red) */
+.mstrip-m {
+  position: relative;
+  min-height: 40px;
+  padding: 4px 0 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-3);
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    transform 0.12s;
+}
+.mstrip-m small {
+  font-size: 10.5px;
+  font-weight: 560;
+  margin-left: 1px;
+}
+.mstrip-m.past {
+  color: var(--ink-4);
+}
+.mstrip-m.now {
+  color: var(--ink);
+}
+.mstrip-m::after {
+  content: '';
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: transparent;
+}
+.mstrip-m.covered::after {
+  background: var(--green-wash);
+}
+.mstrip-m.planned::after {
+  background: var(--green);
+}
+.mstrip-m.short {
+  color: var(--red);
+}
+.mstrip-m.short::after {
+  background: var(--red);
+}
+.mstrip-m[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--rule-strong);
+}
+.mstrip-m.short[aria-pressed='true'] {
+  color: var(--red);
+}
+.mstrip-m:active {
+  transform: scale(0.95);
+}
+@media (hover: hover) {
+  .mstrip-m:hover:not([aria-pressed='true']) {
+    background: var(--sunk);
+  }
+}

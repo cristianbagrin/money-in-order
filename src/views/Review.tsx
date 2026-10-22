@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { goalLine, goals, incomeBySource, roundPlan, same, spending, standouts, type MonthSpend } from '../lib/compare'
-import { addMonths, monthName, monthOf } from '../lib/dates'
+import { monthName, monthOf } from '../lib/dates'
 import { claudeSummary } from '../lib/export'
 import { savedLine, wealth } from '../lib/insights'
 import { fmt } from '../lib/money'
@@ -8,7 +8,8 @@ import { setNote } from '../lib/store'
 import type { ID } from '../lib/types'
 import { WealthChart } from '../ui/charts'
 import { useIndex } from '../ui/hooks'
-import { IconChevron, toast } from '../ui/kit'
+import { toast } from '../ui/kit'
+import { MonthStrip } from '../ui/monthstrip'
 import { play } from '../ui/sound'
 import '../ui/review.css'
 import { SpentSheet } from './SpentSheet'
@@ -22,7 +23,7 @@ function ordinal(n: number): string {
   return `${n}${k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th'}`
 }
 
-export function Review(props: { today: string; month: string; setMonth: (m: string) => void; onCount?: () => void }) {
+export function Review(props: { today: string; month: string; setMonth: (m: string | ((prev: string) => string)) => void; onCount?: () => void }) {
   const ix = useIndex()
   const { today, month } = props
   const current = monthOf(today)
@@ -40,31 +41,6 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
   const [all, setAll] = useState(false)
   const hasData = ix.months.includes(month)
 
-  // Every press moves one month, however fast they come: read and write the month through a ref,
-  // not the value this render closed over.
-  const nav = useRef({ month, first, current, setMonth: props.setMonth })
-  nav.current = { month, first, current, setMonth: props.setMonth }
-  const go = (m: string) => {
-    const n = nav.current
-    const next = m < n.first ? n.first : m > n.current ? n.current : m
-    if (next === n.month) return
-    n.month = next
-    n.setMonth(next)
-  }
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
-      if (document.querySelector('dialog[open]') || e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'ArrowLeft') go(addMonths(nav.current.month, -1))
-      else if (e.key === 'ArrowRight') go(addMonths(nav.current.month, 1))
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   const compared = s.months.length > 0
   const by = isCurrent ? ` by the ${ordinal(s.day)}` : ''
   const max = Math.max(1, ...s.cats.map((c) => Math.max(c.spent, c.usual ?? 0)))
@@ -74,24 +50,10 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
   const period = !!w && w.points.length > 1
   const incomeMax = Math.max(1, ...income.map((r) => Math.max(r.amount, r.usual ?? 0)))
 
-  const atFirst = month <= first
   return (
     <div>
       <div class="pagehead">
-        <div class="monthnav">
-          <button class="iconbtn" aria-label="Previous month" disabled={atFirst} style={{ opacity: atFirst ? 0.3 : 1 }} onClick={() => go(addMonths(month, -1))}>
-            <IconChevron dir="left" />
-          </button>
-          <h1>{monthName(month, { year: month.slice(0, 4) !== today.slice(0, 4) })}</h1>
-          <button class="iconbtn" aria-label="Next month" disabled={month >= current} style={{ opacity: month >= current ? 0.3 : 1 }} onClick={() => go(addMonths(month, 1))}>
-            <IconChevron dir="right" />
-          </button>
-        </div>
-        {!isCurrent && (
-          <button class="pill sm" onClick={() => go(current)}>
-            Now
-          </button>
-        )}
+        <MonthStrip month={month} current={current} setMonth={props.setMonth} min={first < current ? first : current} max={current} at={5} />
       </div>
 
       {s.spent > 0 ? <Headline s={s} base={base} /> : isCurrent && <p class="empty">Log a few days of spending and this fills in.</p>}

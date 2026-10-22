@@ -21,10 +21,11 @@ import {
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID, type Month } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
-import { caretToEnd, IconChevron, IconGear, IconPlus, regroup, toast, useCalc } from '../ui/kit'
+import { caretToEnd, IconGear, IconPlus, regroup, toast, useCalc } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { confetti } from '../ui/confetti'
 import { haptic, play } from '../ui/sound'
+import { MonthStrip, type MonthMark } from '../ui/monthstrip'
 import { useSortable } from '../ui/sortable'
 import { useSwipeDelete } from '../ui/swipe'
 import { askToDelete } from './CategorySheet'
@@ -143,21 +144,15 @@ export function Plan(props: {
     },
   })
 
-  // ← → switch months on a keyboard. Functional updates, so quick or held presses each move one month.
   const setMonth = props.setMonth
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
-      if (document.querySelector('dialog[open]') || e.metaKey || e.ctrlKey) return
-      if (e.key === 'ArrowLeft') setMonth((m) => addMonths(m, -1))
-      else if (e.key === 'ArrowRight') setMonth((m) => addMonths(m, 1))
-      else return
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [setMonth])
+  const markOf = (m: Month): MonthMark | undefined => {
+    const f = fc.months.find((x) => x.month === m)
+    return !f ? undefined : f.left < 0 ? 'short' : f.funded ? 'planned' : 'covered'
+  }
+  const markLabel = (m: Month) => {
+    const f = fc.months.find((x) => x.month === m)
+    return !f ? undefined : f.left < 0 ? `short ${fmt(-f.left, base)}` : f.funded ? 'planned' : 'covered'
+  }
 
   const allAssigned = () => shownSign(monthView(getIndex(), month, current).readyToAssign, base) === 0
 
@@ -213,25 +208,11 @@ export function Plan(props: {
   return (
     <div>
       <div class="pagehead">
-        <div class="monthnav">
-          <button class="iconbtn" aria-label="Previous month" onClick={() => setMonth((m) => addMonths(m, -1))}>
-            <IconChevron dir="left" />
-          </button>
-          <h1>{monthName(month, { year: month.slice(0, 4) !== today.slice(0, 4) })}</h1>
-          <button class="iconbtn" aria-label="Next month" onClick={() => setMonth((m) => addMonths(m, 1))}>
-            <IconChevron dir="right" />
-          </button>
-        </div>
-        {month !== current ? (
-          <button class="pill sm" onClick={() => props.setMonth(current)}>
-            Now
-          </button>
-        ) : (
-          <button class="iconbtn gear" aria-label={stale ? 'Settings, changes not synced' : 'Settings'} onClick={props.onSettings}>
-            <IconGear />
-            {stale && <span class="dot" />}
-          </button>
-        )}
+        <MonthStrip month={month} current={current} setMonth={setMonth} mark={markOf} markLabel={markLabel} />
+        <button class="iconbtn gear" aria-label={stale ? 'Settings, changes not synced' : 'Settings'} onClick={props.onSettings}>
+          <IconGear />
+          {stale && <span class="dot" />}
+        </button>
       </div>
 
       <section class="rta">

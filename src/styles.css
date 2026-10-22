@@ -48,6 +48,9 @@
   --gutter: 16px;
   --tabbar: 56px;
   --radius: 12px;
+  /* the two roundnesses: small things (fields, chips, rows) and big ones (cards, sheets); pills are fully round */
+  --r-sm: 10px;
+  --r-lg: 18px;
   --ease: cubic-bezier(0.2, 0.9, 0.25, 1);
   color-scheme: light;
 }
