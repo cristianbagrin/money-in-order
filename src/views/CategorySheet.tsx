@@ -6,7 +6,7 @@ import { evalAmount, fmt } from '../lib/money'
 import { archiveCategory, categoryHasHistory, deleteCategory, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
 import { useIndex } from '../ui/hooks'
-import { toast } from '../ui/kit'
+import { regroup, toast } from '../ui/kit'
 import { useCountUp } from '../ui/motion'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
@@ -30,7 +30,6 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
   function assign(v: number) {
     if (!cat || v === assigned) return
     undoable(`Assigned ${cat.name}`, () => setAssigned(month, cat.id, v))
-    play('tap')
   }
 
   const prev = addMonths(month, -1)
@@ -163,7 +162,6 @@ function Toggle(props: { cat: Category; field: 'daily' | 'saving'; label: string
         if (on) delete next[props.field]
         else next[props.field] = true
         undoable(props.label, () => saveCategory(next))
-        play('toggle')
       }}
     >
       {props.label}
@@ -209,7 +207,6 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
   }
   function setKind(k: string) {
     if (k === kind) return
-    play('toggle')
     const amount = t?.amount ?? 0
     focusNext.current = !amount
     if (k === 'none') save(undefined)
@@ -250,7 +247,7 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
                   const el = e.currentTarget
                   requestAnimationFrame(() => document.activeElement === el && el.select())
                 }}
-                onInput={(e) => setAmountStr(e.currentTarget.value)}
+                onInput={(e) => setAmountStr(regroup(e))}
                 onBlur={(e) => commit(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') e.currentTarget.blur()

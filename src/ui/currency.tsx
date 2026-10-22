@@ -26,7 +26,6 @@ export function CurrencyPicker(props: { selected: string[]; main: string; onChan
       return
     }
     if (code === main) return
-    play('toggle')
     props.onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code], main)
   }
 

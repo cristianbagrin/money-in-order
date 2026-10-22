@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
-import { fmt } from './lib/money'
+import { fmt, shownSign } from './lib/money'
 import { redo } from './lib/store'
 import { joinSync, normalizeCode, syncReady, syncStatus } from './lib/sync'
 import type { ID, Txn } from './lib/types'
@@ -92,7 +92,6 @@ export function App() {
       if (e.shiftKey) {
         const r = redo()
         if (r) {
-          play('tap')
           toast(`Redone: ${r.label}`)
         }
       } else runUndo()
@@ -163,7 +162,6 @@ export function App() {
   }
 
   const go = (r: Route) => {
-    if (r !== route) play('tap')
     location.hash = `#/${r}`
     setRoute(r)
     window.scrollTo(0, 0)
@@ -180,11 +178,9 @@ export function App() {
         setMonth={setPlanMonth}
         onCategory={(id) => {
           setCatMonth(planMonth)
-          play('open')
           setCatSheet(id)
         }}
         onCount={() => {
-          play('open')
           setCounting(true)
         }}
         onReflect={(m) => {
@@ -201,7 +197,6 @@ export function App() {
         filter={historyFilter}
         setFilter={setHistoryFilter}
         onEdit={(t) => {
-          play('open')
           setTxn(t)
         }}
       />
@@ -248,7 +243,7 @@ function useBadges(today: string) {
   const ix = useIndex()
   const m = monthOf(today)
   const v = useMemo(() => monthView(ix, m, m), [ix, m])
-  return { rta: v.readyToAssign, overspent: v.overspent.length, base: ix.settings.base }
+  return { rta: shownSign(v.readyToAssign, ix.settings.base), rtaMinor: v.readyToAssign, overspent: v.overspent.length, base: ix.settings.base }
 }
 
 function Dot(props: { rta: number; overspent: number }) {
@@ -292,8 +287,8 @@ function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
       </nav>
       <button class="rail-foot" onClick={() => props.go('plan')}>
         <small>Ready to assign</small>
-        <span class={`num ${b.rta < 0 ? 'neg' : b.rta > 0 ? 'pos' : 'faint'}`} style={{ fontSize: '17px', fontWeight: 650 }}>
-          {fmt(b.rta, b.base)}
+        <span class={`num ${b.rta < 0 ? 'neg' : b.rta > 0 ? 'pos' : 'zero'}`} style={{ fontSize: '17px', fontWeight: 650 }}>
+          {fmt(b.rtaMinor, b.base)}
         </span>
       </button>
     </aside>

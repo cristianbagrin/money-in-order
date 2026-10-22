@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { createPortal } from 'preact/compat'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { groupTyped } from '../lib/money'
 import { undo } from '../lib/store'
 import { onTopSheet, topSheet } from './sheet'
 import { haptic, play } from './sound'
@@ -119,7 +120,6 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
       if (v.replace('.', '').length >= 9) return
       v += k
     }
-    play('key')
     haptic('light')
     value.current = v
     props.onChange(v)
@@ -167,6 +167,42 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
   )
 }
 
+// ---------------------------------------------------------------- typed amounts
+
+/**
+ * Call first thing in an amount field's input handler: puts the thousands separators in as you type,
+ * keeps the caret after the same digit, and returns the new value. `numbersOnly` drops anything that
+ * isn't a digit, a decimal point or a leading minus. Pasted text is left as pasted (it may use other conventions).
+ */
+export function regroup(e: Event, opts: { numbersOnly?: boolean } = {}): string {
+  const el = e.currentTarget as HTMLInputElement
+  const raw = el.value
+  const type = (e as InputEvent).inputType ?? ''
+  if (type === 'insertFromPaste' || type === 'insertFromDrop') return raw
+  const caret = el.selectionStart ?? raw.length
+  let before = raw.slice(0, caret)
+  let after = raw.slice(caret)
+  if (opts.numbersOnly) {
+    const keep = (t: string, start: boolean) => t.replace(/[^\d.,-]/g, '').replace(/-/g, (m, i) => (start && i === 0 ? m : ''))
+    before = keep(before, true)
+    after = keep(after, !before)
+    // One decimal point at most: the one nearest the caret stays.
+    if (before.includes('.')) after = after.replace(/\./g, '')
+    else after = after.replace(/\.(?=.*\.)/g, '')
+    before = before.replace(/\.(?=.*\.)/g, '')
+  }
+  const value = groupTyped(before + after)
+  // The caret goes after the same number of characters, not counting separators.
+  const want = before.replace(/,/g, '').length
+  let pos = 0
+  for (let n = 0; pos < value.length && n < want; pos++) if (value[pos] !== ',') n++
+  if (value !== raw) {
+    el.value = value
+    el.setSelectionRange(pos, pos)
+  }
+  return value
+}
+
 // ---------------------------------------------------------------- amount field with clear button
 
 /** A text field for money: selects everything on focus, and has an × to clear and type fresh. */
@@ -200,7 +236,7 @@ export function AmountField(props: {
         }}
         onInput={(e) => {
           abandoned.current = false
-          props.onInput(e.currentTarget.value)
+          props.onInput(regroup(e))
         }}
         onBlur={(e) => {
           if (abandoned.current) abandoned.current = false
@@ -252,7 +288,7 @@ export function NoteField(props: { value: string; onInput: (v: string) => void; 
         }}
         onInput={(e) => {
           abandoned.current = false
-          props.onInput(e.currentTarget.value)
+          props.onInput(regroup(e))
         }}
         onBlur={(e) => {
           if (abandoned.current) abandoned.current = false

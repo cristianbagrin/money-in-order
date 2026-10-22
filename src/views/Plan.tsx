@@ -2,7 +2,7 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { expectedTotal, monthView, type CatMonth } from '../lib/budget'
 import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { evalAmount, fmt } from '../lib/money'
+import { evalAmount, fmt, groupTyped, shownSign } from '../lib/money'
 import {
   addCategory,
   addGroup,
@@ -10,6 +10,7 @@ import {
   deleteCategory,
   deleteGroup,
   fundTargets,
+  getIndex,
   lastCount,
   placeCategory,
   placeGroup,
@@ -21,9 +22,10 @@ import {
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
-import { IconChevron, IconGear, IconPlus, toast } from '../ui/kit'
+import { IconChevron, IconGear, IconPlus, regroup, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
-import { play } from '../ui/sound'
+import { confetti } from '../ui/confetti'
+import { haptic, play } from '../ui/sound'
 import { useSortable } from '../ui/sortable'
 
 /** Enter or Space on a focused text "button" (names, notes) does what a click does. */
@@ -53,8 +55,21 @@ export function Plan(props: {
   const base = ix.settings.base
   const view = useMemo(() => monthView(ix, month, current), [ix, month, current])
   const rta = view.readyToAssign
+  // Rounded as shown: a sliver left over from a conversion counts as nothing to assign.
+  const rtaSign = shownSign(rta, base)
   const shownRta = useCountUp(rta)
   const rtaRef = useRef<HTMLDivElement>(null)
+
+  // Assigning the last of the money is worth a small celebration (not switching months, nor an income removed).
+  const was = useRef({ month, sign: rtaSign, assigned: view.assigned })
+  useEffect(() => {
+    const p = was.current
+    was.current = { month, sign: rtaSign, assigned: view.assigned }
+    if (p.month !== month || p.sign <= 0 || rtaSign !== 0 || view.assigned <= p.assigned) return
+    play('complete')
+    haptic('medium')
+    confetti(rtaRef.current)
+  }, [month, rtaSign, view.assigned])
   const listRef = useRef<HTMLDivElement>(null)
   const [editing, setEditing] = useState<{ id: ID; field: 'name' | 'note' } | null>(null)
   const [editingGroup, setEditingGroup] = useState<ID | null>(null)
@@ -74,7 +89,7 @@ export function Plan(props: {
   const ritual = useRitual(today)
   const showRitual = month === current && !!ritual
   // A budget with no money in it yet: the next step is to count it or log income.
-  const empty = rta === 0 && view.assigned === 0 && expectedTotal(ix) <= 0
+  const empty = rtaSign === 0 && view.assigned === 0 && expectedTotal(ix) <= 0
 
   useSortable(listRef, {
     groupSelector: '[data-sort-group]',
@@ -112,17 +127,19 @@ export function Plan(props: {
     return () => window.removeEventListener('keydown', onKey)
   }, [setMonth])
 
+  const allAssigned = () => shownSign(monthView(getIndex(), month, current).readyToAssign, base) === 0
+
   function fund() {
     const amt = undoable('Funded targets', () => fundTargets(month, current))
     if (!amt) return
-    play('success')
+    if (!allAssigned()) play('success') // otherwise the celebration plays
     flash(rtaRef.current, 'pulse-once')
     toast(`${fmt(amt, base)} went to your targets`, { undo: true })
   }
 
   function repeat() {
     undoable('Repeated last month', () => repeatLastMonth(month))
-    play('success')
+    if (!allAssigned()) play('success')
     toast('Last month’s plan copied', { undo: true })
   }
 
@@ -132,12 +149,11 @@ export function Plan(props: {
     const name = v?.trim()
     if (!name) return
     const c = undoable(`Added ${name}`, () => addCategory(group, name))
-    play('tap')
     if (enter) requestAnimationFrame(() => listRef.current?.querySelector<HTMLInputElement>(`[data-sort-id="${c.id}"] .casg`)?.focus())
   }
 
-  const canFund = view.need > 0 && rta > 0
-  const canRepeat = view.assigned === 0 && prevHasPlan && rta > 0
+  const canFund = view.need > 0 && rtaSign > 0
+  const canRepeat = view.assigned === 0 && prevHasPlan && rtaSign > 0
   const fundPill = canFund && (
     <button class="pill solid sm" onClick={fund}>
       Fund targets {view.need < rta && <small>{fmt(view.need, base)}</small>}
@@ -174,8 +190,8 @@ export function Plan(props: {
       </div>
 
       <section class="rta">
-        <div class="rta-num" ref={rtaRef} style={{ color: rta < 0 ? 'var(--red)' : rta > 0 ? 'var(--green)' : 'var(--pen)' }}>
-          <span class={`marked${rta < 0 ? ' neg' : ''}`}>{fmt(shownRta, base)}</span>
+        <div class="rta-num" ref={rtaRef} style={{ color: rtaSign < 0 ? 'var(--red)' : rtaSign > 0 ? 'var(--green)' : 'var(--pen)' }}>
+          <span class={`marked${rtaSign < 0 ? ' neg' : ''}`}>{fmt(shownRta, base)}</span>
         </div>
         {empty ? (
           // The routine below already lists these steps.
@@ -191,7 +207,7 @@ export function Plan(props: {
           )
         ) : (
           <div class="rta-line">
-            <span class="rta-cap">{rta > 0 ? 'ready to assign, give it all a job.' : rta < 0 ? 'more assigned than you have.' : 'every bit has a job.'}</span>
+            <span class="rta-cap">{rtaSign > 0 ? 'ready to assign, give it all a job' : rtaSign < 0 ? 'more assigned than you have.' : 'every bit has a job.'}</span>
             {!showRitual && (fundPill || repeatPill) && (
               <span class="rta-actions">
                 {fundPill}
@@ -305,7 +321,6 @@ export function Plan(props: {
                   setAddingGroup(false)
                   if (v?.trim()) {
                     undoable('Added group', () => addGroup(v.trim()))
-                    play('tap')
                   }
                 }}
               />
@@ -384,7 +399,7 @@ function CatRow(props: {
   const asgRef = useRef<HTMLInputElement>(null)
   // Typed into since it got focus. Until then the box just mirrors the stored amount.
   const edited = useRef(false)
-  const toDraft = (v: number) => (v ? String(v / 100) : '')
+  const toDraft = (v: number) => (v ? groupTyped(String(v / 100)) : '')
   const asgText = draft ?? fmt(c.assigned, base, { bare: true })
 
   // The stored amount changed (undo, sync, a quick-assign pill): never keep showing an old draft.
@@ -427,7 +442,6 @@ function CatRow(props: {
     const v = raw.trim() === '' ? 0 : evalAmount(raw, base)
     if (v === null || v === c.assigned) return
     undoable(`Assigned ${cat.name}`, () => setAssigned(props.month, cat.id, v))
-    play('tap')
   }
 
   /** Save the name being typed (if any) and open the note field instead. */
@@ -509,7 +523,7 @@ function CatRow(props: {
             return
           }
           edited.current = true
-          setDraftVal(el.value)
+          setDraftVal(regroup(e))
         }}
         onBlur={(e) => commitAssign(e.currentTarget.value)}
         onKeyDown={(e) => {

@@ -86,9 +86,17 @@ export function fmt(minor: number, code: string, opts: FormatOpts = {}): string 
   const showCents = c.decimals > 0 && (cents !== 0 || opts.exact)
   if (showCents) num += '.' + String(cents).padStart(2, '0')
   else if (c.decimals === 0 && cents >= 50 && !opts.exact) num = groupFmt.format(whole + 1)
-  const signStr = neg ? '−' : opts.sign && minor > 0 ? '+' : ''
+  // A sliver that rounds away (−NT$0.3) is zero: no sign in front of it.
+  const zero = !/[1-9]/.test(num)
+  const signStr = zero ? '' : neg ? '−' : opts.sign && minor > 0 ? '+' : ''
   if (opts.bare) return signStr + num
   return c.suffix ? `${signStr}${num} ${c.symbol}` : `${signStr}${c.symbol}${num}`
+}
+
+/** How a sign reads once the amount is rounded for display: 1, −1, or 0 when it shows as zero. */
+export function shownSign(minor: number, code: string): -1 | 0 | 1 {
+  if (!/[1-9]/.test(fmt(minor, code, { bare: true }))) return 0
+  return minor < 0 ? -1 : 1
 }
 
 /** Biggest amount anyone means to type: 9,999,999,999.99 */
@@ -116,6 +124,19 @@ export function parseAmount(s: string): number | null {
   const v = Number(whole || '0') * 100 + Number(frac)
   if (!Number.isFinite(v) || v > MAX_MINOR) return null
   return neg ? -v : v
+}
+
+/**
+ * Thousands separators for what someone is typing: "1234567.5" -> "1,234,567.5", "6000+500" ->
+ * "6,000+500". Commas are always grouping (they are put back where they belong), the dot is the
+ * decimal point, and anything else is left as typed.
+ */
+export function groupTyped(s: string): string {
+  return s.replace(/\d[\d,]*(\.\d*)?/g, (run) => {
+    const [whole, frac] = run.split('.')
+    const digits = whole.replace(/,/g, '')
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? '.' + frac : '')
+  })
 }
 
 /** Rates map: value of 1 unit of currency in base currency. base itself = 1. */

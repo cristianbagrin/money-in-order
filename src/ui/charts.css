@@ -104,14 +104,14 @@
   stroke-linecap: round;
 }
 .ch-line.over {
-  stroke: var(--red, #c4285f);
+  stroke: var(--red, #c8231f);
 }
 .ch-area {
   fill: var(--pen, #1d58a8);
   opacity: 0.08;
 }
 .ch-area.over {
-  fill: var(--red, #c4285f);
+  fill: var(--red, #c8231f);
 }
 .ch-prev {
   fill: none;
@@ -128,7 +128,7 @@
   stroke-linecap: round;
 }
 .ch-proj.over {
-  stroke: var(--red, #c4285f);
+  stroke: var(--red, #c8231f);
 }
 .ch-dot {
   fill: var(--pen, #1d58a8);
@@ -137,7 +137,7 @@
   paint-order: stroke;
 }
 .ch-dot.over {
-  fill: var(--red, #c4285f);
+  fill: var(--red, #c8231f);
 }
 .ch-dot.prev {
   fill: var(--ink-4, #8e989c);
@@ -148,7 +148,7 @@
   stroke-width: 1.5;
 }
 .ch-dot.proj.over {
-  stroke: var(--red, #c4285f);
+  stroke: var(--red, #c8231f);
 }
 
 .ch-bar {
@@ -255,7 +255,7 @@
   background: var(--pen, #1d58a8);
 }
 .ch-key.red {
-  background: var(--red, #c4285f);
+  background: var(--red, #c8231f);
 }
 .ch-key.green {
   background: var(--green, #0a7f5a);
@@ -270,7 +270,7 @@
   border-top-color: var(--pen, #1d58a8);
 }
 .ch-key.dash.red {
-  border-top-color: var(--red, #c4285f);
+  border-top-color: var(--red, #c8231f);
 }
 .ch-key.ghost {
   width: 8px;

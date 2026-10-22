@@ -115,7 +115,6 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
                   class="pill soft"
                   aria-pressed={diffTo === RTA}
                   onClick={() => {
-                    play('toggle')
                     setDiffTo(RTA)
                   }}
                 >
@@ -129,7 +128,6 @@ export function CountSheet(props: { open: boolean; onClose: () => void; onAccoun
                       class="pill soft"
                       aria-pressed={diffTo === c.id}
                       onClick={() => {
-                        play('toggle')
                         setDiffTo(c.id)
                       }}
                     >

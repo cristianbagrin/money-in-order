@@ -1,11 +1,11 @@
 import { memo } from 'preact/compat'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { cur, evalAmount, fmt } from '../lib/money'
+import { cur, evalAmount, fmt, groupTyped } from '../lib/money'
 
 /** How an amount appears in the editor: no grouping, and no cents for currencies without them. */
 function amountText(amt: number, code: string): string {
   const v = Math.abs(amt) / 100
-  return cur(code).decimals ? String(Math.round(v * 100) / 100) : String(Math.round(v))
+  return groupTyped(cur(code).decimals ? String(Math.round(v * 100) / 100) : String(Math.round(v)))
 }
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { deleteTxn, undoable, updateTxn, type NewTxn } from '../lib/store'
@@ -78,7 +78,6 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
 
   function setCategory(cat: string) {
     if (cat === tx.cat) return
-    play('toggle')
     const income = cat === RTA
     // Income is money in; spending is money out (a refund keeps its sign).
     const amt = income ? Math.abs(tx.amt) : refund ? tx.amt : -Math.abs(tx.amt)
@@ -111,7 +110,6 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
               aria-pressed={tx.cur === c}
               onClick={() => {
                 if (c === tx.cur) return
-                play('toggle')
                 change({ cur: c }, 'Changed currency')
               }}
             >

@@ -7,7 +7,7 @@ import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type ID } from '../lib/types'
 import { DatePill } from '../ui/calendar'
 import { useIndex, useMedia } from '../ui/hooks'
-import { Keypad, NoteField, toast } from '../ui/kit'
+import { Keypad, NoteField, regroup, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { haptic, play } from '../ui/sound'
 
@@ -92,7 +92,7 @@ export function Today(props: { today: string; onPlan: () => void }) {
   const monthLeft = d ? 0 : view.cats.filter((c) => !c.cat.saving && !c.cat.archived).reduce((s, c) => s + c.available, 0)
   const heroValue = d ? (monthOver ? d.available : d.leftToday) : monthLeft
   const shown = useCountUp(heroValue)
-  const heroText = fmt(Math.abs(shown), base)
+  const heroText = fmt(shown, base)
 
   return (
     <div class="today" ref={todayRef}>
@@ -119,7 +119,7 @@ export function Today(props: { today: string; onPlan: () => void }) {
                 : monthOver
                   ? `over for the month in ${d.cats.map((c) => c.name).join(' + ')}`
                   : heroValue < 0
-                    ? 'over today'
+                    ? 'over living expenses today'
                     : 'left for today'}
             </div>
           </>
@@ -217,15 +217,14 @@ export function Register(props: { today: string; touch: boolean }) {
   const notesList = useMemo(() => [...new Set(ix.txns.filter((t) => t.note && !t.kind).map((t) => t.note!))].slice(0, 80), [ix])
   const suggested = dr.note.trim() ? memory.get(dr.note.trim().toLowerCase()) ?? null : null
 
-  /** What a bubble says. While typing, categories with money to spend show what would be left; the rest keep their value. */
+  /** What a bubble says. While typing, every category shows what it would have left after this entry. */
   function left(id: ID): { text: string; over: boolean } {
     const cm = view.byId.get(id)
     if (!cm) return { text: fmt(0, base), over: false }
     const now = cm.cat.daily && dd && !(dd.allowance === 0 && cm.available <= 0) ? dd.leftToday : cm.available
-    const spendable = !cm.cat.saving && cm.available > 0
-    const l = spendable ? now - amountBase : now
+    const l = now - amountBase
     // Red is for a real problem: already overspent, or this entry would overspend.
-    return { text: fmt(l, base), over: l < 0 && !cm.cat.saving }
+    return { text: fmt(l, base), over: l < 0 }
   }
 
   function log(cat: ID, el?: Element | null) {
@@ -350,7 +349,7 @@ export function Register(props: { today: string; touch: boolean }) {
                 maxLength={24}
                 value={dr.digits}
                 autoFocus
-                onInput={(e) => setDraft({ digits: e.currentTarget.value })}
+                onInput={(e) => setDraft({ digits: regroup(e) })}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
@@ -377,7 +376,6 @@ export function Register(props: { today: string; touch: boolean }) {
             class={`pill${currency !== base ? ' picked' : ''}`}
             aria-label={`Currency ${currency}. Tap to change`}
             onClick={() => {
-              play('toggle')
               const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
               // A currency without cents can't keep typed cents.
               setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.split('.')[0] : dr.digits })

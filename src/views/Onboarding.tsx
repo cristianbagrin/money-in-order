@@ -5,7 +5,7 @@ import { addAccount, getDB, recordCount, seedCategories, settings, today, update
 import { joinSync, normalizeCode } from '../lib/sync'
 import { RTA } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
-import { IconPlus, toast } from '../ui/kit'
+import { IconPlus, regroup, toast } from '../ui/kit'
 import { play } from '../ui/sound'
 
 interface DraftAccount {
@@ -33,7 +33,6 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
           <br />
           in Order
         </h1>
-        <p class="lede">A plan for every bit of money you have, and a two-tap habit for everything you spend.</p>
         <ol class="rules">
           <li>
             <span>
@@ -181,7 +180,6 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
               class="pill sm"
               aria-label={`Currency ${a.cur}. Tap to change`}
               onClick={() => {
-                play('toggle')
                 const next = curs[(curs.indexOf(a.cur) + 1) % curs.length] ?? main
                 setAccounts(accounts.map((x, k) => (k === i ? { ...x, cur: next } : x)))
               }}
@@ -197,7 +195,10 @@ export function Onboarding(props: { joinCode?: string; onDone: () => void }) {
               style={{ textAlign: 'right' }}
               value={a.bal}
               onFocus={(e) => e.currentTarget.select()}
-              onInput={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, bal: e.currentTarget.value } : x)))}
+              onInput={(e) => {
+                const bal = regroup(e, { numbersOnly: true })
+                setAccounts(accounts.map((x, k) => (k === i ? { ...x, bal } : x)))
+              }}
             />
           </div>
         ))}

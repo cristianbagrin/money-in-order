@@ -63,7 +63,6 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
               class="pill"
               aria-pressed={Math.abs(s.savingsTarget - v) < 0.001}
               onClick={() => {
-                play('toggle')
                 updateSettings({ savingsTarget: v })
               }}
             >
@@ -196,7 +195,6 @@ function NewAccount(props: { currencies: string[]; onDone: () => void }) {
   const add = () => {
     if (!name.trim()) return
     undoable(`Added ${name.trim()}`, () => addAccount(name.trim(), cur))
-    play('tap')
     props.onDone()
   }
   return (
@@ -281,7 +279,6 @@ function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => 
             class="pill sm soft"
             aria-pressed={a.cur === c}
             onClick={() => {
-              play('toggle')
               saveAccount({ ...a, cur: c })
             }}
           >
@@ -399,7 +396,6 @@ function SyncBox() {
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(sync.code!)
-              play('tap')
               toast('Code copied')
             } catch {
               toast(sync.code!)

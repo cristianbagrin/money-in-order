@@ -6,35 +6,23 @@
   AudioContext is only created then (until that moment play() quietly does nothing). After 30 s
   of quiet, or when the page is hidden, the context is suspended so nothing runs while idle.
 
+  Sound is kept for moments that mean something: money logged, a plan step done, a mistake, something
+  removed or brought back. Taps, keys, toggles and sheets opening have none (a keypad tap still has
+  its haptic), so the sounds that remain keep their meaning after months of daily use. Phones play
+  everything softer than laptops, and a burst of sounds ducks itself, so a busy minute never gets loud.
+
   The tuned sounds share one key (C major) so whatever follows whatever still agrees:
-    key      a soft, short "tock": a breath of filtered noise over a falling low sine
-    tap      a tiny water-drop tick, pitch falling
-    toggle   a small rounded "pop", pitch rising
     log      coin "ka-ching": a quick G5 then a ringing C6 with a faint bell glint
     income   brighter, rising chime: C6 then G6, triangle with octave shimmer
     delete   a soft downward whoosh
     undo     the same whoosh played backwards, rising, with a hint of tone
-    lift     a light high blip, rising
     drop     a soft low thunk, falling
     success  a quick C-E-G arpeggio
+    complete everything assigned: a soft C-E-G-C rise that lands on a bell, with a sprinkle on top
     error    two low, soft notes stepping down (G4, E4)
-    open     a faint airy swish up;  close: the same swish down
 */
 
-export type Sound =
-  | 'key'
-  | 'tap'
-  | 'toggle'
-  | 'log'
-  | 'income'
-  | 'delete'
-  | 'undo'
-  | 'lift'
-  | 'drop'
-  | 'success'
-  | 'error'
-  | 'open'
-  | 'close'
+export type Sound = 'log' | 'income' | 'delete' | 'undo' | 'drop' | 'success' | 'complete' | 'error'
 
 // ------------------------------------------------------------------ preference
 
@@ -85,9 +73,15 @@ const noop = () => {}
 
 const GESTURES = ['pointerdown', 'touchend', 'keydown', 'click'] as const
 const CAPTURE: AddEventListenerOptions = { capture: true, passive: true }
-/** Identical sounds closer together than this collapse into one; keys may run faster. */
+/** Identical sounds closer together than this collapse into one. */
 const COLLAPSE_MS = 30
-const KEY_COLLAPSE_MS = 12
+/** Overall level: phone speakers sit close to the ear and carry high notes, so they get much less. */
+const PHONE_LEVEL = 0.38
+const DESK_LEVEL = 0.8
+/** Each sound adds to a "busyness" that fades over this many seconds; while it is high, sounds duck. */
+const BUSY_FADE_S = 4
+const BUSY_DUCK = 0.22
+const DUCK_FLOOR = 0.4
 /** A sound that has to wait this long for the context to wake would land after the tap. */
 const STALE_MS = 150
 const IDLE_MS = 30_000
@@ -143,6 +137,7 @@ function create(): AudioContext | null {
     return null
   }
   master = c.createGain()
+  master.gain.value = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? PHONE_LEVEL : DESK_LEVEL
   master.connect(c.destination)
   c.onstatechange = update
   // Older iOS only unlocks once something actually starts inside the gesture.
@@ -186,7 +181,7 @@ export function play(s: Sound): void {
   try {
     if (!gestured || broken || !soundOn() || document.hidden) return
     const now = performance.now()
-    if (now - (last[s] ?? -Infinity) < (s === 'key' ? KEY_COLLAPSE_MS : COLLAPSE_MS)) return
+    if (now - (last[s] ?? -Infinity) < COLLAPSE_MS) return
     last[s] = now
     if (voices >= MAX_VOICES) return
     const c = wake()
@@ -204,13 +199,26 @@ export function play(s: Sound): void {
 function render(c: AudioContext, s: Sound) {
   if (!master || !soundOn() || document.hidden) return
   // A few ms ahead so the attack is never clipped by the render quantum already in flight.
-  const v = new Voice(c, master)
+  const v = new Voice(c, master, duck())
   RECIPES[s](v, c.currentTime + 0.008)
   v.done()
   clearTimeout(nap)
   nap = setTimeout(() => {
     if (!voices) sleep()
   }, IDLE_MS)
+}
+
+let busy = 0
+let busyAt = 0
+
+/** How loud the next sound plays: full when the app has been quiet, softer the more just played. */
+function duck(): number {
+  const now = performance.now() / 1000
+  busy = busy * Math.exp(-(now - busyAt) / BUSY_FADE_S)
+  busyAt = now
+  const level = Math.max(DUCK_FLOOR, 1 / (1 + BUSY_DUCK * busy))
+  busy += 1
+  return level
 }
 
 // ------------------------------------------------------------------ synthesis
@@ -249,9 +257,13 @@ class Voice {
   private readonly c: BaseAudioContext
   private readonly out: AudioNode
 
-  constructor(c: BaseAudioContext, out: AudioNode) {
+  constructor(c: BaseAudioContext, out: AudioNode, level = 1) {
     this.c = c
-    this.out = out
+    const g = c.createGain()
+    g.gain.value = level
+    g.connect(out)
+    this.nodes.push(g)
+    this.out = g
   }
 
   tone(t: number, o: Tone) {
@@ -344,29 +356,14 @@ const wobble = (r: number) => 1 + (Math.random() * 2 - 1) * r
 
 const G4 = 392.0
 const E4 = 329.63
+const C5 = 523.25
+const E5 = 659.25
 const G5 = 783.99
 const C6 = 1046.5
 const E6 = 1318.51
 const G6 = 1567.98
 
 const RECIPES: Record<Sound, (v: Voice, t: number) => void> = {
-  key(v, t) {
-    const n = wobble(0.05)
-    v.noise(t, { type: 'bandpass', f: 2100 * n, q: 1.3, peak: 0.1, a: 0.001, d: 0.02 })
-    v.tone(t, { f: 440 * n, to: 300 * n, glide: 0.025, peak: 0.04, a: 0.0015, d: 0.028 })
-  },
-
-  tap(v, t) {
-    const n = wobble(0.03)
-    v.tone(t, { f: 1500 * n, to: 950 * n, glide: 0.035, peak: 0.085, a: 0.002, d: 0.05 })
-  },
-
-  toggle(v, t) {
-    const n = wobble(0.02)
-    v.tone(t, { f: 520 * n, to: 840 * n, glide: 0.03, peak: 0.1, a: 0.003, d: 0.07 })
-    v.tone(t, { f: 1040 * n, to: 1680 * n, glide: 0.03, type: 'triangle', peak: 0.014, a: 0.003, d: 0.04 })
-  },
-
   log(v, t) {
     // "ka": a short G5 with the faint click of a coin.
     v.noise(t, { type: 'bandpass', f: 5200, q: 0.9, peak: 0.05, a: 0.001, d: 0.014 })
@@ -398,11 +395,6 @@ const RECIPES: Record<Sound, (v: Voice, t: number) => void> = {
     v.tone(t, { f: 440, to: 880, glide: 0.18, peak: 0.03, a: 0.14, d: 0.06 })
   },
 
-  lift(v, t) {
-    const n = wobble(0.015)
-    v.tone(t, { f: 990 * n, to: 1480 * n, glide: 0.05, peak: 0.09, a: 0.006, d: 0.075 })
-  },
-
   drop(v, t) {
     // Weight for headphones and laptops, plus a mid "knock" so phone speakers carry it too.
     v.tone(t, { f: 280, to: 130, glide: 0.06, type: 'triangle', peak: 0.13, a: 0.002, d: 0.11, lp: 1500 })
@@ -421,6 +413,22 @@ const RECIPES: Record<Sound, (v: Voice, t: number) => void> = {
     v.tone(t + 0.12, { f: G6 * 2, peak: 0.016, a: 0.003, d: 0.08 })
   },
 
+  complete(v, t) {
+    // Soft and low-key: quieter than success, but it opens up and rings a little longer.
+    const notes = [C5, E5, G5, C6]
+    notes.forEach((f, i) => {
+      const at = t + i * 0.075
+      const last = i === notes.length - 1
+      v.tone(at, { f, type: 'triangle', peak: last ? 0.085 : 0.06, a: 0.006, d: last ? 0.5 : 0.14, lp: 3200 })
+      v.tone(at, { f: f * 2, peak: last ? 0.02 : 0.012, a: 0.004, d: last ? 0.3 : 0.08 })
+    })
+    // A hair-detuned twin under the last note, and a few tiny glints like the confetti catching light.
+    v.tone(t + 0.225, { f: C6 * 1.003, peak: 0.03, a: 0.006, d: 0.5 })
+    for (const [i, f] of [E6 * 2, G6 * 2, C6 * 4].entries()) {
+      v.tone(t + 0.3 + i * 0.07 + Math.random() * 0.02, { f: f * wobble(0.01), peak: 0.009, a: 0.002, d: 0.09 })
+    }
+  },
+
   error(v, t) {
     for (const [i, f] of [G4, E4].entries()) {
       const at = t + i * 0.11
@@ -431,13 +439,6 @@ const RECIPES: Record<Sound, (v: Voice, t: number) => void> = {
     }
   },
 
-  open(v, t) {
-    v.noise(t, { type: 'bandpass', f: 1300, to: 4200, sweep: 0.17, q: 0.6, peak: 0.12, a: 0.05, d: 0.13 })
-  },
-
-  close(v, t) {
-    v.noise(t, { type: 'bandpass', f: 4200, to: 1300, sweep: 0.14, q: 0.6, peak: 0.11, a: 0.015, d: 0.12 })
-  },
 }
 
 // ------------------------------------------------------------------ haptics
