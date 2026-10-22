@@ -157,7 +157,16 @@ h3 {
 
 .app {
   min-height: 100dvh;
-  padding-top: env(safe-area-inset-top);
+  padding-top: calc(env(safe-area-inset-top) + var(--top-gap));
+}
+/* iOS blurs a band under the status bar on home-screen apps; on a notched phone the page starts below it */
+:root {
+  --top-gap: 0px;
+}
+@media (max-width: 959px) and (pointer: coarse) {
+  :root {
+    --top-gap: min(16px, env(safe-area-inset-top));
+  }
 }
 
 .main {
@@ -684,7 +693,7 @@ textarea:focus {
   flex-direction: column;
   /* exactly the screen between the status bar and the tab bar: the amount and keypad never scroll away,
      the bubbles scroll inside their own area when there are many */
-  --today-h: calc(100dvh - env(safe-area-inset-top) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
+  --today-h: calc(100dvh - env(safe-area-inset-top) - var(--top-gap) - var(--tabbar) - env(safe-area-inset-bottom) - 12px);
   height: var(--today-h);
 }
 .hero {
@@ -704,7 +713,7 @@ textarea:focus {
 }
 .hero-cap {
   margin-top: 6px;
-  font-size: 15px;
+  font-size: 13px;
   color: var(--ink-2);
 }
 .plan-first {
@@ -946,10 +955,12 @@ textarea:focus {
   gap: 8px 10px;
   margin-top: 2px;
 }
+/* one line beside the action, even on a small phone */
 .rta-cap {
-  flex: 1 1 150px;
+  flex: 1 1 auto;
   min-width: 0;
-  font-size: 15px;
+  white-space: nowrap;
+  font-size: 13px;
   line-height: 1.3;
   color: var(--ink-2);
 }
@@ -1293,7 +1304,7 @@ textarea:focus {
     line-height: 1;
   }
   .rta-cap {
-    font-size: 14px;
+    font-size: 12.5px;
   }
   .grp {
     margin-top: 3px;
