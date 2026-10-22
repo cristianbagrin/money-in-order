@@ -610,6 +610,33 @@ export function placeAccount(id: ID, index: number) {
   if (changed.length) commit({ accounts: changed })
 }
 
+/**
+ * Move an account within its own kind (cash or investment), as the Accounts sheet lists them apart.
+ * `index` counts among that kind without the account itself. The other kind keeps its places.
+ */
+export function placeAccountOfKind(id: ID, index: number) {
+  const a = db.accounts[id]
+  if (!a || a.d) return
+  const all = Object.values(db.accounts)
+    .filter((x) => !x.d)
+    .sort((x, y) => x.order - y.order || x.name.localeCompare(y.name))
+  const kind = all.filter((x) => !x.invest === !a.invest && x.id !== id)
+  kind.splice(Math.max(0, Math.min(index, kind.length)), 0, a)
+  // The kind's accounts fill the same places they held, so the other kind never moves.
+  let k = 0
+  const next = all.map((x) => (!x.invest === !a.invest ? kind[k++] : x))
+  const changed = next.map((x, i) => ({ ...x, order: i })).filter((x) => db.accounts[x.id].order !== x.order)
+  if (changed.length) commit({ accounts: changed })
+}
+
+/** Put a chosen currency at a position among the chosen ones (the base always comes first). */
+export function placeCurrency(code: string, index: number) {
+  const list = settings().extraCurrencies.filter((c) => c !== code)
+  if (list.length === settings().extraCurrencies.length) return
+  list.splice(Math.max(0, Math.min(index, list.length)), 0, code)
+  updateSettings({ extraCurrencies: list })
+}
+
 export function reorderCategory(id: ID, dir: -1 | 1) {
   const c = db.cats[id]
   if (!c) return

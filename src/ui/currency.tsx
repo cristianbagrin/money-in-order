@@ -5,24 +5,50 @@ import { currenciesInUse, hasRate, refreshRates } from '../lib/rates'
 import { IconSearch, toast } from './kit'
 import { Sheet } from './sheet'
 import { haptic, play } from './sound'
+import { sortKey, useSortable } from './sortable'
 import './currency.css'
 
 /**
  * Pick the currencies you use. Tap to add or remove; double-tap to make one the currency you plan in
- * (it turns solid).
+ * (it turns solid). With `onReorder` the chosen ones lead, the plan's currency first and then the rest in
+ * the order they are kept in, and can be dragged (or moved with Shift and the arrow keys) to change it.
  */
-export function CurrencyPicker(props: { selected: string[]; main: string; onChange: (selected: string[], main: string) => void }) {
-  const { selected, main } = props
+export function CurrencyPicker(props: {
+  selected: string[]
+  main: string
+  onChange: (selected: string[], main: string) => void
+  /** `index` counts among the chosen ones after the plan's currency, without the one moved */
+  onReorder?: (code: string, index: number) => void
+}) {
+  const { selected, main, onReorder } = props
   const [more, setMore] = useState(false)
   const last = useRef<{ code: string; t: number } | null>(null)
-  // The common ones always come first, in the same order, so pills never jump around under a finger.
-  const first = [...new Set([...COMMON_CURRENCIES, ...selected, main])]
-  const visible = more ? [...first, ...Object.keys(CURRENCIES).filter((c) => !first.includes(c))] : first
+  const ref = useRef<HTMLDivElement>(null)
+  // A pill that was just tapped stays where it is for a moment, so the second tap of a double-tap lands on it.
+  const [held, setHeld] = useState<string[] | null>(null)
+  const timer = useRef(0)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  // Without ordering the common ones always come first, in the same order, so pills never jump around under a finger.
+  const first = onReorder ? [...new Set([main, ...selected, ...COMMON_CURRENCIES])] : [...new Set([...COMMON_CURRENCIES, ...selected, main])]
+  const all = more ? [...first, ...Object.keys(CURRENCIES).filter((c) => !first.includes(c))] : first
+  const visible = held ? [...held.filter((c) => all.includes(c)), ...all.filter((c) => !held.includes(c))] : all
+  const extras = selected.filter((c) => c !== main)
+
+  useSortable(ref, {
+    flow: true,
+    disabled: !onReorder || !!held,
+    onDrop: (info) => onReorder?.(info.id, info.index),
+  })
 
   function tap(code: string) {
     const now = Date.now()
     const double = last.current?.code === code && now - last.current.t < 380
     last.current = { code, t: now }
+    if (onReorder) {
+      setHeld(visible)
+      clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setHeld(null), 500)
+    }
     if (double) {
       if (code !== main) {
         play('success')
@@ -35,18 +61,23 @@ export function CurrencyPicker(props: { selected: string[]; main: string; onChan
   }
 
   return (
-    <div class="pills">
-      {visible.map((code) => (
-        <button
-          key={code}
-          class={`pill${code === main ? ' solid' : selected.includes(code) ? ' picked' : ''}`}
-          aria-pressed={code === main || selected.includes(code)}
-          aria-label={`${code}${code === main ? ', the currency you plan in' : selected.includes(code) ? ', in use' : ''}`}
-          onClick={() => tap(code)}
-        >
-          {code}
-        </button>
-      ))}
+    <div class="pills" ref={ref}>
+      {visible.map((code) => {
+        const movable = !!onReorder && code !== main && selected.includes(code)
+        return (
+          <button
+            key={code}
+            class={`pill${code === main ? ' solid' : selected.includes(code) ? ' picked' : ''}`}
+            aria-pressed={code === main || selected.includes(code)}
+            aria-label={`${code}${code === main ? ', the currency you plan in' : selected.includes(code) ? ', in use' : ''}`}
+            data-sort-id={movable ? code : undefined}
+            onClick={() => tap(code)}
+            onKeyDown={(e) => movable && !held && onReorder && sortKey(e, extras.indexOf(code), extras.length, (to) => onReorder(code, to))}
+          >
+            {code}
+          </button>
+        )
+      })}
       <button class="pill ghost" onClick={() => setMore(!more)}>
         {more ? 'Less' : 'More'}
       </button>

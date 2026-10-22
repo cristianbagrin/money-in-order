@@ -9,6 +9,9 @@ import './sortable.css'
  * The gap is a real (empty) spacer element whose height animates, so everything after it, group
  * headers included, slides by itself. On drop every inline style and spacer is removed again before
  * `onDrop` runs, so the app's re-render owns the DOM order.
+ *
+ * `flow: true` is the same for rows of pills that wrap (FlowSorter): the item floats under the pointer,
+ * an empty slot of its size shows where it would land, and the pills around slide to make room.
  */
 
 export interface DropInfo {
@@ -30,6 +33,8 @@ export interface SortableOptions {
   handleSelector?: string
   /** Touch hold delay in ms. Default 260. */
   longPressMs?: number
+  /** The items sit in a wrapping row (pills) rather than a column. */
+  flow?: boolean
   disabled?: boolean
   onDrop: (info: DropInfo) => void
 }
@@ -96,7 +101,19 @@ interface Gap {
   origin: boolean
 }
 
-interface Drag {
+/** What the input handlers need of a drag, whichever kind of list it is in. */
+interface DragBase {
+  touch: boolean
+  pointer: number
+  target: Node
+  x: number
+  y: number
+  settling: unknown
+}
+
+type ScrollState = Pick<Drag, 'y' | 'y0' | 'scroller' | 'scrollArmed' | 'scrollAcc'>
+
+interface Drag extends DragBase {
   touch: boolean
   pointer: number
   target: Node
@@ -174,12 +191,16 @@ function flow(parent: Element) {
 
 class Sorter {
   readonly root: HTMLElement
-  private cfg: Config
-  private opts: { current: SortableOptions }
-  private setDragging: (id: string | null) => void
-  private press: Press | null = null
-  private drag: Drag | null = null
+  protected cfg: Config
+  protected opts: { current: SortableOptions }
+  protected setDragging: (id: string | null) => void
+  protected press: Press | null = null
+  protected drag: DragBase | null = null
   private listening = false
+
+  private get dr(): Drag | null {
+    return this.drag as Drag | null
+  }
 
   constructor(root: HTMLElement, cfg: Config, opts: { current: SortableOptions }, setDragging: (id: string | null) => void) {
     this.root = root
@@ -259,7 +280,7 @@ class Sorter {
     document.addEventListener('selectstart', this.onSelectStart, true)
   }
 
-  private unlisten() {
+  protected unlisten() {
     if (!this.listening) return
     this.listening = false
     window.removeEventListener('pointermove', this.onPointerMove, true)
@@ -418,7 +439,7 @@ class Sorter {
 
   // ------------------------------------------------------------------ dragging
 
-  private start() {
+  protected start() {
     const p = this.press
     if (!p) return
     clearTimeout(p.timer)
@@ -545,7 +566,7 @@ class Sorter {
   }
 
   private frame = (now: number) => {
-    const d = this.drag
+    const d = this.dr
     if (!d) return
     if (!d.item.isConnected) {
       this.finish(false)
@@ -584,20 +605,20 @@ class Sorter {
 
   /** Where the item sits in the layout, without our transform. */
   private natural(): number {
-    const d = this.drag!
+    const d = this.dr!
     const r = d.item.getBoundingClientRect()
     return r.top - d.ty + ((d.s - 1) * d.h) / 2
   }
 
   private apply(ty: number, s: number) {
-    const d = this.drag!
+    const d = this.dr!
     d.ty = ty
     d.s = s
     d.item.style.transform = `translate3d(0px, ${ty.toFixed(2)}px, 0px) scale(${s.toFixed(4)})`
   }
 
-  private autoScroll(dt: number) {
-    const d = this.drag!
+  protected autoScroll(dt: number) {
+    const d = (this.drag as ScrollState | null)!
     if (!d.scrollArmed) {
       if (Math.abs(d.y - d.y0) < 12) return
       d.scrollArmed = true
@@ -635,7 +656,7 @@ class Sorter {
 
   /** Pick the group under the pointer and the index the item would land at. */
   private retarget(nat: number) {
-    const d = this.drag!
+    const d = this.dr!
     let gi = d.gap.gi
     if (d.groups.length > 1) {
       // The container under the pointer, or the nearest one within reach (an emptied group can be
@@ -665,7 +686,7 @@ class Sorter {
   }
 
   private moveGap(gi: number, k: number) {
-    const d = this.drag!
+    const d = this.dr!
     const prev = d.gap
     const origin = gi === d.gi0 && k === d.i0
     if (!prev.origin) this.closeSpacer(keyOf(prev.gi, prev.k))
@@ -679,7 +700,7 @@ class Sorter {
   }
 
   private openSpacer(gi: number, k: number) {
-    const d = this.drag!
+    const d = this.dr!
     const key = keyOf(gi, k)
     let sp = d.spacers.get(key)
     if (!sp) {
@@ -717,7 +738,7 @@ class Sorter {
   }
 
   private closeSpacer(key: string) {
-    const d = this.drag!
+    const d = this.dr!
     const sp = d.spacers.get(key)
     if (!sp) return
     sp.closing = true
@@ -734,8 +755,8 @@ class Sorter {
     )
   }
 
-  private drop(commit: boolean) {
-    const d = this.drag
+  protected drop(commit: boolean) {
+    const d = this.dr
     if (!d || d.settling) return
     if (!commit && !d.gap.origin) this.moveGap(d.gi0, d.i0)
     d.settling = { t0: performance.now(), from: d.top, s0: d.s, commit: commit && !d.gap.origin }
@@ -745,8 +766,8 @@ class Sorter {
   }
 
   /** Remove every trace of the drag, then report the move (if any). */
-  private finish(commit: boolean) {
-    const d = this.drag
+  protected finish(commit: boolean) {
+    const d = this.dr
     if (!d) return
     cancelAnimationFrame(d.raf)
     let info: DropInfo | null = null
@@ -790,6 +811,275 @@ class Sorter {
   }
 }
 
+interface FlowDrag extends DragBase, ScrollState {
+  item: HTMLElement
+  id: string
+  slot: HTMLElement
+  /** where the item was when picked up, and how far its fixed position is off from that (a transformed ancestor) */
+  r0: DOMRect
+  offX: number
+  offY: number
+  grabX: number
+  grabY: number
+  i0: number
+  index: number
+  last: number
+  saved: string | null
+  reduced: boolean
+  raf: number
+}
+
+/**
+ * Sorter for rows of pills that wrap. The input rules are the same (mouse: press and move; touch: hold, then
+ * drag; Escape cancels), but the item is lifted out of the flow and an empty slot of its size travels
+ * through the row. The item itself never moves in the DOM, so on drop only the slot is removed before
+ * `onDrop` runs.
+ */
+class FlowSorter extends Sorter {
+  private get fd(): FlowDrag | null {
+    return this.drag as FlowDrag | null
+  }
+
+  /** The draggable items except `item`, in document order. */
+  private others(item: HTMLElement): HTMLElement[] {
+    const { itemSelector, idAttr } = this.cfg
+    return Array.from(this.root.querySelectorAll<HTMLElement>(itemSelector)).filter((it) => it !== item && it.hasAttribute(idAttr))
+  }
+
+  protected start() {
+    const p = this.press
+    if (!p) return
+    clearTimeout(p.timer)
+    this.press = null
+    const item = p.item
+    if (active || !item.isConnected || (p.touch && !p.target.isConnected)) {
+      if (!this.drag) this.unlisten()
+      return
+    }
+    const r = item.getBoundingClientRect()
+    const margin = getComputedStyle(item).margin
+
+    // The slot takes the item's place in the row, so nothing around it jumps when the item floats up.
+    const slot = document.createElement('div')
+    slot.className = 'sort-slot'
+    slot.setAttribute('aria-hidden', 'true')
+    slot.style.cssText = `width:${r.width}px;height:${r.height}px;margin:${margin}`
+    item.before(slot)
+    const i0 = this.others(item).filter((it) => slot.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_PRECEDING).length
+
+    const saved = item.getAttribute('style')
+    item.style.cssText += `;position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;margin:0;transition:none;transform:translate3d(0,0,0)`
+    // Fixed inside a transformed ancestor is relative to that ancestor: measure where it really landed.
+    const at = item.getBoundingClientRect()
+    item.classList.add('sort-lifted', 'sort-flow')
+    this.root.classList.add('sort-active')
+    document.body.classList.add('is-sorting')
+    window.getSelection()?.removeAllRanges()
+    if (p.touch) {
+      try {
+        navigator.vibrate?.(8)
+      } catch {
+        /* not allowed here */
+      }
+    } else {
+      try {
+        this.root.setPointerCapture(p.pointer)
+      } catch {
+        /* pointer already gone */
+      }
+    }
+    const id = item.getAttribute(this.cfg.idAttr) ?? ''
+    const d: FlowDrag = {
+      touch: p.touch,
+      pointer: p.pointer,
+      target: p.target,
+      item,
+      id,
+      slot,
+      r0: r,
+      offX: r.left - at.left,
+      offY: r.top - at.top,
+      grabX: p.x0 - r.left,
+      grabY: p.y0 - r.top,
+      x: p.x,
+      y: p.y,
+      y0: p.y,
+      i0,
+      index: i0,
+      scroller: scrollParent(this.root),
+      scrollArmed: false,
+      scrollAcc: 0,
+      last: performance.now(),
+      saved,
+      reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+      settling: false,
+      raf: 0,
+    }
+    this.drag = d
+    active = this
+    this.place(d)
+    d.raf = requestAnimationFrame(this.tick)
+    this.setDragging(id)
+  }
+
+  /** Put the item under the pointer, where it was grabbed. */
+  private place(d: FlowDrag) {
+    const tx = d.x - d.grabX - d.r0.left + d.offX
+    const ty = d.y - d.grabY - d.r0.top + d.offY
+    d.item.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${1 + LIFT_SCALE * 2})`
+  }
+
+  private tick = (now: number) => {
+    const d = this.fd
+    if (!d) return
+    if (!d.item.isConnected) {
+      this.finish(false)
+      return
+    }
+    const dt = clamp(now - d.last, 0, 64)
+    d.last = now
+    if (!d.settling) {
+      if (d.touch && !d.target.isConnected) this.drop(false) // its touchend can no longer reach us
+      else {
+        this.autoScroll(dt)
+        this.place(d)
+        this.chase(d)
+      }
+    }
+    d.raf = requestAnimationFrame(this.tick)
+  }
+
+  /**
+   * Move the slot past the pill nearest the pointer, once the pointer is past that pill's middle on the way
+   * there. (Judging by the middle keeps a wide pill from swapping back and forth as it slides out of the way.)
+   */
+  private chase(d: FlowDrag) {
+    const all = this.others(d.item)
+    const box = this.root.getBoundingClientRect()
+    if (!all.length || d.x < box.left - 24 || d.x > box.right + 24 || d.y < box.top - 24 || d.y > box.bottom + 24) return
+    let best: HTMLElement | null = null
+    let bestDist = Infinity
+    let rect: DOMRect | null = null
+    for (const it of all) {
+      const r = it.getBoundingClientRect()
+      const dx = Math.max(r.left - d.x, 0, d.x - r.right)
+      const dy = Math.max(r.top - d.y, 0, d.y - r.bottom)
+      // A row counts first: the empty space right of a row's last pill belongs to that row.
+      const dist = dy * 4 + dx
+      if (dist < bestDist) {
+        best = it
+        bestDist = dist
+        rect = r
+      }
+    }
+    if (!best || !rect) return
+    const forward = !!(d.slot.compareDocumentPosition(best) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const sameRow = d.y >= rect.top && d.y <= rect.bottom
+    const mid = rect.left + rect.width / 2
+    const past = sameRow ? (forward ? d.x > mid : d.x < mid) : forward ? d.y > rect.bottom : d.y < rect.top
+    if (!past) return
+    // Slide the others: remember where they are, move the slot, and play the difference.
+    const before = new Map(all.map((it) => [it, it.getBoundingClientRect()]))
+    if (forward) best.after(d.slot)
+    else best.before(d.slot)
+    d.index = all.filter((it) => d.slot.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_PRECEDING).length
+    if (d.reduced) return
+    for (const [it, r0] of before) {
+      const r1 = it.getBoundingClientRect()
+      const dx = r0.left - r1.left
+      const dy = r0.top - r1.top
+      if ((dx || dy) && typeof it.animate === 'function') {
+        it.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: GAP_MS, easing: EASE })
+      }
+    }
+  }
+
+  protected drop(commit: boolean) {
+    const d = this.fd
+    if (!d || d.settling) return
+    d.settling = true
+    if (!commit) {
+      d.item.before(d.slot) // (back where it was picked up)
+      d.index = d.i0
+    }
+    // Glide into the slot, then hand over to the re-render.
+    const to = d.slot.getBoundingClientRect()
+    const tx = to.left - d.r0.left + d.offX
+    const ty = to.top - d.r0.top + d.offY
+    const done = () => this.finish(commit && d.index !== d.i0)
+    if (d.reduced || typeof d.item.animate !== 'function') return done()
+    const a = d.item.animate([{ transform: d.item.style.transform }, { transform: `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(1)` }], {
+      duration: DROP_MS,
+      easing: 'ease-out',
+      fill: 'forwards',
+    })
+    a.onfinish = done
+    a.oncancel = done
+  }
+
+  /** Remove every trace of the drag, then report the move (if any). */
+  protected finish(commit: boolean) {
+    const d = this.fd
+    if (!d) return
+    cancelAnimationFrame(d.raf)
+    let info: DropInfo | null = null
+    if (commit) {
+      const next = this.others(d.item).find((it) => d.slot.compareDocumentPosition(it) & Node.DOCUMENT_POSITION_FOLLOWING)
+      info = { id: d.id, fromGroup: null, toGroup: null, beforeId: next?.getAttribute(this.cfg.idAttr) ?? null, index: d.index }
+    }
+    d.slot.remove()
+    const it = d.item
+    for (const a of it.getAnimations?.() ?? []) a.cancel()
+    it.classList.remove('sort-lifted', 'sort-flow')
+    if (d.saved === null) it.removeAttribute('style')
+    else it.setAttribute('style', d.saved)
+    this.root.classList.remove('sort-active')
+    document.body.classList.remove('is-sorting')
+    if (!d.touch) {
+      try {
+        if (this.root.hasPointerCapture(d.pointer)) this.root.releasePointerCapture(d.pointer)
+      } catch {
+        /* already released */
+      }
+    }
+    this.drag = null
+    if (active === this) active = null
+    this.unlisten()
+    this.setDragging(null)
+    if (info) this.opts.current.onDrop(info)
+  }
+}
+
+/**
+ * Keyboard reordering for a sortable item: Shift + arrow keys move it one place.
+ * Call it from the onKeyDown of something inside the item with the item's place in its list;
+ * `move(to)` gets the place it should land at (what a drop's `index` is). Focus follows the item to where
+ * it re-renders; `focus` names the focusable inside the item when it isn't the item itself.
+ * Returns true when the key was ours.
+ */
+export function sortKey(e: KeyboardEvent, index: number, count: number, move: (to: number) => void, opts: { idAttr?: string; focus?: string } = {}): boolean {
+  if (!e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false
+  const dir = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : 0
+  if (!dir) return false
+  e.preventDefault()
+  const to = index + dir
+  if (to < 0 || to >= count) return true
+  const idAttr = opts.idAttr ?? 'data-sort-id'
+  const item = (e.currentTarget as HTMLElement).closest<HTMLElement>(`[${idAttr}]`)
+  const parent = item?.parentElement
+  const id = item?.getAttribute(idAttr)
+  move(to)
+  if (!parent || id == null) return true
+  // Re-rendering may move the element in the DOM, which drops its focus.
+  const refocus = () => {
+    const now = Array.from(parent.querySelectorAll<HTMLElement>(`[${idAttr}]`)).find((n) => n.getAttribute(idAttr) === id)
+    const target = opts.focus ? now?.querySelector<HTMLElement>(opts.focus) : now
+    if (target && document.activeElement !== target) target.focus()
+  }
+  requestAnimationFrame(() => requestAnimationFrame(refocus))
+  return true
+}
+
 /**
  * Hold-and-drag reordering for the items inside `ref`'s element.
  * Mouse: press and move. Touch: hold, then drag. Escape cancels.
@@ -806,19 +1096,20 @@ export function useSortable(ref: { current: HTMLElement | null }, opts: Sortable
     groupSelector,
     handleSelector,
     longPressMs = 260,
+    flow = false,
     disabled = false,
   } = opts
 
   useEffect(() => {
     const el = ref.current
     if (!el || disabled) return
-    const s = new Sorter(el, { itemSelector, idAttr, groupSelector, handleSelector, longPressMs }, optsRef, setDraggingId)
+    const s = new (flow ? FlowSorter : Sorter)(el, { itemSelector, idAttr, groupSelector, handleSelector, longPressMs }, optsRef, setDraggingId)
     sorter.current = s
     return () => {
       s.destroy()
       if (sorter.current === s) sorter.current = null
     }
-  }, [disabled, itemSelector, idAttr, groupSelector, handleSelector, longPressMs, attach])
+  }, [disabled, flow, itemSelector, idAttr, groupSelector, handleSelector, longPressMs, attach])
 
   // Re-attach if the container element itself is swapped or appears later.
   useEffect(() => {

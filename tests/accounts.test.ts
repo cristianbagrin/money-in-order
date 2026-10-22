@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { balances, investmentsInPlan, netWorth, totalMoney, wealthSeries } from '../src/lib/accounts'
+import { balances, cashAccounts, investAccounts, investmentsInPlan, netWorth, totalMoney, wealthSeries } from '../src/lib/accounts'
 import { expectedTotal, monthView } from '../src/lib/budget'
+import { merge } from '../src/lib/merge'
+import { currenciesInUse } from '../src/lib/rates'
 import * as S from '../src/lib/store'
 import { emptyDB, RTA, type Category } from '../src/lib/types'
 
@@ -217,5 +219,96 @@ describe('income sources', () => {
     expect(S.sources().map((x) => x.name)).toEqual(['Job', 'Client'])
     S.deleteSource(s.id)
     expect(S.sources().map((x) => x.name)).toEqual(['Client'])
+  })
+})
+
+describe('ordering', () => {
+  it('moves income sources', () => {
+    const a = S.addSource('Salary')
+    const b = S.addSource('Client')
+    const c = S.addSource('Gifts')
+    S.placeSource(c.id, 0)
+    expect(S.sources().map((x) => x.name)).toEqual(['Gifts', 'Salary', 'Client'])
+    S.placeSource(a.id, 99)
+    expect(S.sources().map((x) => x.id)).toEqual([c.id, b.id, a.id])
+  })
+
+  it('moves accounts through the order field', () => {
+    const a = S.addAccount('Cash', 'TWD')
+    const b = S.addAccount('Bank', 'TWD')
+    const c = S.addAccount('Wallet', 'TWD')
+    S.placeAccount(c.id, 0)
+    expect(cashAccounts(S.getIndex()).map((x) => x.name)).toEqual(['Wallet', 'Cash', 'Bank'])
+    S.placeAccount(a.id, 2)
+    expect(cashAccounts(S.getIndex()).map((x) => x.id)).toEqual([c.id, b.id, a.id])
+  })
+
+  it('moves an account within its kind, leaving the other kind where it is', () => {
+    const cash = S.addAccount('Cash', 'TWD')
+    const stocks = S.addAccount('Stocks', 'EUR', { invest: true })
+    const bank = S.addAccount('Bank', 'TWD')
+    const fund = S.addAccount('Fund', 'EUR', { invest: true })
+    S.placeAccountOfKind(bank.id, 0)
+    expect(cashAccounts(S.getIndex()).map((x) => x.id)).toEqual([bank.id, cash.id])
+    expect(investAccounts(S.getIndex()).map((x) => x.id)).toEqual([stocks.id, fund.id])
+    S.placeAccountOfKind(fund.id, 0)
+    expect(investAccounts(S.getIndex()).map((x) => x.id)).toEqual([fund.id, stocks.id])
+    expect(cashAccounts(S.getIndex()).map((x) => x.id)).toEqual([bank.id, cash.id])
+    // a move that changes nothing writes nothing
+    const before = S.getDB().accounts[cash.id].u
+    S.placeAccountOfKind(fund.id, 0)
+    expect(S.getDB().accounts[cash.id].u).toBe(before)
+  })
+
+  it('moves chosen currencies, the base staying first', () => {
+    S.updateSettings({ extraCurrencies: ['EUR', 'PLN', 'USD'] })
+    S.placeCurrency('USD', 0)
+    expect(S.settings().extraCurrencies).toEqual(['USD', 'EUR', 'PLN'])
+    S.placeCurrency('USD', 5)
+    expect(S.settings().extraCurrencies).toEqual(['EUR', 'PLN', 'USD'])
+    S.placeCurrency('JPY', 0) // not chosen: nothing happens
+    expect(S.settings().extraCurrencies).toEqual(['EUR', 'PLN', 'USD'])
+    // the order is the one the entry screens offer
+    expect(currenciesInUse()).toEqual(['TWD', 'EUR', 'PLN', 'USD'])
+  })
+
+  it('undoes a move', () => {
+    const a = S.addAccount('Cash', 'TWD')
+    S.addAccount('Bank', 'TWD')
+    S.clearUndo()
+    S.undoable('Moved account', () => S.placeAccount(a.id, 1))
+    expect(cashAccounts(S.getIndex()).map((x) => x.name)).toEqual(['Bank', 'Cash'])
+    S.undo()
+    expect(cashAccounts(S.getIndex()).map((x) => x.name)).toEqual(['Cash', 'Bank'])
+  })
+
+  it('keeps an order that two devices set apart', () => {
+    const a = S.addAccount('Cash', 'TWD')
+    const b = S.addAccount('Bank', 'TWD')
+    const c = S.addAccount('Wallet', 'TWD')
+    const shared = S.getDB()
+    S.placeAccount(c.id, 0)
+    S.saveAccount({ ...S.getDB().accounts[a.id], name: 'Petty cash' })
+    const one = S.getDB()
+    S.replaceDB(shared)
+    S.placeAccountOfKind(b.id, 0)
+    const two = S.getDB()
+    const merged = merge(one, two)
+    expect(merge(two, one)).toEqual(merged)
+    // the rename survives next to somebody's reorder
+    expect(merged.accounts[a.id].name).toBe('Petty cash')
+  })
+})
+
+describe('last typed balance', () => {
+  it('says when and what, even once transactions moved the balance on', () => {
+    const a = S.addAccount('Bank', 'TWD')
+    expect(bal('Bank').typedBal).toBeNull()
+    S.recordCount({ date: '2026-10-01', bal: { [a.id]: 500000 }, rates: S.settings().rates, diffTo: RTA })
+    S.setTrackAccounts(true)
+    S.addTxn({ date: '2026-10-03', cat: cat('Living').id, amt: -20000, cur: 'TWD', acct: a.id })
+    expect(bal('Bank').bal).toBe(480000)
+    expect(bal('Bank').asOf).toBe('2026-10-01')
+    expect(bal('Bank').typedBal).toBe(500000)
   })
 })

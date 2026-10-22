@@ -54,6 +54,11 @@
   font-weight: 450;
   color: var(--ink-3);
 }
+.acc-name .acc-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .acc-amt {
   display: grid;
   align-content: center;

@@ -3,7 +3,7 @@ import { balances, investmentsInPlan, netWorth, totalMoney, type Balance } from 
 import { dayOfMonth, monthName, monthOf } from '../lib/dates'
 import { convert, cur, evalAmount, fmt, groupTyped } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
-import { addAccount, addMove, deleteAccount, previewCount, recordCount, saveAccount, setInvestment, takeOutOfPlan, undoable } from '../lib/store'
+import { addAccount, addMove, deleteAccount, placeAccountOfKind, previewCount, recordCount, saveAccount, setInvestment, takeOutOfPlan, undoable } from '../lib/store'
 import { RTA, type Account, type Day, type ID } from '../lib/types'
 import { NO_AUTOFILL } from '../ui/account'
 import { useIndex } from '../ui/hooks'
@@ -11,6 +11,7 @@ import { AnyCurrency, CurrencyPill } from '../ui/currency'
 import { AmountField, IconPlus, toast } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
+import { sortKey, useSortable } from '../ui/sortable'
 import { useSwipeDelete } from '../ui/swipe'
 import '../ui/accounts.css'
 
@@ -41,6 +42,8 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
   const [diffTo, setDiffTo] = useState<ID>(RTA)
   const saveRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const cashRef = useRef<HTMLDivElement>(null)
+  const investRef = useRef<HTMLDivElement>(null)
 
   const all = balances(ix)
   const first = all[0]?.acct.id
@@ -72,6 +75,16 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
   const noRate = [...new Set(accounts.filter((a) => typed(a.id) && !hasRate(a.cur)).map((a) => a.cur))]
   const any = accounts.some((a) => typed(a.id))
   const ready = any && !accounts.some(invalid) && !noRate.length
+  // Hold and drag a row to reorder, within cash or within investments. Not while something is being typed.
+  const sortable = {
+    disabled: any || !!form || editing !== null,
+    onDrop: (info: { id: string; index: number }) => {
+      undoable('Moved account', () => placeAccountOfKind(info.id, info.index))
+      play('drop')
+    },
+  }
+  useSortable(cashRef, sortable)
+  useSortable(investRef, sortable)
   const r = any ? previewCount({ date: props.today, bal, rates: ix.settings.rates }) : null
 
   // Enter in a balance goes on to the next account's, and after the last one to Save.
@@ -100,8 +113,14 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
     else toast(`Corrected by ${fmt(res.diff + res.fx, base, { sign: true })}`, { undo: true })
   }
 
-  const row = (b: Balance) => (
-    <div key={b.acct.id}>
+  // Shift + arrows on a name or balance moves the row, for the keyboard.
+  const keys = (b: Balance, list: Balance[]) => (e: KeyboardEvent) => {
+    const t = (e.target as HTMLElement).closest('.acc-name, .acc-amt')
+    if (!t || sortable.disabled) return
+    sortKey(e, list.indexOf(b), list.length, (to) => sortable.onDrop({ id: b.acct.id, index: to }), { focus: t.matches('.acc-amt') ? '.acc-amt' : '.acc-name' })
+  }
+  const row = (b: Balance, list: Balance[]) => (
+    <div key={b.acct.id} data-sort-id={b.acct.id} onKeyDown={keys(b, list)}>
       <AccountRow
         b={b}
         base={base}
@@ -132,8 +151,8 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
     <Sheet open={props.open} onClose={props.onClose} title="Accounts">
       <div ref={listRef}>
         {cash.length > 0 && (
-          <div class="acc-list">
-            {cash.map(row)}
+          <div class="acc-list" ref={cashRef}>
+            {cash.map((b) => row(b, cash))}
             <div class="acc-total">
               <span>Total money</span>
               <b class="num marked">{fmt(totalMoney(ix), base)}</b>
@@ -141,9 +160,9 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
           </div>
         )}
         {invest.length > 0 && (
-          <div class="acc-list">
+          <div class="acc-list" ref={investRef}>
             <h3 class="acc-head">Investments</h3>
-            {invest.map(row)}
+            {invest.map((b) => row(b, invest))}
             <div class="acc-total">
               <span>Net worth</span>
               <b class="num marked">{fmt(netWorth(ix), base)}</b>
@@ -248,8 +267,8 @@ function AccountRow(props: {
   const a = b.acct
   const remove = () => removeAccount(a)
   const sw = useSwipeDelete<HTMLDivElement, HTMLDivElement>(remove)
-  // A tracked balance follows what you log; the others are as of the day they were typed in.
-  const sub = b.tracked ? '' : b.asOf ? `${a.invest ? 'updated' : 'counted'} ${dayText(b.asOf, props.today)}` : a.invest ? 'no value yet' : 'not counted'
+  // When the balance was last typed in, and what it was then (a tracked balance has moved on since).
+  const sub = b.asOf && b.typedBal !== null ? `Updated ${dayText(b.asOf, props.today)} · ${fmt(b.typedBal, a.cur)}` : a.invest ? 'No value yet' : 'Not counted'
   return (
     <div class="acc-wrap" ref={sw.wrap} data-acct={a.id}>
       <div class="swipe-del" aria-hidden="true">
