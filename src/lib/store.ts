@@ -399,6 +399,12 @@ export function deleteTxn(id: ID) {
   if (t) commit({ txns: [tomb(t)] })
 }
 
+/** Delete several transactions in one commit (so inside undoable they undo together). */
+export function deleteTxns(ids: ID[]) {
+  const txns = ids.map((id) => db.txns[id]).filter((t) => t && !t.d).map(tomb)
+  if (txns.length) commit({ txns })
+}
+
 export function restoreTxn(t: Txn) {
   const copy = { ...t }
   delete copy.d
