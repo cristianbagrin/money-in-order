@@ -1391,6 +1391,12 @@ textarea:focus {
   font-weight: 650;
   color: var(--ink-2);
 }
+.txn-wrap {
+  position: relative;
+  margin: 0 -10px;
+  width: calc(100% + 20px);
+  border-radius: 12px;
+}
 .txn {
   display: flex;
   align-items: center;
@@ -1398,13 +1404,79 @@ textarea:focus {
   width: 100%;
   min-height: 44px;
   padding: 4px 10px;
-  margin: 0 -10px;
-  width: calc(100% + 20px);
   border: 0;
   border-radius: 12px;
   background: none;
   text-align: left;
   transition: background 0.12s;
+  /* vertical scrolling stays the browser's; a horizontal drag is the row's swipe */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+/* swipe to delete: the row is opaque while it slides, over a red area it uncovers */
+.txn-wrap.swiping {
+  overflow: hidden;
+}
+.txn-wrap.swiping .txn:not(.sel) {
+  background: var(--bg);
+}
+.txn-wrap.swiping .txn {
+  will-change: transform;
+}
+.txn-del {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 18px;
+  border-radius: 12px;
+  background: var(--red);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+}
+.txn-wrap.swiping .txn-del {
+  display: flex;
+}
+.txn-x {
+  display: none;
+}
+@media (hover: hover) {
+  .txn-x {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    margin-top: -14px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--ink-3);
+    font-size: 20px;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    cursor: pointer;
+  }
+  .txn-wrap:hover .txn-x,
+  .txn-wrap.sel .txn-x,
+  .txn-x:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .txn-wrap:hover .txn,
+  .txn-wrap.sel .txn {
+    padding-right: 44px;
+  }
+  .txn-x:hover {
+    background: var(--red-wash);
+    color: var(--red);
+  }
 }
 @media (hover: hover) {
   .txn:hover {

@@ -22,27 +22,161 @@ const KIND_LABEL: Record<NonNullable<Txn['kind']>, string> = {
   fx: 'Exchange rates',
 }
 
+interface Swipe {
+  id: number
+  x0: number
+  y0: number
+  /** where the row already was when grabbed (non-zero when it is caught mid spring-back) */
+  from: number
+  drag: boolean
+  pts: { t: number; x: number }[]
+}
+
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+
 /**
  * One History row. It takes everything as props (no store subscription) and is memoized, so a long list
- * re-renders only the rows that changed.
+ * re-renders only the rows that changed. Hover shows a × (mouse); a left swipe deletes (touch).
  */
-export const TxnRow = memo(function TxnRow(props: { t: Txn; base: string; catName: string; onOpen: (t: Txn) => void; selected?: boolean; plain?: boolean }) {
+export const TxnRow = memo(function TxnRow(props: { t: Txn; base: string; catName: string; onOpen: (t: Txn, e: MouseEvent) => void; onDelete: (t: Txn) => void; selected?: boolean; plain?: boolean }) {
   const { t, base, catName } = props
   const title = t.note || (t.kind ? KIND_LABEL[t.kind] : catName)
   const positive = t.base > 0
+  const wrap = useRef<HTMLDivElement>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const swipe = useRef<Swipe | null>(null)
+  const swallow = useRef(false)
+  const gone = useRef(false)
+  const timer = useRef(0)
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  // The swipe moves the row with transform only and never re-renders it; a red area behind shows what it will do.
+  function down(e: PointerEvent) {
+    const el = btn.current
+    if (!el || e.pointerType !== 'touch' || !e.isPrimary || gone.current) return
+    clearTimeout(timer.current)
+    // Catch the row where it is, even mid spring-back, so it can be grabbed again.
+    const from = new DOMMatrixReadOnly(getComputedStyle(el).transform).m41
+    el.style.transition = 'none'
+    el.style.transform = `translateX(${from}px)`
+    swipe.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, from, drag: false, pts: [{ t: e.timeStamp, x: e.clientX }] }
+    if (from) start(e.pointerId)
+  }
+
+  function start(id: number) {
+    swipe.current!.drag = true
+    btn.current!.setPointerCapture(id)
+    wrap.current!.classList.add('swiping')
+  }
+
+  function move(e: PointerEvent) {
+    const s = swipe.current
+    const el = btn.current
+    if (!s || !el || e.pointerId !== s.id) return
+    const dx = e.clientX - s.x0
+    if (!s.drag) {
+      const dy = e.clientY - s.y0
+      // Vertical first (or to the right): it is a scroll, not ours.
+      if (Math.abs(dy) >= 10 && Math.abs(dy) > Math.abs(dx)) swipe.current = null
+      else if (Math.abs(dx) >= 10) dx < 0 ? start(e.pointerId) : (swipe.current = null)
+      if (!swipe.current?.drag) return
+    }
+    // 1:1 from where it was grabbed.
+    el.style.transform = `translateX(${Math.min(0, Math.max(-el.offsetWidth, s.from + dx))}px)`
+    s.pts.push({ t: e.timeStamp, x: e.clientX })
+    while (s.pts.length > 2 && e.timeStamp - s.pts[0].t > 100) s.pts.shift()
+  }
+
+  function up(e: PointerEvent) {
+    const s = swipe.current
+    const el = btn.current
+    if (!s || !el || e.pointerId !== s.id) return
+    swipe.current = null
+    if (!s.drag) return
+    swallow.current = true
+    setTimeout(() => (swallow.current = false), 60)
+    const a = s.pts[0]
+    const b = s.pts[s.pts.length - 1]
+    // px/ms over the last ~100ms; a finger that stopped before lifting is not a flick.
+    const v = e.type === 'pointerup' && b.t > a.t && e.timeStamp - b.t < 80 ? (b.x - a.x) / (b.t - a.t) : 0
+    const w = el.offsetWidth
+    const x = new DOMMatrixReadOnly(getComputedStyle(el).transform).m41
+    settle(e.type === 'pointerup' && v < 0.5 && (x <= -0.45 * w || (v <= -0.5 && x < -8)), v, x, w)
+  }
+
+  function settle(del: boolean, v: number, x: number, w: number) {
+    const el = btn.current!
+    const box = wrap.current!
+    const calm = reduced()
+    if (!del) {
+      const done = () => {
+        box.classList.remove('swiping')
+        el.style.transition = el.style.transform = ''
+      }
+      if (calm) return done()
+      el.style.transition = 'transform 260ms var(--ease)'
+      el.style.transform = 'translateX(0)'
+      timer.current = window.setTimeout(done, 280)
+      return
+    }
+    gone.current = true
+    const finish = () => props.onDelete(t)
+    if (calm) {
+      // No slide: the row just fades.
+      el.style.transition = 'opacity 150ms linear'
+      el.style.opacity = '0'
+      timer.current = window.setTimeout(finish, 160)
+      return
+    }
+    // Carry on at the finger's speed (linear, so the speed doesn't change), then close the gap.
+    const ms = Math.round(Math.min(260, Math.max(100, (w + x) / Math.max(-v, 0.9))))
+    el.style.transition = `transform ${ms}ms linear`
+    el.style.transform = `translateX(${-w}px)`
+    timer.current = window.setTimeout(() => {
+      box.style.height = `${box.offsetHeight}px`
+      box.getBoundingClientRect()
+      box.style.transition = 'height 180ms var(--ease)'
+      box.style.height = '0px'
+      timer.current = window.setTimeout(finish, 190)
+    }, ms)
+  }
+
+  function click(e: MouseEvent) {
+    if (swallow.current) return e.preventDefault()
+    props.onOpen(t, e)
+  }
+
   return (
-    <button class={`txn${props.selected ? ' sel' : ''}`} onClick={() => props.onOpen(t)} data-txn={t.id}>
-      <div class="txn-main">
-        <div class="txn-title">{title}</div>
-        {title !== catName && !props.plain && <div class="txn-sub">{catName}</div>}
+    <div class={`txn-wrap${props.selected ? ' sel' : ''}`} ref={wrap}>
+      <div class="txn-del" aria-hidden="true">
+        Delete
       </div>
-      <div class="txn-amt">
-        <span class={`num${positive ? ' pos' : ''}`}>{fmt(t.base, base, { sign: positive })}</span>
-        {t.cur !== base && <small class="num">{fmt(t.amt, t.cur)}</small>}
-      </div>
-    </button>
+      <button
+        ref={btn}
+        class={`txn${props.selected ? ' sel' : ''}`}
+        onClick={click}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+        data-txn={t.id}
+      >
+        <div class="txn-main">
+          <div class="txn-title">{title}</div>
+          {title !== catName && !props.plain && <div class="txn-sub">{catName}</div>}
+        </div>
+        <div class="txn-amt">
+          <span class={`num${positive ? ' pos' : ''}`}>{fmt(t.base, base, { sign: positive })}</span>
+          {t.cur !== base && <small class="num">{fmt(t.amt, t.cur)}</small>}
+        </div>
+      </button>
+      <button class="txn-x" tabIndex={-1} aria-label="Delete" onClick={() => props.onDelete(t)}>
+        ×
+      </button>
+    </div>
   )
 })
+
 
 /** Edit a transaction. Every change applies right away (and can be undone). */
 export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () => void }) {

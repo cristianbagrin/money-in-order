@@ -2,7 +2,7 @@ import { memo } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { dateLabel } from '../lib/dates'
 import { fmt } from '../lib/money'
-import { deleteTxn, undoable } from '../lib/store'
+import { deleteTxns, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Txn } from '../lib/types'
 import { useIndex } from '../ui/hooks'
 import { IconSearch, toast } from '../ui/kit'
@@ -10,6 +10,7 @@ import { play } from '../ui/sound'
 import { TxnRow } from './TxnSheet'
 
 const PAGE = 150
+const NONE: ReadonlySet<ID> = new Set()
 
 interface Day {
   date: string
@@ -18,7 +19,7 @@ interface Day {
 }
 
 /** One day of rows. Memoized, and left unrendered while it is off screen, so thousands of rows stay smooth. */
-const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: string; catById: Map<ID, Category>; plain: boolean; selId: string | null; onOpen: (t: Txn) => void }) {
+const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: string; catById: Map<ID, Category>; plain: boolean; sel: ReadonlySet<ID> | null; onOpen: (t: Txn, e: MouseEvent) => void; onDelete: (t: Txn) => void }) {
   const { day: d, base, catById } = props
   return (
     <div class="daygrp" style={{ '--n': d.items.length }}>
@@ -33,8 +34,9 @@ const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: 
           base={base}
           catName={t.cat === RTA ? 'Income' : catById.get(t.cat)?.name ?? 'Unknown'}
           plain={props.plain}
-          selected={props.selId === t.id}
+          selected={!!props.sel?.has(t.id)}
           onOpen={props.onOpen}
+          onDelete={props.onDelete}
         />
       ))}
     </div>
@@ -49,16 +51,61 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   const [limit, setLimit] = useState(PAGE)
   // The keyboard selection is a transaction, not a position, so it can't drift onto another row when the list changes.
   const [selId, setSelId] = useState<ID | null>(null)
+  // Cmd/Ctrl+click and Shift+click/arrows grow it into a set (always containing selId, the one the arrows move from).
+  const [selIds, setSelIds] = useState<ReadonlySet<ID>>(NONE)
   // The key handler reads the latest list and selection from here, so keys pressed faster than a render still act on the right row.
-  const cur = useRef<{ shown: Txn[]; selId: ID | null }>({ shown: [], selId: null })
-  const select = useCallback((id: ID | null) => {
+  // anchor is where a Shift range starts.
+  const cur = useRef<{ shown: Txn[]; selId: ID | null; ids: ReadonlySet<ID>; anchor: ID | null }>({ shown: [], selId: null, ids: NONE, anchor: null })
+  const pick = useCallback((id: ID | null, ids: ReadonlySet<ID>) => {
     cur.current.selId = id
+    cur.current.ids = ids
     setSelId(id)
+    setSelIds(ids)
   }, [])
+  const select = useCallback((id: ID | null) => {
+    cur.current.anchor = id
+    pick(id, id ? new Set([id]) : NONE)
+  }, [])
+  /** Select everything from the anchor to id. */
+  const range = useCallback((id: ID) => {
+    const { shown } = cur.current
+    const a = shown.findIndex((t) => t.id === (cur.current.anchor ?? id))
+    const b = shown.findIndex((t) => t.id === id)
+    if (a < 0 || b < 0) return select(id)
+    pick(id, new Set(shown.slice(Math.min(a, b), Math.max(a, b) + 1).map((t) => t.id)))
+  }, [])
+  /** One undoable step for any number of transactions. */
+  const remove = useCallback((ts: Txn[]) => {
+    if (!ts.length) return
+    const gone = new Set(ts.map((t) => t.id))
+    const left = [...cur.current.ids].filter((id) => !gone.has(id))
+    if (left.length !== cur.current.ids.size) {
+      const sel = cur.current.selId
+      pick(sel && !gone.has(sel) ? sel : left[left.length - 1] ?? null, left.length ? new Set(left) : NONE)
+    }
+    undoable('Deleted', () => deleteTxns(ts.map((t) => t.id)))
+    play('delete')
+    toast(ts.length > 1 ? `${ts.length} deleted` : 'Deleted', { undo: true })
+  }, [])
+  const removeOne = useCallback((t: Txn) => remove([t]), [])
   const searchRef = useRef<HTMLInputElement>(null)
   const onEdit = useRef(props.onEdit)
   onEdit.current = props.onEdit
-  const open = useCallback((t: Txn) => onEdit.current(t), [])
+  const open = useCallback(
+    (t: Txn, e: MouseEvent) => {
+      const { ids } = cur.current
+      if (e.metaKey || e.ctrlKey) {
+        const next = new Set(ids)
+        if (!next.delete(t.id)) next.add(t.id)
+        cur.current.anchor = t.id
+        pick(next.has(t.id) ? t.id : [...next].pop() ?? null, next)
+      } else if (e.shiftKey) {
+        if (!cur.current.anchor) cur.current.anchor = cur.current.selId ?? t.id
+        range(t.id)
+      } else onEdit.current(t)
+    },
+    [],
+  )
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -90,16 +137,16 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   }, [filter])
 
   const shown = useMemo(() => rows.slice(0, limit), [rows, limit])
-  const selIdx = selId ? shown.findIndex((t) => t.id === selId) : -1
   cur.current.shown = shown
   cur.current.selId = selId
 
-  // Keyboard: / searches, ↑ ↓ walk the list, Enter opens, Delete deletes (undoable). The list only takes these
+  // Keyboard: / searches, ↑ ↓ walk the list (Shift extends), Enter opens, Delete deletes the selection (undoable), Esc clears it. The list only takes these
   // keys when nothing else owns them: focus on the page itself or on a row, never on another button or field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('dialog[open]') || e.metaKey || e.ctrlKey) return
-      const { shown, selId } = cur.current
+      if (e.key === 'Escape' && cur.current.ids.size) select(null)
+      const { shown, selId, ids } = cur.current
       const selIdx = selId ? shown.findIndex((t) => t.id === selId) : -1
       const el = document.activeElement as HTMLElement | null
       const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
@@ -122,7 +169,10 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         e.preventDefault()
         const from = row ? focusedIdx : selIdx
         const next = Math.max(0, Math.min(shown.length - 1, from + (e.key === 'ArrowDown' ? 1 : -1)))
-        select(shown[next].id)
+        if (e.shiftKey) {
+          if (!cur.current.anchor || !ids.size) cur.current.anchor = shown[Math.max(from, 0)].id
+          range(shown[next].id)
+        } else select(shown[next].id)
         if (inSearch) searchRef.current?.blur()
         const node = document.querySelector<HTMLElement>(`[data-txn="${shown[next].id}"]`)
         // Walking with focus on a row keeps the focus on the row you land on.
@@ -135,15 +185,14 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         e.preventDefault()
         onEdit.current(t)
       } else if ((e.key === 'Backspace' || e.key === 'Delete') && !typing) {
-        const t = shown[row ? focusedIdx : selIdx]
-        if (!t) return
+        const hit = ids.size > 1 ? shown.filter((t) => ids.has(t.id)) : [shown[row ? focusedIdx : selIdx]].filter(Boolean)
+        if (!hit.length) return
         e.preventDefault()
-        const i = shown.indexOf(t)
+        const i = shown.indexOf(hit[hit.length - 1])
+        const j = shown.indexOf(hit[0])
         // The selection moves to the neighbour, so Delete can be pressed again.
-        select((shown[i + 1] ?? shown[i - 1])?.id ?? null)
-        undoable('Deleted', () => deleteTxn(t.id))
-        play('delete')
-        toast('Deleted', { undo: true })
+        select((shown.slice(i + 1).find((t) => !hit.includes(t)) ?? shown[j - 1])?.id ?? null)
+        remove(hit)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -172,7 +221,20 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   // Names only matter to the rows, so the map is reused until a name actually changes.
   const nameKey = ix.cats.map((c) => c.id + c.name).join('|')
   const catById = useMemo(() => ix.catById, [nameKey])
-  const selDate = selIdx >= 0 ? shown[selIdx].date : null
+  // Each day gets only its own selected rows (the same Set while they don't change), so other days keep skipping render.
+  const selCache = useRef(new Map<string, ReadonlySet<ID>>())
+  const daySel = useMemo(() => {
+    const prev = selCache.current
+    const next = new Map<string, ReadonlySet<ID>>()
+    if (selIds.size)
+      for (const d of days) {
+        const s = new Set(d.items.filter((t) => selIds.has(t.id)).map((t) => t.id))
+        const p = prev.get(d.date)
+        if (s.size) next.set(d.date, p && p.size === s.size && [...s].every((id) => p.has(id)) ? p : s)
+      }
+    selCache.current = next
+    return next
+  }, [days, selIds])
   const used = ix.cats.filter((c) => !c.archived)
   const filtered = !!q || filter !== 'all'
   const total = useMemo(() => (filtered ? rows.reduce((s, t) => s + t.base, 0) : 0), [rows, filtered])
@@ -203,7 +265,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         </p>
       )}
       {days.map((d) => (
-        <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all'} selId={d.date === selDate ? selId : null} onOpen={open} />
+        <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all'} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} />
       ))}
       {!rows.length && <p class="empty">Nothing matches.</p>}
       {rows.length > limit && (
