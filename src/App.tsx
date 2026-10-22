@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { totalMoney } from './lib/accounts'
 import { monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
 import { fmt, shownSign } from './lib/money'
@@ -6,6 +7,7 @@ import { redo } from './lib/store'
 import type { ID, Txn } from './lib/types'
 import { useIndex, useSync, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
+import { AccountsSheet } from './views/AccountsSheet'
 import { CategorySheet } from './views/CategorySheet'
 import { CountSheet } from './views/CountSheet'
 import { History } from './views/History'
@@ -46,6 +48,7 @@ export function App() {
   const [catMonth, setCatMonth] = useState(monthOf(today))
   const [txn, setTxn] = useState<Txn | null>(null)
   const [counting, setCounting] = useState(false)
+  const [accounts, setAccounts] = useState(false)
   const [historyFilter, setHistoryFilter] = useState('all')
 
   useEffect(() => {
@@ -165,13 +168,13 @@ export function App() {
       />
     )
   else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} />
-  else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onBack={() => go(lastMain.current)} />
+  else if (route === 'settings') page = <Settings onCount={() => setCounting(true)} onAccounts={() => setAccounts(true)} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 
   return (
     <div class="app">
       <div class="statusbar" />
-      <Rail route={route} go={go} today={today} />
+      <Rail route={route} go={go} today={today} onAccounts={() => setAccounts(true)} />
       <main class={`main${route === 'today' ? ' main-today' : ''}`} key={route}>
         {page}
       </main>
@@ -188,13 +191,14 @@ export function App() {
         }}
       />
       <TxnSheet txn={txn} today={today} onClose={() => setTxn(null)} />
+      <AccountsSheet open={accounts} today={today} onClose={() => setAccounts(false)} onCount={() => setCounting(true)} />
       <CountSheet
         open={counting}
         today={today}
         onClose={() => setCounting(false)}
         onAccounts={() => {
           setCounting(false)
-          go('settings')
+          setAccounts(true)
         }}
       />
       <Toasts />
@@ -206,7 +210,7 @@ function useBadges(today: string) {
   const ix = useIndex()
   const m = monthOf(today)
   const v = useMemo(() => monthView(ix, m, m), [ix, m])
-  return { rta: shownSign(v.readyToAssign, ix.settings.base), rtaMinor: v.readyToAssign, overspent: v.overspent.length, base: ix.settings.base }
+  return { rta: shownSign(v.readyToAssign, ix.settings.base), overspent: v.overspent.length }
 }
 
 function Dot(props: { rta: number; overspent: number }) {
@@ -229,16 +233,15 @@ function TabBar(props: { route: Route; go: (r: Route) => void; today: string }) 
   )
 }
 
-function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
+function Rail(props: { route: Route; go: (r: Route) => void; today: string; onAccounts: () => void }) {
+  const ix = useIndex()
   const b = useBadges(props.today)
+  const total = useMemo(() => totalMoney(ix), [ix])
+  const base = ix.settings.base
   const stale = useSync().stale
   return (
     <aside class="rail">
       <div class="brand">
-        <svg class="brand-mark" viewBox="70 90 372 332" aria-hidden="true">
-          <path d="M84 300 L428 276 L428 380 L84 404 Z" fill="#ffd84d" />
-          <ellipse cx="256" cy="256" rx="104" ry="150" transform="rotate(8 256 256)" fill="none" stroke="currentColor" stroke-width="58" />
-        </svg>
         <span>
           Money
           <br />
@@ -254,10 +257,10 @@ function Rail(props: { route: Route; go: (r: Route) => void; today: string }) {
           </button>
         ))}
       </nav>
-      <button class="rail-foot" onClick={() => props.go('plan')}>
-        <small>Ready to assign</small>
-        <span class={`num ${b.rta < 0 ? 'neg' : b.rta > 0 ? 'pos' : 'zero'}`} style={{ fontSize: '17px', fontWeight: 650 }}>
-          {fmt(b.rtaMinor, b.base)}
+      <button class="rail-foot" onClick={props.onAccounts}>
+        <small>Total money</small>
+        <span class={`num ${shownSign(total, base) < 0 ? 'neg' : ''}`} style={{ fontSize: '17px', fontWeight: 650 }}>
+          {fmt(total, base)}
         </span>
       </button>
     </aside>

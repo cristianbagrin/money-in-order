@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { transactionsCSV } from '../lib/export'
 import { refreshRates } from '../lib/rates'
-import { addAccount, changeBase, deleteAccount, restoreBackup, saveAccount, settings, unarchiveCategory, undoable, updateSettings } from '../lib/store'
+import { accountsInOrder } from '../lib/accounts'
+import { addSource, changeBase, deleteSource, renameSource, restoreBackup, setTrackAccounts, settings, sources, unarchiveCategory, undoable, updateSettings } from '../lib/store'
 import { disableSync } from '../lib/sync'
-import { AccountForm } from '../ui/account'
-import { live, type Account, type DB } from '../lib/types'
+import { AccountForm, NO_AUTOFILL } from '../ui/account'
+import type { DB, Source } from '../lib/types'
 import { CurrencyPicker } from '../ui/currency'
 import { useIndex, useSync } from '../ui/hooks'
 import { IconPlus, Section, toast } from '../ui/kit'
 import { play, setSoundOn, soundOn } from '../ui/sound'
+import '../ui/accounts.css'
 
-export function Settings(props: { onCount: () => void; onBack: () => void }) {
+export function Settings(props: { onCount: () => void; onAccounts: () => void; onBack: () => void }) {
   const ix = useIndex()
   const s = ix.settings
   const [sound, setSound] = useState(soundOn())
@@ -27,7 +29,7 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
       <SyncBox />
 
       <Section title="Accounts">
-        <Accounts onCount={props.onCount} />
+        <Accounts onCount={props.onCount} onAccounts={props.onAccounts} />
       </Section>
 
       <Section title="Currencies">
@@ -56,7 +58,11 @@ export function Settings(props: { onCount: () => void; onBack: () => void }) {
         />
       </Section>
 
-      <Section title="Save each month">
+      <Section title="Income">
+        <Sources />
+      </Section>
+
+      <Section title="Save of each month’s income">
         <div class="pills">
           {[0.1, 0.15, 0.2, 0.25, 0.3, 0.4].map((v) => (
             <button
@@ -151,80 +157,136 @@ async function share(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-function Accounts(props: { onCount: () => void }) {
+/** The accounts; tapping one opens the same sheet the rail's Total money does, where they are edited. */
+function Accounts(props: { onCount: () => void; onAccounts: () => void }) {
   const ix = useIndex()
-  const s = ix.settings
-  const accounts = live(ix.db.accounts).sort((a, b) => a.order - b.order)
+  const accounts = accountsInOrder(ix)
+  return (
+    <div class="pills">
+      {accounts.map((a) => (
+        <button key={a.id} class="pill" onClick={props.onAccounts}>
+          {a.name} <small>{a.invest ? 'investment' : a.cur}</small>
+        </button>
+      ))}
+      <button class="pill ghost" aria-label="Add an account" onClick={props.onAccounts}>
+        <IconPlus />
+      </button>
+      <button class="pill" onClick={props.onCount}>
+        Update balances
+      </button>
+      <button class="pill toggle" aria-pressed={!!ix.settings.trackAccounts} onClick={() => setTrackAccounts(!ix.settings.trackAccounts)}>
+        Track accounts
+      </button>
+    </div>
+  )
+}
+
+/** Income sources: pills, a + that turns into a name field, a tap to rename or remove. */
+function Sources() {
+  useIndex()
+  const list = sources()
   const [open, setOpen] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const currencies = [s.base, ...s.extraCurrencies]
-  const editing = accounts.find((a) => a.id === open)
+  const editing = list.find((x) => x.id === open)
 
   return (
     <>
       <div class="pills">
-        {accounts.map((a) => (
-          <button key={a.id} class="pill soft" aria-pressed={open === a.id} onClick={() => setOpen(open === a.id ? null : a.id)}>
-            {a.name} <small>{a.cur}</small>
+        {list.map((x) => (
+          <button
+            key={x.id}
+            class="pill"
+            aria-pressed={open === x.id}
+            onClick={() => {
+              setAdding(false)
+              setOpen(open === x.id ? null : x.id)
+            }}
+          >
+            {x.name}
           </button>
         ))}
-        <button
-          class="pill ghost"
-          aria-label="Add an account"
-          onClick={() => {
-            setOpen(null)
-            setAdding(true)
-          }}
-        >
-          <IconPlus />
-        </button>
-        <button class="pill" onClick={props.onCount}>
-          Count your money
-        </button>
+        {adding ? (
+          <NewSource onDone={() => setAdding(false)} />
+        ) : (
+          <button
+            class="pill ghost"
+            aria-label="Add an income source"
+            onClick={() => {
+              setOpen(null)
+              setAdding(true)
+            }}
+          >
+            <IconPlus />
+          </button>
+        )}
       </div>
-      {adding && <NewAccount currencies={currencies} onDone={() => setAdding(false)} />}
-      {editing && <AccountEditor key={editing.id} a={editing} currencies={currencies} onDone={() => setOpen(null)} />}
+      {editing && <SourceEditor key={editing.id} x={editing} onDone={() => setOpen(null)} />}
     </>
   )
 }
 
-function NewAccount(props: { currencies: string[]; onDone: () => void }) {
-  const [name, setName] = useState('')
-  const [cur, setCur] = useState(props.currencies[0])
-  const nameRef = useRef<HTMLInputElement>(null)
-  useEffect(() => nameRef.current?.focus(), [])
-  const add = () => {
-    if (!name.trim()) return
-    undoable(`Added ${name.trim()}`, () => addAccount(name.trim(), cur))
+function NewSource(props: { onDone: () => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const done = useRef(false)
+  useEffect(() => ref.current?.focus(), [])
+  // Enter adds, Esc cancels; leaving the field with a name typed adds it too.
+  const finish = (add: boolean) => {
+    if (done.current) return
+    done.current = true
+    const name = ref.current?.value.trim()
+    if (add && name) {
+      undoable(`Added ${name}`, () => addSource(name))
+      play('success')
+    }
     props.onDone()
   }
   return (
-    <div class="card" style={{ marginTop: '10px' }}>
+    <input
+      {...NO_AUTOFILL}
+      ref={ref}
+      type="text"
+      class="pill-input"
+      aria-label="Name"
+      placeholder="Name"
+      autocapitalize="words"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') finish(true)
+        else if (e.key === 'Escape') finish(false)
+      }}
+      onBlur={() => finish(true)}
+    />
+  )
+}
+
+function SourceEditor(props: { x: Source; onDone: () => void }) {
+  const { x } = props
+  return (
+    <div class="acc-form">
       <input
+        {...NO_AUTOFILL}
         type="text"
-        aria-label="New account name"
-        spellcheck={false} autocorrect="off"
-        ref={nameRef}
-        value={name}
-        onInput={(e) => setName(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') add()
-          if (e.key === 'Escape') props.onDone()
+        aria-label="Name"
+        autocapitalize="words"
+        defaultValue={x.name}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => {
+          const name = e.currentTarget.value.trim()
+          if (!name) e.currentTarget.value = x.name
+          else if (name !== x.name) undoable(`Renamed ${x.name}`, () => renameSource(x.id, name))
         }}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       />
-      <div class="pills" style={{ marginTop: '10px' }}>
-        {props.currencies.map((c) => (
-          <button key={c} class="pill sm soft" aria-pressed={cur === c} onClick={() => setCur(c)}>
-            {c}
-          </button>
-        ))}
-      </div>
-      <div class="cs-foot" style={{ marginTop: '12px' }}>
-        <button class="link" onClick={props.onDone}>
-          Cancel
-        </button>
-        <button class="link" disabled={!name.trim()} onClick={add}>
-          Add
+      <div class="cs-foot">
+        <button
+          class="link red"
+          onClick={() => {
+            undoable(`Removed ${x.name}`, () => deleteSource(x.id))
+            play('delete')
+            props.onDone()
+            toast(`${x.name} removed`, { undo: true })
+          }}
+        >
+          Remove
         </button>
       </div>
     </div>
@@ -253,54 +315,6 @@ function Archived() {
         ))}
       </div>
     </Section>
-  )
-}
-
-function AccountEditor(props: { a: Account; currencies: string[]; onDone: () => void }) {
-  const { a } = props
-  return (
-    <div class="card" style={{ marginTop: '10px' }}>
-      <input
-        type="text"
-        aria-label="Account name"
-        spellcheck={false} autocorrect="off"
-        defaultValue={a.name}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={(e) => {
-          const name = e.currentTarget.value.trim()
-          if (!name) e.currentTarget.value = a.name
-          else if (name !== a.name) saveAccount({ ...a, name })
-        }}
-        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-      />
-      <div class="pills" style={{ marginTop: '10px' }}>
-        {[...new Set([...props.currencies, a.cur])].map((c) => (
-          <button
-            key={c}
-            class="pill sm soft"
-            aria-pressed={a.cur === c}
-            onClick={() => {
-              saveAccount({ ...a, cur: c })
-            }}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-      <div class="cs-foot" style={{ marginTop: '12px' }}>
-        <button
-          class="link red"
-          onClick={() => {
-            undoable(`Removed ${a.name}`, () => deleteAccount(a.id))
-            play('delete')
-            props.onDone()
-            toast(`${a.name} removed`, { undo: true })
-          }}
-        >
-          Remove
-        </button>
-      </div>
-    </div>
   )
 }
 

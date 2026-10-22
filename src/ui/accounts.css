@@ -1,0 +1,161 @@
+/* Accounts: balances list (sheet), the inline editors, income sources (Settings) */
+
+.acc-list {
+  margin-bottom: 8px;
+}
+.acc-head {
+  margin: 18px 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.acc-wrap {
+  position: relative;
+  margin: 0 -10px;
+  width: calc(100% + 20px);
+  border-radius: 12px;
+}
+.acc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  text-align: left;
+  transition: background 0.12s;
+  /* vertical scrolling stays the browser's; a horizontal drag is the row's swipe */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+.acc-row b {
+  display: block;
+  font-weight: 600;
+}
+.acc-sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--ink-3);
+}
+.acc-amt {
+  display: grid;
+  justify-items: end;
+  font-size: 17px;
+  font-weight: 600;
+}
+/* swipe to delete: the row is opaque while it slides, over a red area it uncovers */
+.acc-wrap.swiping {
+  overflow: hidden;
+}
+.acc-wrap.swiping .acc-row {
+  background: var(--surface);
+  will-change: transform;
+}
+.acc-row:active {
+  background: var(--sunk);
+}
+.acc-x {
+  display: none;
+}
+@media (hover: hover) {
+  .acc-row:hover {
+    background: var(--sunk);
+  }
+  .acc-x {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    margin-top: -14px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--ink-3);
+    font-size: 20px;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    cursor: pointer;
+  }
+  .acc-wrap:hover .acc-x,
+  .acc-x:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .acc-wrap:hover .acc-row {
+    padding-right: 44px;
+  }
+  .acc-x:hover {
+    background: var(--red-wash);
+    color: var(--red);
+  }
+}
+.acc-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--rule);
+  margin-top: 4px;
+  font-size: 15px;
+}
+.acc-total b {
+  font-size: 19px;
+  font-weight: 650;
+}
+.acc-actions {
+  margin-top: 18px;
+}
+
+/* inline forms: add, edit, move */
+.acc-form {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 4px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--sunk);
+}
+.acc-form .cs-foot {
+  margin-top: 2px;
+}
+.acc-lab {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-3);
+  margin-bottom: -4px;
+}
+.acc-move-amt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.acc-move-amt .acc-field {
+  flex: 1;
+  min-width: 0;
+}
+.acc-cur {
+  width: 40px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* income sources: a pill that turns into a name field */
+input.pill-input {
+  width: 150px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 16px;
+}
+.pills + .acc-form {
+  margin-top: 12px;
+}

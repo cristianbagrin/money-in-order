@@ -4,6 +4,21 @@ import { toast } from './kit'
 import { play } from './sound'
 
 /**
+ * For every text field that is not the sign-in form (names of accounts, income sources...). iOS and the
+ * password managers take a text field next to a password field, or with a name like "account", for a
+ * login and offer to fill it: these attributes tell them all it is not one.
+ */
+export const NO_AUTOFILL = {
+  autocomplete: 'off',
+  spellcheck: false,
+  autocorrect: 'off',
+  'data-1p-ignore': 'true',
+  'data-lpignore': 'true',
+  'data-bwignore': 'true',
+  'data-form-type': 'other',
+} as const
+
+/**
  * Sign in, or create an account with the budget on this device. A real form with the fields password
  * managers know, so the browser can save and fill the email and password.
  */
@@ -54,7 +69,7 @@ export function AccountForm(props: { signInOnly?: boolean; onDone?: () => void }
   return (
     <form class="account" onSubmit={submit} noValidate>
       {!props.signInOnly && (
-        <div class="pills" role="group" aria-label="Account">
+        <div class="pills" role="group" aria-label="Sign in or create">
           <button type="button" class="pill sm" aria-pressed={mode === 'in'} onClick={() => setMode('in')}>
             Sign in
           </button>

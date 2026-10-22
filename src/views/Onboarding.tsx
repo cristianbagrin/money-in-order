@@ -3,7 +3,7 @@ import { evalAmount } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
 import { addAccount, getDB, recordCount, seedCategories, settings, today, updateSettings } from '../lib/store'
 import { RTA } from '../lib/types'
-import { AccountForm } from '../ui/account'
+import { AccountForm, NO_AUTOFILL } from '../ui/account'
 import { CurrencyPicker } from '../ui/currency'
 import { IconPlus, regroup, toast } from '../ui/kit'
 import { play } from '../ui/sound'
@@ -145,9 +145,10 @@ export function Onboarding(props: { onDone: () => void }) {
         {accounts.map((a, i) => (
           <div class="acct-row" key={i}>
             <input
+              {...NO_AUTOFILL}
               type="text"
-              aria-label="Account name"
-              spellcheck={false} autocorrect="off"
+              aria-label="Bank or wallet"
+              autocapitalize="words"
               value={a.name}
               onInput={(e) => setAccounts(accounts.map((x, k) => (k === i ? { ...x, name: e.currentTarget.value } : x)))}
             />
@@ -162,10 +163,11 @@ export function Onboarding(props: { onDone: () => void }) {
               {curs.includes(a.cur) ? a.cur : main}
             </button>
             <input
+              {...NO_AUTOFILL}
               type="text"
               inputMode="decimal"
               class="num"
-              aria-label={`${a.name || 'Account'} balance`}
+              aria-label={`${a.name || 'Wallet'} balance`}
               placeholder="0"
               style={{ textAlign: 'right' }}
               value={a.bal}
