@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
-import { balances, netWorth, totalMoney, type Balance } from '../lib/accounts'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { balances, investmentsInPlan, netWorth, totalMoney, type Balance } from '../lib/accounts'
 import { dayOfMonth, monthName, monthOf } from '../lib/dates'
 import { convert, cur, evalAmount, fmt, groupTyped } from '../lib/money'
-import { hasRate } from '../lib/rates'
-import { addAccount, addMove, deleteAccount, saveAccount, undoable } from '../lib/store'
-import type { Account, Day, ID } from '../lib/types'
+import { hasRate, refreshRates } from '../lib/rates'
+import { addAccount, addMove, deleteAccount, previewCount, recordCount, saveAccount, setInvestment, takeOutOfPlan, undoable } from '../lib/store'
+import { RTA, type Account, type Day, type ID } from '../lib/types'
 import { NO_AUTOFILL } from '../ui/account'
 import { useIndex } from '../ui/hooks'
 import { AmountField, IconPlus, toast } from '../ui/kit'
@@ -20,103 +20,286 @@ function amountText(minor: number, code: string): string {
 }
 
 /** "3 Oct" (with the year when it isn't this one). */
-export function dayText(d: Day, today: Day): string {
+function dayText(d: Day, today: Day): string {
   const y = d.slice(0, 4)
   return `${dayOfMonth(d)} ${monthName(monthOf(d), { short: true })}${y === today.slice(0, 4) ? '' : ` ${y}`}`
 }
 
-/** Where the money is: every account's balance, the total, and the few things you do with them. */
-export function AccountsSheet(props: { open: boolean; onClose: () => void; onCount: () => void; today: Day }) {
+/**
+ * Where the money is: every account's balance, the total, and the few things you do with them.
+ * Tap a balance to type what is really there (updating balances): the accounts left alone keep theirs, and
+ * the difference from what the plan expected is booked so the plan matches reality. Investments alone never
+ * touch the plan. `count` opens it ready to type the first balance.
+ */
+export function AccountsSheet(props: { open: boolean; onClose: () => void; count?: boolean; today: Day }) {
   const ix = useIndex()
   const { base, trackAccounts } = ix.settings
   const [form, setForm] = useState<'add' | 'move' | { edit: ID } | null>(null)
-  useEffect(() => {
-    if (props.open) setForm(null)
-  }, [props.open])
+  const [vals, setVals] = useState<Record<ID, string>>({})
+  const [editing, setEditing] = useState<ID | null>(null)
+  const [diffTo, setDiffTo] = useState<ID>(RTA)
+  const saveRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const all = balances(ix)
+  const first = all[0]?.acct.id
+  useEffect(() => {
+    if (!props.open) return
+    setForm(null)
+    setVals({})
+    setDiffTo(RTA)
+    setEditing(null)
+    void refreshRates()
+    if (!props.count) return
+    const t = setTimeout(() => setEditing(first ?? null), 60)
+    return () => clearTimeout(t)
+  }, [props.open])
+
   const cash = all.filter((b) => !b.acct.invest)
   const invest = all.filter((b) => b.acct.invest)
+  const accounts = all.map((b) => b.acct)
   const edit = typeof form === 'object' && form ? form.edit : null
+
+  // An empty field is not typed: that account keeps the balance it has.
+  const typed = (id: ID) => (vals[id] ?? '').trim() !== ''
+  const invalid = (a: Account) => typed(a.id) && evalAmount(vals[a.id], a.cur) === null
+  const bal = useMemo(() => {
+    const out: Record<ID, number> = {}
+    for (const a of accounts) if (typed(a.id)) out[a.id] = evalAmount(vals[a.id], a.cur) ?? 0
+    return out
+  }, [vals, ix.db.accounts])
+  const noRate = [...new Set(accounts.filter((a) => typed(a.id) && !hasRate(a.cur)).map((a) => a.cur))]
+  const any = accounts.some((a) => typed(a.id))
+  const ready = any && !accounts.some(invalid) && !noRate.length
+  const r = any ? previewCount({ date: props.today, bal, rates: ix.settings.rates }) : null
+
+  // Enter in a balance goes on to the next account's, and after the last one to Save.
+  const next = (id: ID) => {
+    const i = accounts.findIndex((a) => a.id === id)
+    if (i < accounts.length - 1) {
+      const n = accounts[i + 1].id
+      const open = listRef.current?.querySelector<HTMLInputElement>(`[data-acct="${n}"] input`)
+      if (open) open.focus()
+      else setEditing(n)
+    } else saveRef.current?.focus()
+  }
+
+  const cancel = () => {
+    setVals({})
+    setEditing(null)
+    setDiffTo(RTA)
+  }
+  function save() {
+    const res = undoable('Updated balances', () => recordCount({ date: props.today, bal, rates: ix.settings.rates, diffTo }))
+    play('success')
+    props.onClose()
+    if (!res.cash) toast('Investments updated', { undo: true })
+    else if (res.first) toast(`Starting with ${fmt(res.total, base)}`, { undo: true })
+    else if (!res.diff && !res.fx) toast('Everything matches', { undo: true })
+    else toast(`Corrected by ${fmt(res.diff + res.fx, base, { sign: true })}`, { undo: true })
+  }
+
   const row = (b: Balance) => (
     <div key={b.acct.id}>
-      <AccountRow b={b} base={base} today={props.today} open={edit === b.acct.id} onOpen={() => setForm(edit === b.acct.id ? null : { edit: b.acct.id })} />
-      {edit === b.acct.id && <AccountEditor key={b.acct.id} a={b.acct} onDone={() => setForm(null)} />}
+      <AccountRow
+        b={b}
+        base={base}
+        today={props.today}
+        open={edit === b.acct.id}
+        onOpen={() => setForm(edit === b.acct.id ? null : { edit: b.acct.id })}
+        field={editing === b.acct.id || typed(b.acct.id)}
+        value={vals[b.acct.id] ?? ''}
+        invalid={invalid(b.acct)}
+        onEdit={() => setEditing(b.acct.id)}
+        onInput={(v) => setVals((all) => ({ ...all, [b.acct.id]: v }))}
+        onDone={() => setEditing((cur) => (cur === b.acct.id ? null : cur))}
+        onEnter={() => next(b.acct.id)}
+      />
+      {edit === b.acct.id && <AccountEditor key={b.acct.id} a={b.acct} today={props.today} onDone={() => setForm(null)} />}
+    </div>
+  )
+
+  const gap = r ? r.diff + r.fx : 0
+  const line = (label: string, v: number) => (
+    <div class="acc-line">
+      <span class="muted">{label}</span>
+      <span class={`num ${v < 0 ? 'neg' : 'pos'}`}>{fmt(v, base, { sign: true })}</span>
     </div>
   )
 
   return (
     <Sheet open={props.open} onClose={props.onClose} title="Accounts">
-      {cash.length > 0 && (
-        <div class="acc-list">
-          {cash.map(row)}
-          <div class="acc-total">
-            <span>Total money</span>
-            <b class="num marked">{fmt(totalMoney(ix), base)}</b>
+      <div ref={listRef}>
+        {cash.length > 0 && (
+          <div class="acc-list">
+            {cash.map(row)}
+            <div class="acc-total">
+              <span>Total money</span>
+              <b class="num marked">{fmt(totalMoney(ix), base)}</b>
+            </div>
           </div>
-        </div>
-      )}
-      {invest.length > 0 && (
-        <div class="acc-list">
-          <h3 class="acc-head">Investments</h3>
-          {invest.map(row)}
-          <div class="acc-total">
-            <span>Net worth</span>
-            <b class="num marked">{fmt(netWorth(ix), base)}</b>
-          </div>
-        </div>
-      )}
-
-      <div class="pills acc-actions">
-        <button class="pill" onClick={props.onCount}>
-          Update balances
-        </button>
-        {trackAccounts && all.length > 1 && (
-          <button class="pill" aria-pressed={form === 'move'} onClick={() => setForm(form === 'move' ? null : 'move')}>
-            Move money
-          </button>
         )}
-        <button class="pill ghost" aria-pressed={form === 'add'} onClick={() => setForm(form === 'add' ? null : 'add')}>
-          <IconPlus /> Account
-        </button>
+        {invest.length > 0 && (
+          <div class="acc-list">
+            <h3 class="acc-head">Investments</h3>
+            {invest.map(row)}
+            <div class="acc-total">
+              <span>Net worth</span>
+              <b class="num marked">{fmt(netWorth(ix), base)}</b>
+            </div>
+          </div>
+        )}
       </div>
 
+      {investmentsInPlan(ix).map(({ acct }) => (
+        <p class="acc-fix" key={acct.id}>
+          <span>Total money still counts {acct.name}</span>
+          <button
+            class="link"
+            onClick={() => {
+              undoable(`Took ${acct.name} out of Total money`, () => takeOutOfPlan(acct.id, props.today))
+              play('success')
+              toast(`${acct.name} taken out of Total money`, { undo: true })
+            }}
+          >
+            Take it out
+          </button>
+        </p>
+      ))}
+
+      {r && (
+        <div class="acc-rec">
+          {r.cash && (
+            <>
+              <div class="acc-line">
+                <span>{r.first ? 'Your money' : 'Counted'}</span>
+                <b class="num">{fmt(r.total, base)}</b>
+              </div>
+              {!r.first && gap === 0 && <p class="muted acc-ok">Matches your plan</p>}
+              {!r.first && r.fx !== 0 && line('Exchange rates', r.fx)}
+              {!r.first && r.diff !== 0 && line(r.diff < 0 ? 'Missing' : 'Extra', r.diff)}
+              {!r.first && r.diff !== 0 && (
+                <>
+                  <p class="section-title">{r.diff < 0 ? 'Where did it go?' : 'Where should it go?'}</p>
+                  <div class="pills">
+                    <button class="pill soft" aria-pressed={diffTo === RTA} onClick={() => setDiffTo(RTA)}>
+                      Ready to assign
+                    </button>
+                    {ix.cats
+                      .filter((c) => !c.archived)
+                      .map((c) => (
+                        <button key={c.id} class="pill soft" aria-pressed={diffTo === c.id} onClick={() => setDiffTo(c.id)}>
+                          {c.name}
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+          {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again.</p>}
+          <div class="acc-save">
+            <button class="link" onClick={cancel}>
+              Cancel
+            </button>
+            <button class="btn" ref={saveRef} disabled={!ready} onClick={save}>
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!any && (
+        <div class="pills acc-actions">
+          {trackAccounts && all.length > 1 && (
+            <button class="pill" aria-pressed={form === 'move'} onClick={() => setForm(form === 'move' ? null : 'move')}>
+              Move money
+            </button>
+          )}
+          <button class="pill ghost" aria-pressed={form === 'add'} onClick={() => setForm(form === 'add' ? null : 'add')}>
+            <IconPlus /> Account
+          </button>
+        </div>
+      )}
+
       {form === 'add' && <NewAccount onDone={() => setForm(null)} />}
-      {form === 'move' && <MoveMoney accounts={all.map((b) => b.acct)} today={props.today} onDone={() => setForm(null)} />}
+      {form === 'move' && <MoveMoney accounts={accounts} today={props.today} onDone={() => setForm(null)} />}
     </Sheet>
   )
 }
 
-function AccountRow(props: { b: Balance; base: string; today: Day; open: boolean; onOpen: () => void }) {
+/** The name opens the account's editor; the balance turns into a field to type the real one. */
+function AccountRow(props: {
+  b: Balance
+  base: string
+  today: Day
+  open: boolean
+  onOpen: () => void
+  field: boolean
+  value: string
+  invalid: boolean
+  onEdit: () => void
+  onInput: (v: string) => void
+  onDone: () => void
+  onEnter: () => void
+}) {
   const { b, base } = props
   const a = b.acct
   const remove = () => removeAccount(a)
-  const sw = useSwipeDelete<HTMLDivElement, HTMLButtonElement>(remove)
+  const sw = useSwipeDelete<HTMLDivElement, HTMLDivElement>(remove)
   // A tracked balance follows what you log; the others are as of the day they were typed in.
   const sub = b.tracked ? '' : b.asOf ? `${a.invest ? 'updated' : 'counted'} ${dayText(b.asOf, props.today)}` : a.invest ? 'no value yet' : 'not counted'
   return (
-    <div class="acc-wrap" ref={sw.wrap}>
+    <div class="acc-wrap" ref={sw.wrap} data-acct={a.id}>
       <div class="swipe-del" aria-hidden="true">
         Remove
       </div>
-      <button
+      <div
         ref={sw.row}
         class="acc-row"
-        aria-expanded={props.open}
-        onClick={(e) => {
-          if (!sw.swallow(e)) props.onOpen()
-        }}
         {...sw.handlers}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || !(e.target as HTMLElement).closest('.acc-count')) return
+          // (Without this the same Enter would also press Save once the focus lands on it.)
+          e.preventDefault()
+          props.onEnter()
+        }}
       >
-        <span class="grow">
+        <button
+          class="acc-name"
+          aria-expanded={props.open}
+          onClick={(e) => {
+            if (!sw.swallow(e)) props.onOpen()
+          }}
+        >
           <b>{a.name}</b>
           {sub && <small class="acc-sub">{sub}</small>}
-        </span>
-        <span class="acc-amt">
-          <span class="num">{fmt(b.bal, a.cur)}</span>
-          {a.cur !== base && <small class="num acc-sub">{fmt(b.base, base)}</small>}
-        </span>
-      </button>
+        </button>
+        {props.field ? (
+          <AmountField
+            class={`acc-count${props.invalid ? ' bad' : ''}`}
+            label={`${a.name} balance in ${a.cur}`}
+            cur={a.cur}
+            // the balance kept, until something is typed
+            placeholder={fmt(b.bal, a.cur)}
+            value={props.value}
+            onInput={props.onInput}
+            onCommit={props.onDone}
+            autoFocus
+          />
+        ) : (
+          <button
+            class="acc-amt"
+            aria-label={`${a.name} balance ${fmt(b.bal, a.cur)}, change`}
+            onClick={(e) => {
+              if (!sw.swallow(e)) props.onEdit()
+            }}
+          >
+            <span class="num">{fmt(b.bal, a.cur)}</span>
+            {a.cur !== base && <small class="num acc-sub">{fmt(b.base, base)}</small>}
+          </button>
+        )}
+      </div>
       <button class="acc-x" tabIndex={-1} aria-label={`Remove ${a.name}`} onClick={remove}>
         ×
       </button>
@@ -185,10 +368,11 @@ function NewAccount(props: { onDone: () => void }) {
   )
 }
 
-function AccountEditor(props: { a: Account; onDone: () => void }) {
+function AccountEditor(props: { a: Account; today: Day; onDone: () => void }) {
   const { a } = props
   const ix = useIndex()
-  const currencies = [...new Set([ix.settings.base, ...ix.settings.extraCurrencies, a.cur])]
+  const { base } = ix.settings
+  const currencies = [...new Set([base, ...ix.settings.extraCurrencies, a.cur])]
   return (
     <div class="acc-form">
       <input
@@ -215,8 +399,10 @@ function AccountEditor(props: { a: Account; onDone: () => void }) {
           class="pill sm toggle"
           aria-pressed={!!a.invest}
           onClick={() => {
-            const { invest: _, ...rest } = a
-            saveAccount(a.invest ? rest : { ...rest, invest: 1 })
+            // The balance leaves the plan's total with it (or comes back), in the same undoable step.
+            const on = !a.invest
+            const moved = undoable(on ? `${a.name} to investments` : `${a.name} to cash`, () => setInvestment(a.id, on, props.today))
+            if (moved) toast(on ? `${fmt(-moved, base)} moved out of Total money` : `${fmt(moved, base)} back in Total money`, { undo: true })
           }}
         >
           Investment
