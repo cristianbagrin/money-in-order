@@ -118,6 +118,9 @@ export interface FormatOpts {
   exact?: boolean
 }
 
+/** What sets two facts on one line apart: a little more room, no dot. */
+export const SEP = '\u2003'
+
 /** 12345 (minor) in EUR -> "€123.45"; in TWD -> "NT$123" */
 export function fmt(minor: number, code: string, opts: FormatOpts = {}): string {
   const c = cur(code)

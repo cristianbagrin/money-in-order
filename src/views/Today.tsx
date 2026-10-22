@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { cashAccounts } from '../lib/accounts'
 import { daily, monthView } from '../lib/budget'
 import { dayOfMonth, daysInMonth, isoDate, monthOf } from '../lib/dates'
-import { cur, evalAmount, fmt } from '../lib/money'
+import { cur, evalAmount, fmt, SEP } from '../lib/money'
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type Account, type ID, type Source } from '../lib/types'
@@ -376,7 +376,7 @@ export function Register(props: { today: string; touch: boolean }) {
     const before = { ...draft }
     const income = cat === RTA
     const name = income ? 'Income' : ix.catById.get(cat)?.name ?? ''
-    const label = `${inflow && !income ? '+' : ''}${fmt(amount, currency)} ${income ? 'income' : `· ${name}`}`
+    const label = `${inflow && !income ? '+' : ''}${fmt(amount, currency)} ${income ? 'income' : `${SEP}${name}`}`
     undoable(
       label,
       () =>
@@ -409,14 +409,14 @@ export function Register(props: { today: string; touch: boolean }) {
     } else if (ddAfter) {
       toast(
         ddAfter.leftToday >= 0
-          ? `${name} · ${fmt(ddAfter.leftToday, base)} left today`
-          : `Over · ${fmt(ddAfter.tomorrow ?? 0, base)} tomorrow`,
+          ? `${name}${SEP}${fmt(ddAfter.leftToday, base)} left today`
+          : `Over${SEP}${fmt(ddAfter.tomorrow ?? 0, base)} tomorrow`,
         { undo: true },
       )
     } else if (cm && cm.available < 0) {
       toast(`${name} is ${fmt(-cm.available, base)} over`, { undo: true })
     } else {
-      toast(`${name} · ${fmt(cm?.available ?? 0, base)} left`, { undo: true })
+      toast(`${name}${SEP}${fmt(cm?.available ?? 0, base)} left`, { undo: true })
     }
   }
 

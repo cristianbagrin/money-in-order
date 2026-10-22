@@ -4,7 +4,7 @@ import { monthView, type Index } from '../lib/budget'
 import { goalLine, goals, groupSpending, incomeBySource, roundPlan, same, spending, standouts, usualSpending, type CatSpend, type MonthSpend } from '../lib/compare'
 import { dayOfMonth, daysInMonth, monthDiff, monthName, monthOf } from '../lib/dates'
 import { savedLine, savingsRate, wealth } from '../lib/insights'
-import { fmt } from '../lib/money'
+import { fmt, SEP } from '../lib/money'
 import { expectedIncome, forecast, MAX_AHEAD } from '../lib/plan'
 import type { ID, Target } from '../lib/types'
 import { NetWorthChart, REST, REST_ID, share, slicesOf, SpendDonut } from '../ui/charts'
@@ -212,7 +212,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
             {period && !same(w.change, end.total) && (
               <small class={`num ${w.change > 0 ? 'pos' : 'neg'}`}>
                 {fmt(w.change, base, { sign: true })}
-                {w.points[0].total > 0 && ` · ${w.change > 0 ? '+' : '−'}${Math.round((Math.abs(w.change) / w.points[0].total) * 100)}%`}
+                {w.points[0].total > 0 && `${SEP}${w.change > 0 ? '+' : '−'}${Math.round((Math.abs(w.change) / w.points[0].total) * 100)}%`}
                 <span class="rv-since"> since {since(w.points[0].month)}</span>
               </small>
             )}

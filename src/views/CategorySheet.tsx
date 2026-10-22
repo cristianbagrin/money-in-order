@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { investAccounts } from '../lib/accounts'
 import { assignedInMonth, averageSpent, monthView, type CatMonth } from '../lib/budget'
 import { addMonths, monthName } from '../lib/dates'
-import { evalAmount, fmt, roundFor } from '../lib/money'
+import { evalAmount, fmt, roundFor, shownSign } from '../lib/money'
 import { suggestions } from '../lib/plan'
+import { dueIn } from '../lib/repeat'
 import { archiveCategory, categoryHasHistory, deleteCategory, getIndex, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
 import { useIndex, useToday } from '../ui/hooks'
@@ -41,6 +42,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
 
   if (!cat) return <Sheet open={false} onClose={props.onClose} children={null} />
 
+  const availSign = shownSign(available, base)
   const assigned = cm?.assigned ?? 0
   const spent = -(cm?.activity ?? 0)
   const carry = cm?.carry ?? 0
@@ -57,6 +59,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
     if (value > 0 && value !== assigned && !quick.some((q) => q.value === value)) quick.push({ label, value })
   }
   if (cm && cm.goal > 0) offer(cat.target ? 'Target' : 'Clear it', cm.goal)
+  offer('Repeats', roundFor(base, dueIn(ix, month).get(cat.id) ?? 0))
   if (cat.saving) {
     // Savings: its share of the month's savings target (spending from it isn't a cost to repeat).
     const s = month >= current ? suggestions(ix, month, current).find((x) => x.cat === cat.id) : undefined
@@ -79,7 +82,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
 
   return (
     <Sheet open onClose={props.onClose} title={cat.name}>
-      <div class={`cs-avail ${available < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : available > 0 ? 'pos' : 'faint'}`}>
+      <div class={`cs-avail ${availSign < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : availSign > 0 ? 'pos' : 'faint'}`}>
         <span class={`marked${available < 0 ? ' neg' : ''}`}>{fmt(shown, base)}</span>
       </div>
 

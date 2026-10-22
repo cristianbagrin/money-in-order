@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { balances, investmentsInPlan, netWorth, totalMoney, type Balance } from '../lib/accounts'
 import { dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { convert, cur, evalAmount, fmt, groupTyped } from '../lib/money'
+import { convert, cur, evalAmount, fmt, groupTyped, SEP } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
 import { addAccount, addMove, deleteAccount, placeAccountOfKind, previewCount, recordCount, saveAccount, setInvestment, takeOutOfPlan, undoable } from '../lib/store'
 import { RTA, type Account, type Day, type ID } from '../lib/types'
@@ -275,7 +275,7 @@ function AccountRow(props: {
   const remove = () => removeAccount(a)
   const sw = useSwipeDelete<HTMLDivElement, HTMLDivElement>(remove)
   // When the balance was last typed in, and what it was then (a tracked balance has moved on since).
-  const sub = b.asOf && b.typedBal !== null ? `Updated ${dayText(b.asOf, props.today)} · ${fmt(b.typedBal, a.cur)}` : a.invest ? 'No value yet' : 'Not counted'
+  const sub = b.asOf && b.typedBal !== null ? `Updated ${dayText(b.asOf, props.today)}${SEP}${fmt(b.typedBal, a.cur)}` : a.invest ? 'No value yet' : 'Not counted'
   return (
     <div class="acc-wrap" ref={sw.wrap} data-acct={a.id}>
       <div class="swipe-del" aria-hidden="true">

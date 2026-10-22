@@ -4,7 +4,7 @@
 import { countsDesc, investAccounts, wealthSeries, type WealthPoint } from './accounts'
 import { monthView, type CatMonth, type Index, type MonthView } from './budget'
 import { addMonths, monthOf } from './dates'
-import { fmt } from './money'
+import { fmt, SEP } from './money'
 import type { Category } from './types'
 
 /** Money kept toward a goal or a buffer, not meant to be spent this month. */
@@ -66,7 +66,7 @@ export interface SavedLine {
   rate: string | null
 }
 
-/** The month's saving in plain words against the target: "Saved 18% of income · target 20%". */
+/** The month's saving in plain words against the target: "Saved 18% of income, target 20%". */
 export function savedLine(ix: Index, month: string, today: string): SavedLine | null {
   const v = monthView(ix, month, monthOf(today))
   const base = ix.settings.base
@@ -77,7 +77,7 @@ export function savedLine(ix: Index, month: string, today: string): SavedLine | 
   if (v.saved > v.income) return { text: `Saved ${fmt(v.saved, base)}, more than came in`, good: true, rate: null }
   const rate = v.saved / v.income
   return {
-    text: `Saved ${pct(rate)} of income${target > 0 ? ` · target ${pct(target)}` : ''}`,
+    text: `Saved ${pct(rate)} of income${target > 0 ? `${SEP}target ${pct(target)}` : ''}`,
     good: target > 0 ? rate + 0.005 >= target : rate > 0,
     rate: pct(rate),
   }

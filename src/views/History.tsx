@@ -2,7 +2,7 @@ import { memo } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { cashAccounts } from '../lib/accounts'
 import { addMonths, dateLabel, monthName, monthOf } from '../lib/dates'
-import { fmt } from '../lib/money'
+import { fmt, SEP } from '../lib/money'
 import { deleteTxns, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Txn } from '../lib/types'
 import { useIndex } from '../ui/hooks'
@@ -19,6 +19,8 @@ interface Names {
   acct: Map<ID, { name: string; cur: string }>
   src: Map<ID, string>
   track: boolean
+  /** repeats still going: how often */
+  rep: Map<ID, string>
 }
 
 type Period = 'all' | 'this' | 'last' | '3m' | 'year' | `m:${string}`
@@ -68,7 +70,7 @@ const DayGroup = memo(function DayGroup(props: { day: Day; today: string; base: 
         const to = t.to ? names.acct.get(t.to) : undefined
         const isMove = t.kind === 'move'
         // Income says its source; with accounts tracked, every row says its account.
-        const extra = isMove ? '' : [t.cat === RTA && t.src ? names.src.get(t.src) : '', names.track ? from?.name : ''].filter(Boolean).join(' · ')
+        const extra = isMove ? '' : [t.cat === RTA && t.src ? names.src.get(t.src) : '', names.track ? from?.name : '', t.rep ? names.rep.get(t.rep) : ''].filter(Boolean).join(SEP)
         return (
           <TxnRow
             key={t.id}
@@ -316,12 +318,13 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   const track = !!ix.settings.trackAccounts
   const cash = track ? cashAccounts(ix) : []
   // Rows only need names, so the maps are rebuilt only when one changes.
-  const nameKey2 = Object.values(ix.db.accounts).map((a) => (a.d ? '' : `${a.id}:${a.name}:${a.cur}`)).join('|') + '#' + sources.map((s) => s.id + s.name).join('|') + (track ? '#t' : '')
+  const nameKey2 = Object.values(ix.db.accounts).map((a) => (a.d ? '' : `${a.id}:${a.name}:${a.cur}`)).join('|') + '#' + sources.map((s) => s.id + s.name).join('|') + (track ? '#t' : '') + '#' + Object.values(ix.db.repeats).map((r) => (r.d ? '' : r.id + r.every)).join('|')
   const names = useMemo<Names>(
     () => ({
       acct: new Map(Object.values(ix.db.accounts).filter((a) => !a.d).map((a) => [a.id, { name: a.name, cur: a.cur }])),
       src: new Map(sources.map((s) => [s.id, s.name])),
       track,
+      rep: new Map(Object.values(ix.db.repeats).filter((r) => !r.d).map((r) => [r.id, r.every === 'year' ? 'Yearly' : 'Monthly'])),
     }),
     [nameKey2],
   )
@@ -392,7 +395,9 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       </div>
       {filtered && rows.length > 0 && (
         <p class="faint" style={{ fontSize: '13px', margin: '12px 0 0' }}>
-          {rows.length} {rows.length === 1 ? 'transaction' : 'transactions'} · <span class="num">{fmt(total, base, { sign: total > 0 })}</span>
+          {rows.length} {rows.length === 1 ? 'transaction' : 'transactions'}
+          {SEP}
+          <span class="num">{fmt(total, base, { sign: total > 0 })}</span>
         </p>
       )}
       {days.map((d) => (

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { totalMoney } from './lib/accounts'
 import { assignedAhead, monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
-import { fmt, shownSign } from './lib/money'
-import { redo } from './lib/store'
-import type { ID, Txn } from './lib/types'
+import { fmt, SEP, shownSign } from './lib/money'
+import { logRepeats, redo } from './lib/store'
+import { RTA, type ID, type Txn } from './lib/types'
 import { useIndex, useSync, useToday } from './ui/hooks'
 import { runUndo, toast, Toasts } from './ui/kit'
 import { AccountsSheet } from './views/AccountsSheet'
@@ -64,6 +64,16 @@ export function App() {
   useEffect(() => {
     if (route !== 'history') setHistoryFilter('all')
   }, [route])
+
+  // Repeating payments log themselves on their day (and catch up on the days the app wasn't open).
+  useEffect(() => {
+    if (!ix.settings.ready) return
+    const made = logRepeats(today)
+    if (!made.length) return
+    const t = made[0]
+    const name = t.note || (t.cat === RTA ? 'Income' : ix.catById.get(t.cat)?.name) || ''
+    toast(made.length === 1 ? `Logged ${name}${SEP}${fmt(Math.abs(t.amt), t.cur)}` : `Logged ${made.length} repeating payments`)
+  }, [ix, today])
 
   // Keep the visible months on "now" when the month rolls over.
   useEffect(() => {

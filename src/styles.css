@@ -1168,15 +1168,18 @@ textarea:focus {
   flex: 0 1 auto;
   min-width: 0;
 }
+/* 'add note' stays out of sight until the pointer is right by it: its padding is a small halo that wakes it */
 .cnote-add {
   flex: none;
+  padding: 8px 14px 8px 6px;
+  margin: -8px -14px -8px -6px;
   font-size: 12px;
   color: var(--ink-3);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s;
 }
-.crow:hover .cnote-add,
+.cnote-add:hover,
 .crow.editing .cnote-add,
 .cnote-add:focus-visible {
   opacity: 1;
@@ -1185,7 +1188,7 @@ textarea:focus {
   .cnote-add {
     display: none;
   }
-  /* renaming on a phone: the name gets the whole line, 'Add note' sits under it */
+  /* renaming on a phone: the name gets the whole line, 'add note' sits under it */
   .crow.editing .cname-line {
     flex-wrap: wrap;
   }
@@ -1193,6 +1196,7 @@ textarea:focus {
     display: block;
     flex-basis: 100%;
     padding: 6px 0 2px;
+    margin: 0;
     font-size: 13px;
   }
 }
@@ -1386,6 +1390,13 @@ textarea:focus {
 }
 .cs-foot .link.red {
   color: var(--red);
+}
+.cs-foot {
+  align-items: center;
+  gap: 12px;
+}
+.txn-repeat {
+  flex-wrap: nowrap;
 }
 
 /* ---------------------------------------------------------------- HISTORY */

@@ -70,6 +70,27 @@ export interface Txn extends Rec {
   /** move: the account the money went to, and what arrived there in that account's currency (when it differs) */
   to?: ID
   toAmt?: number
+  /** the Repeat this entry belongs to: the one it was set on, or one it logged */
+  rep?: ID
+}
+
+/**
+ * A payment that comes back (rent, a subscription, a yearly insurance): set on an entry, it logs a copy of
+ * it by itself on the same day every month or year.
+ */
+export interface Repeat extends Rec {
+  every: 'month' | 'year'
+  /** the entry it was set on: its day of the month (or of the year) is when it comes back */
+  from: Day
+  /** it logs nothing on or before this day: what came before was logged by hand */
+  after: Day
+  /** what it logs: a copy of the entry it was set on, kept up to date with the latest one */
+  cat: ID
+  amt: number
+  cur: string
+  note?: string
+  acct?: ID
+  src?: ID
 }
 
 /** Money given to a category in a month. id = `${m}|${cat}` */
@@ -147,14 +168,15 @@ export interface DB {
   accounts: Record<ID, Account>
   counts: Record<ID, Count>
   notes: Record<ID, Note>
+  repeats: Record<ID, Repeat>
   meta: { settings?: Settings; rates?: RateTable }
 }
 
-export const COLLECTIONS = ['groups', 'cats', 'txns', 'assigns', 'accounts', 'counts', 'notes', 'meta'] as const
+export const COLLECTIONS = ['groups', 'cats', 'txns', 'assigns', 'accounts', 'counts', 'notes', 'repeats', 'meta'] as const
 export type CollectionName = (typeof COLLECTIONS)[number]
 
 export function emptyDB(): DB {
-  return { groups: {}, cats: {}, txns: {}, assigns: {}, accounts: {}, counts: {}, notes: {}, meta: {} }
+  return { groups: {}, cats: {}, txns: {}, assigns: {}, accounts: {}, counts: {}, notes: {}, repeats: {}, meta: {} }
 }
 
 export function live<T extends Rec>(coll: Record<ID, T>): T[] {

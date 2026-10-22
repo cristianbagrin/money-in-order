@@ -3,6 +3,7 @@ import { buildIndex, DEFAULT_SETTINGS, monthView, settingsOf, type Index } from 
 import { isoDate, monthOf } from './dates'
 import { edit, repair, same } from './merge'
 import { convert, type Rates } from './money'
+import { active, occurrences, repeatsOf } from './repeat'
 import {
   COLLECTIONS,
   emptyDB,
@@ -18,6 +19,7 @@ import {
   type Month,
   type RateTable,
   type Rec,
+  type Repeat,
   type Settings,
   type Source,
   type Txn,
@@ -254,8 +256,11 @@ export function redo(): UndoEntry | null {
   return e
 }
 
-/** Write records. The fields that changed get a fresh timestamp; unchanged records aren't rewritten. */
-export function commit(patch: Patch) {
+/**
+ * Write records. The fields that changed get a fresh timestamp; unchanged records aren't rewritten.
+ * `asStamped`: new records keep the time they carry (see logRepeats).
+ */
+export function commit(patch: Patch, asStamped = false) {
   const next = { ...db } as unknown as Record<string, Record<ID, Rec>>
   const written: [CollectionName, Rec][] = []
   for (const name of Object.keys(patch) as CollectionName[]) {
@@ -267,7 +272,7 @@ export function commit(patch: Patch) {
         const key = `${name}|${r.id}`
         if (!recording.prev.has(key)) recording.prev.set(key, coll[r.id] ?? null)
       }
-      const w = edit(coll[r.id], r, stamp())
+      const w = edit(coll[r.id], r, asStamped && !coll[r.id] ? r.u : stamp())
       if (!w) continue
       coll[r.id] = w
       written.push([name, w])
@@ -457,7 +462,76 @@ export function updateTxn(id: ID, patch: Partial<NewTxn>) {
   }
   for (const k of ['note', 'acct', 'src', 'to', 'toAmt'] as const) if (next[k] === undefined || next[k] === '') delete next[k]
   if (next.kind === 'move') next.base = 0
-  commit({ txns: [next] })
+  commit({ txns: [next], repeats: followLatest(next) })
+}
+
+// ---------------------------------------------------------------- repeating payments
+
+/** What a repeat logs, copied from an entry. */
+function copyOf(t: Txn): Pick<Repeat, 'cat' | 'amt' | 'cur' | 'note' | 'acct' | 'src'> {
+  return { cat: t.cat, amt: t.amt, cur: t.cur, note: t.note, acct: t.acct, src: t.src }
+}
+
+/** An edit to the latest entry of a repeat is what it logs from now on (a new price, another account). */
+function followLatest(t: Txn): Repeat[] {
+  const r = t.rep ? db.repeats[t.rep] : undefined
+  if (!r || r.d) return []
+  const later = Object.values(db.txns).some((o) => !o.d && o.rep === r.id && o.id !== t.id && o.date > t.date)
+  if (later) return []
+  const next: Repeat = { ...r, ...copyOf(t) }
+  for (const k of ['note', 'acct', 'src'] as const) if (next[k] === undefined) delete next[k]
+  return [next]
+}
+
+/** The repeat an entry belongs to, while it still repeats. */
+export function repeatOf(t: Txn): Repeat | null {
+  const r = t.rep ? db.repeats[t.rep] : undefined
+  return r && !r.d ? r : null
+}
+
+/**
+ * Make an entry come back every month or year (or stop it, with null). It starts after today:
+ * what is already past was logged by hand.
+ */
+export function setRepeat(txnId: ID, every: Repeat['every'] | null) {
+  const t = db.txns[txnId]
+  if (!t || t.d || t.kind) return
+  const r = repeatOf(t)
+  if (!every) {
+    if (r) commit({ repeats: [tomb(r)] })
+    return
+  }
+  if (r) {
+    if (r.every !== every) commit({ repeats: [{ ...r, every }] })
+    return
+  }
+  const now = isoDate()
+  const rep: Repeat = { id: uid(), u: 0, every, from: t.date, after: t.date > now ? t.date : now, ...copyOf(t) }
+  for (const k of ['note', 'acct', 'src'] as const) if (rep[k] === undefined) delete rep[k]
+  commit({ repeats: [rep], txns: [{ ...t, rep: rep.id }] })
+}
+
+/**
+ * Log every repeating payment that has come due by `today` and isn't logged yet. Returns what it logged.
+ * Each is stamped with the start of its day, so the same entry logged on two devices is one record,
+ * and deleting it (always later) wins over a device that logs it again before it hears of that.
+ */
+export function logRepeats(today: string): Txn[] {
+  const txns: Txn[] = []
+  for (const r of repeatsOf(db)) {
+    if (!active(db, r)) continue
+    for (const o of occurrences(r, today)) {
+      if (db.txns[o.id]) continue
+      const [y, m, d] = o.date.split('-').map(Number)
+      const t: Txn = { id: o.id, u: new Date(y, m - 1, d).getTime(), date: o.date, cat: r.cat, amt: r.amt, cur: r.cur, base: toBase(r.amt, r.cur), rep: r.id }
+      if (r.note) t.note = r.note
+      if (r.acct && db.accounts[r.acct] && !db.accounts[r.acct].d) t.acct = r.acct
+      if (r.src) t.src = r.src
+      txns.push(t)
+    }
+  }
+  if (txns.length) commit({ txns }, true)
+  return txns
 }
 
 export function deleteTxn(id: ID) {
@@ -848,7 +922,7 @@ export function setNote(month: Month, text: string) {
 // ---------------------------------------------------------------- first run
 
 export const STARTER: { group: string; cats: (Partial<Category> & { name: string })[] }[] = [
-  { group: 'Every day', cats: [{ name: 'Living', daily: true, note: 'groceries · eating out · transport' }] },
+  { group: 'Every day', cats: [{ name: 'Living', daily: true, note: 'groceries, eating out, transport' }] },
   { group: 'Fixed', cats: [{ name: 'Phone' }, { name: 'BJJ / gym' }, { name: 'Business', note: 'Google Workspace' }] },
   { group: 'Flexible', cats: [{ name: 'Purchases' }, { name: 'Trips' }, { name: 'Other' }] },
   {
