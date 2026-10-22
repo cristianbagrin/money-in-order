@@ -817,6 +817,11 @@ textarea:focus {
 .amount-val.is-empty {
   color: var(--rule-strong);
 }
+/* money coming in (a + in front) */
+.amount-val.in,
+.amount-wrap.in {
+  color: var(--green);
+}
 .amount-input {
   min-height: 0 !important;
   border: 0 !important;
@@ -844,7 +849,7 @@ textarea:focus {
 
 .keypad {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, 1fr) 0.72fr;
   margin: 12px calc(-1 * var(--gutter)) 0;
   border-top: 1px solid var(--rule);
   background: var(--surface);
@@ -866,11 +871,15 @@ textarea:focus {
   justify-content: center;
   transition: background 0.12s;
 }
-.key:nth-child(3n) {
+.key:nth-child(4n) {
   border-right: 0;
 }
-.key:nth-child(n + 10) {
+.key:nth-child(n + 13) {
   border-bottom: 0;
+}
+.key.op {
+  color: var(--pen);
+  background: var(--bg);
 }
 .key:active {
   background: var(--sunk);

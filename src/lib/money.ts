@@ -175,7 +175,8 @@ const MONEY_MARKS = /NT\$|[A-Z]{1,3}\$|[$€£¥₩₹₪₺₴₱₫฿]|zł|K�
  * result is rounded to what that currency can hold.
  */
 export function evalAmount(input: string, code?: string): number | null {
-  const v = evalRaw(input.replace(MONEY_MARKS, ''))
+  // A sum still being typed ("200 + 15 +") counts up to its last number.
+  const v = evalRaw(input.replace(MONEY_MARKS, '').replace(/[\s+\-−*/×÷]+$/, ''))
   return v === null ? null : roundFor(code, v)
 }
 
@@ -196,6 +197,7 @@ function evalRaw(input: string): number | null {
         sign = -sign
         continue
       }
+      if (p === '+') continue
       const v = parseAmount(p)
       if (v === null) return null
       nums.push(sign * v)

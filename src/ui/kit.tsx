@@ -99,6 +99,18 @@ export function Toasts() {
 
 // ---------------------------------------------------------------- keypad (phones only)
 
+const OPS = '+-*/'
+const OP_SIGN: Record<string, string> = { '+': '+', '-': '−', '*': '×', '/': '÷' }
+const OP_NAME: Record<string, string> = { '+': 'plus', '-': 'minus', '*': 'times', '/': 'divided by' }
+
+/** How a typed sum reads: "1200+15*3" -> "1,200 + 15 × 3". */
+export function showSum(s: string): string {
+  return groupTyped(s)
+    .replace(/\s+/g, '')
+    .replace(/[+\-−*/×÷]/g, (op, i) => (i === 0 ? op : ` ${OP_SIGN[op] ?? op} `))
+}
+
+/** Phone keypad: digits, and + − × ÷ for sums (a + in front means money coming in). */
 export function Keypad(props: { value: string; onChange: (v: string) => void; decimals: number }) {
   const value = useRef(props.value)
   value.current = props.value
@@ -107,17 +119,32 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
 
   const press = (k: string) => {
     let v = value.current
+    // The number being typed: the part after the last + − × ÷.
+    const num = v.split(/[+\-*/]/).pop() ?? ''
+    const last = v.slice(-1)
     if (k === 'back') v = v.slice(0, -1)
-    else if (k === '.') {
-      if (v.includes('.')) return
-      v = (v || '0') + '.'
+    else if (OPS.includes(k)) {
+      // A + in front means money coming in; anything else needs a number before it.
+      if (!v) {
+        if (k !== '+') return
+        v = '+'
+      } else if (OPS.includes(last)) {
+        if (v.length === 1) return
+        v = v.slice(0, -1) + k
+      } else {
+        if (v.length >= 40) return
+        v += k
+      }
+    } else if (k === '.') {
+      if (num.includes('.')) return
+      v += num ? '.' : '0.'
     } else if (k === '00') {
-      if (!v || v.includes('.') || v.length >= 8) return
+      if (!num || num.includes('.') || num === '0' || num.length >= 8) return
       v += '00'
     } else {
-      if (v.includes('.') && v.split('.')[1].length >= 2) return
-      if (v === '0') v = ''
-      if (v.replace('.', '').length >= 9) return
+      if (num.includes('.') && num.split('.')[1].length >= 2) return
+      if (num === '0') v = v.slice(0, -1)
+      if (num.replace('.', '').length >= 9) return
       v += k
     }
     haptic('light')
@@ -125,13 +152,13 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
     props.onChange(v)
   }
   const endHold = () => clearTimeout(hold.current)
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', props.decimals ? '.' : '00', '0', 'back']
+  const keys = ['1', '2', '3', '+', '4', '5', '6', '-', '7', '8', '9', '*', props.decimals ? '.' : '00', '0', 'back', '/']
   return (
     <div class="keypad" role="group" aria-label="Amount keypad">
       {keys.map((k) => (
         <button
           key={k}
-          class="key"
+          class={`key${OPS.includes(k) ? ' op' : ''}`}
           // Pointer-down feels instant on a phone. The click that follows a touch is ignored;
           // a click with no pointer before it comes from the keyboard.
           onPointerDown={(e) => {
@@ -158,9 +185,9 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
             press(k)
           }}
           onContextMenu={(e) => e.preventDefault()}
-          aria-label={k === 'back' ? 'Delete (hold to clear)' : k}
+          aria-label={k === 'back' ? 'Delete (hold to clear)' : OP_NAME[k] ?? k}
         >
-          {k === 'back' ? <IconBack /> : k}
+          {k === 'back' ? <IconBack /> : OP_SIGN[k] ?? k}
         </button>
       ))}
     </div>
@@ -170,29 +197,28 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
 // ---------------------------------------------------------------- typed amounts
 
 /**
- * Call first thing in an amount field's input handler: puts the thousands separators in as you type,
- * keeps the caret after the same digit, and returns the new value. `numbersOnly` drops anything that
- * isn't a digit, a decimal point or a leading minus. Pasted text is left as pasted (it may use other conventions).
+ * Call first thing in an amount field's input handler. Only numbers and sums get in ("200 + 15 - 12";
+ * no letters), one decimal point per number, and the thousands separators go in as you type (not on
+ * a paste, which may use other conventions). Keeps the caret after the same digit; returns the new value.
  */
-export function regroup(e: Event, opts: { numbersOnly?: boolean } = {}): string {
+export function regroup(e: Event): string {
   const el = e.currentTarget as HTMLInputElement
   const raw = el.value
   const type = (e as InputEvent).inputType ?? ''
-  if (type === 'insertFromPaste' || type === 'insertFromDrop') return raw
   const caret = el.selectionStart ?? raw.length
-  let before = raw.slice(0, caret)
-  let after = raw.slice(caret)
-  if (opts.numbersOnly) {
-    const keep = (t: string, start: boolean) => t.replace(/[^\d.,-]/g, '').replace(/-/g, (m, i) => (start && i === 0 ? m : ''))
-    before = keep(before, true)
-    after = keep(after, !before)
-    // One decimal point at most: a second one typed is ignored.
+  const MARK = '\u0001'
+  let s = (raw.slice(0, caret) + MARK + raw.slice(caret))
+    .replace(/[^\d.,+\-−*/×÷ \u0001]/g, '')
+    .replace(/\*/g, '×')
+    .replace(/\//g, '÷')
+  // In each number the first decimal point stays; another one typed is ignored.
+  s = s.replace(/[\d.,\u0001]+/g, (run) => {
     let dot = false
-    const once = (t: string) => t.replace(/\./g, (m) => (dot ? '' : ((dot = true), m)))
-    before = once(before)
-    after = once(after)
-  }
-  const value = groupTyped(before + after)
+    return run.replace(/\./g, (m) => (dot ? '' : ((dot = true), m)))
+  })
+  const before = s.slice(0, s.indexOf(MARK))
+  s = s.replace(MARK, '')
+  const value = type === 'insertFromPaste' || type === 'insertFromDrop' ? s : groupTyped(s)
   // The caret goes after the same number of characters, not counting separators.
   const want = before.replace(/,/g, '').length
   let pos = 0

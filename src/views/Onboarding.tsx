@@ -171,7 +171,7 @@ export function Onboarding(props: { onDone: () => void }) {
               value={a.bal}
               onFocus={(e) => e.currentTarget.select()}
               onInput={(e) => {
-                const bal = regroup(e, { numbersOnly: true })
+                const bal = regroup(e)
                 setAccounts(accounts.map((x, k) => (k === i ? { ...x, bal } : x)))
               }}
             />

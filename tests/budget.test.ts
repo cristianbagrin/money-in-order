@@ -280,7 +280,7 @@ describe('evalAmount', () => {
     expect(evalAmount('-50')).toBe(-5000)
     expect(evalAmount('12.5')).toBe(1250)
     expect(evalAmount('abc')).toBe(null)
-    expect(evalAmount('5+')).toBe(null)
+    expect(evalAmount('5+')).toBe(500) // a sum still being typed counts up to its last number
   })
 })
 

@@ -28,3 +28,13 @@ describe('zero as shown', () => {
     expect(fmt(-100, 'TWD')).toBe('−NT$1')
   })
 })
+
+describe('sums in amount fields', () => {
+  it('adds up as typed, a + in front and a trailing operator are fine', () => {
+    expect(evalAmount('200 + 15 - 12')).toBe(20300)
+    expect(evalAmount('+300')).toBe(30000)
+    expect(evalAmount('1,200 × 3')).toBe(360000)
+    expect(evalAmount('200 +')).toBe(20000)
+    expect(evalAmount('abc')).toBe(null)
+  })
+})

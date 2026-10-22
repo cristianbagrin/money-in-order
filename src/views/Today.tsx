@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { daily, monthView } from '../lib/budget'
 import { dayOfMonth, daysInMonth, isoDate, monthOf } from '../lib/dates'
-import { cur, evalAmount, fmt, keypadToMinor } from '../lib/money'
+import { cur, evalAmount, fmt } from '../lib/money'
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type ID } from '../lib/types'
 import { DatePill } from '../ui/calendar'
 import { useIndex, useMedia } from '../ui/hooks'
-import { Keypad, NoteField, regroup, toast } from '../ui/kit'
+import { Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { haptic, play } from '../ui/sound'
 
@@ -161,9 +161,12 @@ export function Register(props: { today: string; touch: boolean }) {
   const currency = dr.currency ?? base
   const date = dr.date ?? today
   const c = cur(currency)
-  const typed = touch ? null : evalAmount(dr.digits, currency)
-  const invalid = !touch && dr.digits.trim() !== '' && typed === null
-  const amount = touch ? keypadToMinor(dr.digits) : Math.abs(typed ?? 0)
+  // Sums allowed ("200 + 15 - 12"). A + in front means money coming in: a refund, money back into the category.
+  const inflow = /^\s*\+/.test(dr.digits)
+  const typed = evalAmount(dr.digits, currency)
+  const invalid = !touch && dr.digits.trim() !== '' && (typed === null || (inflow && typed <= 0))
+  const amount = typed === null ? 0 : inflow ? Math.max(0, typed) : Math.abs(typed)
+  const isSum = /\d\s*[+\-−*/×÷]/.test(dr.digits)
   const amountBase = currency === base ? amount : toBase(amount, currency)
   const currencies = currenciesInUse().filter(hasRate)
   const amountRef = useRef<HTMLInputElement>(null)
@@ -222,7 +225,7 @@ export function Register(props: { today: string; touch: boolean }) {
     const cm = view.byId.get(id)
     if (!cm) return { text: fmt(0, base), over: false }
     const now = cm.cat.daily && dd && !(dd.allowance === 0 && cm.available <= 0) ? dd.leftToday : cm.available
-    const l = now - amountBase
+    const l = inflow ? now + amountBase : now - amountBase
     // Red is for a real problem: already overspent, or this entry would overspend.
     return { text: fmt(l, base), over: l < 0 }
   }
@@ -237,13 +240,13 @@ export function Register(props: { today: string; touch: boolean }) {
     const before = { ...draft }
     const income = cat === RTA
     const name = income ? 'Income' : ix.catById.get(cat)?.name ?? ''
-    const label = `${fmt(amount, currency)} ${income ? 'income' : `· ${name}`}`
+    const label = `${inflow && !income ? '+' : ''}${fmt(amount, currency)} ${income ? 'income' : `· ${name}`}`
     undoable(
       label,
-      () => addTxn({ date, cat, amt: income ? amount : -amount, cur: currency, note: dr.note.trim() || undefined }),
+      () => addTxn({ date, cat, amt: income || inflow ? amount : -amount, cur: currency, note: dr.note.trim() || undefined }),
       () => setDraft(before),
     )
-    play(income ? 'income' : 'log')
+    play(income || inflow ? 'income' : 'log')
     haptic('medium')
     flash(el ?? null, 'pulse-once')
     setDraft({ digits: '', note: '', date: null, currency: null })
@@ -280,7 +283,7 @@ export function Register(props: { today: string; touch: boolean }) {
       if (document.querySelector('dialog[open]')) return
       const el = document.activeElement as HTMLElement | null
       const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
-      if (!typing && /^[0-9.,]$/.test(e.key)) {
+      if (!typing && /^[0-9.,+\-*/]$/.test(e.key)) {
         amountRef.current?.focus()
         return
       }
@@ -308,27 +311,30 @@ export function Register(props: { today: string; touch: boolean }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [touch])
 
-  const display = dr.digits ? (c.suffix ? `${fmtDigits(dr.digits)} ${c.symbol}` : `${c.symbol}${fmtDigits(dr.digits)}`) : c.suffix ? `0 ${c.symbol}` : `${c.symbol}0`
+  const sum = showSum(dr.digits.replace(/^\s*\+/, '')) || '0'
+  const display = (inflow ? '+' : '') + (c.suffix ? `${sum} ${c.symbol}` : `${c.symbol}${sum}`)
+  // A sum shows what it comes to.
+  const total = isSum && typed !== null ? `= ${fmt(amount, currency)}` : ''
   const sym = (
     <span class="amount-sym" aria-hidden="true">
       {c.symbol}
     </span>
   )
-  // The line under the amount only speaks in another currency, but it keeps its height (wherever the
-  // currency can be switched) so choosing one moves nothing.
+  // The line under the amount says what a sum comes to and what another currency is worth. It keeps its
+  // height wherever the currency can be switched, so choosing one moves nothing.
   const converted = currency !== base && amount > 0
 
   return (
     <div class="register" ref={regRef}>
       <div class="amountline" ref={amountBox}>
         {touch ? (
-          <div class={`amount-val${dr.digits ? '' : ' is-empty'}`} aria-live="polite" style={{ fontSize: fitSize(display, 40, 9) }}>
+          <div class={`amount-val${dr.digits ? '' : ' is-empty'}${inflow ? ' in' : ''}`} aria-live="polite" style={{ fontSize: fitSize(display, 40, 9) }}>
             {display}
           </div>
         ) : (
           // The currency stays put beside the number, as on the phone; an amount that can't be read turns red.
           <div
-            class={`amount-wrap${dr.digits ? '' : ' is-empty'}${invalid ? ' invalid' : ''}`}
+            class={`amount-wrap${dr.digits ? '' : ' is-empty'}${invalid ? ' invalid' : inflow ? ' in' : ''}`}
             onMouseDown={(e) => {
               if (e.target === amountRef.current) return
               e.preventDefault()
@@ -378,7 +384,7 @@ export function Register(props: { today: string; touch: boolean }) {
             onClick={() => {
               const next = currencies[(currencies.indexOf(currency) + 1) % currencies.length]
               // A currency without cents can't keep typed cents.
-              setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.split('.')[0] : dr.digits })
+              setDraft({ currency: next, digits: touch && !cur(next).decimals ? dr.digits.replace(/\.\d*/g, '') : dr.digits })
             }}
           >
             {currency}
@@ -386,9 +392,9 @@ export function Register(props: { today: string; touch: boolean }) {
         )}
         <DatePill value={date} today={today} max={today} onChange={(v) => setDraft({ date: v === today ? null : v })} />
       </div>
-      {currencies.length > 1 && (
-        <div class="conv" aria-hidden={converted ? undefined : 'true'}>
-          {converted ? `≈ ${fmt(amountBase, base)}` : ' '}
+      {(currencies.length > 1 || total) && (
+        <div class="conv" aria-hidden={converted || total ? undefined : 'true'}>
+          {[total, converted ? `≈ ${fmt(amountBase, base)}` : ''].filter(Boolean).join('   ') || ' '}
         </div>
       )}
       <NoteField
@@ -426,10 +432,4 @@ export function Register(props: { today: string; touch: boolean }) {
       {touch && <Keypad value={dr.digits} onChange={(v) => setDraft({ digits: v })} decimals={c.decimals} />}
     </div>
   )
-}
-
-function fmtDigits(s: string): string {
-  const [w, f] = s.split('.')
-  const whole = Number(w || '0').toLocaleString('en-US')
-  return f !== undefined ? `${whole}.${f}` : whole
 }
