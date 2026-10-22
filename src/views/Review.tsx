@@ -484,7 +484,7 @@ export function situationText(ix: Index, today: string): string {
   const v = monthView(ix, current, current)
   const out: string[] = []
 
-  out.push(`Money in Order, ${today} (day ${dayOfMonth(today)} of ${daysInMonth(current)}). Amounts in ${base}.`)
+  out.push(`My budget as of ${today} (day ${dayOfMonth(today)} of ${daysInMonth(current)}). Amounts in ${base}.`)
   out.push('')
   out.push(`Ready to assign: ${f(v.readyToAssign)}`)
   const invest = balances(ix).reduce((sum, b) => sum + (b.acct.invest ? b.base : 0), 0)
