@@ -94,7 +94,7 @@ function act(r: () => number): string | null {
   const month = pick(r, MONTHS)!
   const amount = () => Math.round(r() * 5000) * 100 + (r() < 0.2 ? Math.round(r() * 99) : 0)
   const currency = () => pick(r, ['TWD', 'TWD', 'TWD', 'EUR', 'JPY', 'USD'])!
-  const n = Math.floor(r() * 32)
+  const n = Math.floor(r() * 34)
   switch (n) {
     case 0:
     case 1:
@@ -259,6 +259,22 @@ function act(r: () => number): string | null {
       }
       S.undoable('reorder currency', () => S.placeCurrency(pick(r, s.extraCurrencies)!, Math.floor(r() * 3)))
       return 'reorder currency'
+    }
+    case 31: {
+      if (!txn || txn.kind) return null
+      const every = pick(r, ['month', 'year', null] as const)!
+      S.undoable('repeat', () => S.setRepeat(txn.id, every))
+      return 'repeat'
+    }
+    case 32: {
+      // Months go by: repeats set up a while ago log what came due (twice is the same as once).
+      const reps = live(db.repeats ?? {})
+      if (!reps.length) return null
+      S.commit({ repeats: reps.map((x) => ({ ...x, after: addDays(TODAY, -Math.floor(r() * 400)) })) })
+      const made = S.logRepeats(TODAY)
+      expect(S.logRepeats(TODAY)).toEqual([])
+      for (const t of made) expect(t.date <= TODAY && t.u <= Date.now(), 'a repeat logged ahead of time').toBe(true)
+      return 'log repeats'
     }
     default:
       if (r() < 0.5 && S.sources().length > 1) {
