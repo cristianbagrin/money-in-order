@@ -1432,7 +1432,8 @@ textarea:focus {
 .txn-wrap.swiping .txn {
   will-change: transform;
 }
-.txn-del {
+.txn-del,
+.swipe-del {
   display: none;
   position: absolute;
   inset: 0;
@@ -1445,7 +1446,8 @@ textarea:focus {
   font-size: 14px;
   font-weight: 650;
 }
-.txn-wrap.swiping .txn-del {
+.txn-wrap.swiping .txn-del,
+.swiping > .swipe-del {
   display: flex;
 }
 .txn-x {

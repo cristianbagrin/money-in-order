@@ -43,6 +43,8 @@ export interface Category extends Rec {
   note?: string
   /** kept for history, hidden from everyday screens */
   archived?: 1
+  /** an investment account: money spent from this (savings) category moves into it */
+  acct?: ID
 }
 
 export interface Txn extends Rec {
@@ -55,8 +57,18 @@ export interface Txn extends Rec {
   /** the same amount in the base currency at the rate of the day; this is what the budget uses */
   base: number
   note?: string
-  /** start = opening balance, adj = correction found while counting, fx = exchange-rate drift */
-  kind?: 'start' | 'adj' | 'fx'
+  /**
+   * start = opening balance, adj = correction found while counting, fx = exchange-rate drift,
+   * move = money moved between two accounts (base 0: the plan doesn't change)
+   */
+  kind?: 'start' | 'adj' | 'fx' | 'move'
+  /** the account the money left or arrived in (only when accounts are tracked) */
+  acct?: ID
+  /** income: where it came from (a Source id) */
+  src?: ID
+  /** move: the account the money went to, and what arrived there in that account's currency (when it differs) */
+  to?: ID
+  toAmt?: number
 }
 
 /** Money given to a category in a month. id = `${m}|${cat}` */
@@ -71,6 +83,14 @@ export interface Account extends Rec {
   name: string
   cur: string
   order: number
+  /** investments: wealth tracked by its value, never spent from or counted into the plan */
+  invest?: 1
+}
+
+/** Where income comes from (salary, a client). Lives in Settings. */
+export interface Source {
+  id: ID
+  name: string
 }
 
 /** A snapshot of every account's real balance, taken when you count your money. */
@@ -84,6 +104,8 @@ export interface Count extends Rec {
   total: number
   /** what the budget expected before the correction */
   expected: number
+  /** accounts not typed in this count: their balance was carried over from what was known */
+  carried?: ID[]
 }
 
 /** Monthly reflection. id = month */
@@ -104,6 +126,10 @@ export interface Settings extends Rec {
   extraCurrencies: string[]
   /** onboarding finished */
   ready?: 1
+  /** each transaction says which account it came from */
+  trackAccounts?: 1
+  /** where income comes from, in display order */
+  sources?: Source[]
 }
 
 /** Live exchange rates. Machine data, kept apart from Settings so a background refresh never touches the user's choices. */

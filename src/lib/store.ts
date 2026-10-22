@@ -1,3 +1,4 @@
+import { balances } from './accounts'
 import { buildIndex, DEFAULT_SETTINGS, fundingPlan, monthView, settingsOf, type Index } from './budget'
 import { addMonths, isoDate, monthOf } from './dates'
 import { edit, repair, same } from './merge'
@@ -10,6 +11,7 @@ import {
   type Assign,
   type Category,
   type CollectionName,
+  type Count,
   type DB,
   type Group,
   type ID,
@@ -17,6 +19,7 @@ import {
   type RateTable,
   type Rec,
   type Settings,
+  type Source,
   type Txn,
 } from './types'
 
@@ -351,6 +354,40 @@ export function toBase(amt: number, from: string, rates: Rates = settings().rate
   return convert(amt, from, s.base, rates, s.base)
 }
 
+/** Each transaction says which account it came from (Today asks), or not (the default). */
+export function setTrackAccounts(on: boolean) {
+  updateSettings({ trackAccounts: on ? 1 : undefined })
+}
+
+// ---------------------------------------------------------------- income sources
+
+export function sources(): Source[] {
+  return settings().sources ?? []
+}
+
+export function addSource(name: string): Source {
+  const src: Source = { id: uid(), name }
+  updateSettings({ sources: [...sources(), src] })
+  return src
+}
+
+export function renameSource(id: ID, name: string) {
+  updateSettings({ sources: sources().map((x) => (x.id === id ? { ...x, name } : x)) })
+}
+
+/** Income logged from it stays, as plain income. */
+export function deleteSource(id: ID) {
+  updateSettings({ sources: sources().filter((x) => x.id !== id) })
+}
+
+export function placeSource(id: ID, index: number) {
+  const list = sources().filter((x) => x.id !== id)
+  const it = sources().find((x) => x.id === id)
+  if (!it) return
+  list.splice(Math.max(0, Math.min(index, list.length)), 0, it)
+  updateSettings({ sources: list })
+}
+
 // ---------------------------------------------------------------- transactions
 
 export interface NewTxn {
@@ -361,6 +398,10 @@ export interface NewTxn {
   note?: string
   kind?: Txn['kind']
   base?: number
+  acct?: ID
+  src?: ID
+  to?: ID
+  toAmt?: number
 }
 
 export function addTxn(t: NewTxn): Txn {
@@ -374,9 +415,25 @@ export function addTxn(t: NewTxn): Txn {
     base: t.base ?? toBase(t.amt, t.cur),
     ...(t.note ? { note: t.note } : {}),
     ...(t.kind ? { kind: t.kind } : {}),
+    ...(t.acct ? { acct: t.acct } : {}),
+    ...(t.src ? { src: t.src } : {}),
+    ...(t.to ? { to: t.to } : {}),
+    ...(t.toAmt !== undefined ? { toAmt: t.toAmt } : {}),
   }
+  if (rec.kind === 'move') rec.base = 0
   commit({ txns: [rec] })
   return rec
+}
+
+/**
+ * Move money between two accounts: `amt` (positive) leaves `from` in its currency, `toAmt` arrives in
+ * `to` when that account uses another currency. The plan doesn't change.
+ */
+export function addMove(m: { date: string; from: ID; to: ID; amt: number; toAmt?: number; note?: string }): Txn {
+  const from = db.accounts[m.from]
+  const to = db.accounts[m.to]
+  const toAmt = to && from && to.cur !== from.cur ? m.toAmt ?? convert(m.amt, from.cur, to.cur, settings().rates, settings().base) : undefined
+  return addTxn({ date: m.date, cat: RTA, kind: 'move', amt: -Math.abs(m.amt), cur: from?.cur ?? settings().base, acct: m.from, to: m.to, toAmt, note: m.note })
 }
 
 export function updateTxn(id: ID, patch: Partial<NewTxn>) {
@@ -390,7 +447,8 @@ export function updateTxn(id: ID, patch: Partial<NewTxn>) {
         next.cur === old.cur && old.amt !== 0 ? Math.round((old.base / old.amt) * next.amt) : toBase(next.amt, next.cur)
     }
   }
-  if (!next.note) delete next.note
+  for (const k of ['note', 'acct', 'src', 'to', 'toAmt'] as const) if (next[k] === undefined || next[k] === '') delete next[k]
+  if (next.kind === 'move') next.base = 0
   commit({ txns: [next] })
 }
 
@@ -496,9 +554,39 @@ export function categoryHasHistory(id: ID): boolean {
   )
 }
 
-export function deleteCategory(id: ID) {
+/**
+ * Delete a category for good. With `into`, its transactions and the money given to it move to that
+ * category first (nothing about your money changes); with `dropTxns`, its transactions are deleted too
+ * (the money they spent comes back to Ready to assign). Without either, use it only for an unused category.
+ */
+export function deleteCategory(id: ID, opts: { into?: ID; dropTxns?: boolean } = {}) {
   const c = db.cats[id]
-  if (c) commit({ cats: [tomb(c)] })
+  if (!c) return
+  const patch: Patch = { cats: [tomb(c)] }
+  const { into, dropTxns } = opts
+  if (into && into !== id && db.cats[into]) {
+    patch.txns = Object.values(db.txns)
+      .filter((t) => !t.d && t.cat === id)
+      .map((t) => ({ ...t, cat: into }))
+    const sums = new Map<Month, number>()
+    const assigns: Assign[] = []
+    for (const a of Object.values(db.assigns)) {
+      if (a.d || a.cat !== id || !a.amt) continue
+      sums.set(a.m, (sums.get(a.m) ?? 0) + a.amt)
+      assigns.push(tomb(a))
+    }
+    for (const [m, amt] of sums) assigns.push(assignRec(m, into, assignedOf(m, into) + amt))
+    patch.assigns = assigns
+  } else if (dropTxns) {
+    patch.txns = Object.values(db.txns)
+      .filter((t) => !t.d && t.cat === id)
+      .map(tomb)
+    patch.assigns = Object.values(db.assigns)
+      .filter((a) => !a.d && a.cat === id)
+      .map(tomb)
+  }
+  // An investment link or anything else pointing here is harmless; nothing else references a category.
+  commit(patch)
 }
 
 /** Put a category into a group at a position (drag and drop). */
@@ -571,9 +659,9 @@ export function saveAccount(a: Account) {
   commit({ accounts: [a] })
 }
 
-export function addAccount(name: string, currency: string): Account {
+export function addAccount(name: string, currency: string, opts: { invest?: boolean } = {}): Account {
   const order = Math.max(0, ...Object.values(db.accounts).filter((a) => !a.d).map((a) => a.order + 1))
-  const a: Account = { id: uid(), u: 0, name, cur: currency, order }
+  const a: Account = { id: uid(), u: 0, name, cur: currency, order, ...(opts.invest ? { invest: 1 as const } : {}) }
   commit({ accounts: [a] })
   return a
 }
@@ -585,6 +673,7 @@ export function deleteAccount(id: ID) {
 
 export interface CountInput {
   date: string
+  /** the balances typed in, in each account's currency. Accounts left out keep the balance known so far. */
   bal: Record<ID, number>
   rates: Rates
   /** where the unexplained difference goes: RTA or a category (e.g. forgotten spending) */
@@ -592,19 +681,38 @@ export interface CountInput {
 }
 
 export interface CountResult {
+  /** the cash counted, in base (every cash account: typed, or as known) */
   total: number
   expected: number
   fx: number
   diff: number
   first: boolean
+  /** a cash account was typed in, so the plan is checked against it (investments alone never change the plan) */
+  cash: boolean
+  /** every account's balance after this count, in its own currency */
+  full: Record<ID, number>
+  /** the accounts that were not typed in */
+  carried: ID[]
 }
 
 /** Work out what a count would change, without saving anything. */
 export function previewCount(input: Omit<CountInput, 'diffTo'>): CountResult {
   const s = settings()
+  const known = new Map(balances(getIndex()).map((b) => [b.acct.id, b.bal]))
   const accounts = Object.values(db.accounts).filter((a) => !a.d)
+  const full: Record<ID, number> = {}
+  const carried: ID[] = []
+  for (const a of accounts) {
+    if (input.bal[a.id] !== undefined) full[a.id] = input.bal[a.id]
+    else {
+      full[a.id] = known.get(a.id) ?? 0
+      carried.push(a.id)
+    }
+  }
+  const cashAccts = accounts.filter((a) => !a.invest)
+  const cash = cashAccts.some((a) => input.bal[a.id] !== undefined)
   let total = 0
-  for (const a of accounts) total += convert(input.bal[a.id] ?? 0, a.cur, s.base, input.rates, s.base)
+  for (const a of cashAccts) total += convert(full[a.id], a.cur, s.base, input.rates, s.base)
   let expected = 0
   for (const t of Object.values(db.txns)) if (!t.d) expected += t.base
   const counts = Object.values(db.counts)
@@ -612,10 +720,11 @@ export function previewCount(input: Omit<CountInput, 'diffTo'>): CountResult {
     .sort((a, b) => (a.date < b.date ? 1 : -1))
   const prev = counts[0]
   const first = !prev && !Object.values(db.txns).some((t) => !t.d && t.kind === 'start')
+  if (!cash) return { total: expected, expected, fx: 0, diff: 0, first: false, cash, full, carried }
   // Exchange-rate drift: how much the foreign balances from the last count changed in value.
   let fx = 0
   if (prev) {
-    for (const a of accounts) {
+    for (const a of cashAccts) {
       if (a.cur === s.base) continue
       const b = prev.bal[a.id]
       // Only the same money in the same currency can drift with rates; a changed currency is just a difference.
@@ -623,7 +732,7 @@ export function previewCount(input: Omit<CountInput, 'diffTo'>): CountResult {
       fx += convert(b, a.cur, s.base, input.rates, s.base) - convert(b, a.cur, s.base, prev.rates, s.base)
     }
   }
-  return { total, expected, fx: first ? 0 : fx, diff: total - expected - (first ? 0 : fx), first }
+  return { total, expected, fx: first ? 0 : fx, diff: total - expected - (first ? 0 : fx), first, cash, full, carried }
 }
 
 export function recordCount(input: CountInput): CountResult {
@@ -643,16 +752,15 @@ export function recordCount(input: CountInput): CountResult {
   })
   if (r.first) {
     if (r.diff) txns.push(mk(r.diff, RTA, 'start', 'Starting balance'))
-  } else {
+  } else if (r.cash) {
     if (r.fx) txns.push(mk(r.fx, RTA, 'fx', 'Exchange rates'))
     if (r.diff) txns.push(mk(r.diff, input.diffTo, 'adj', r.diff < 0 ? 'Unlogged spending' : 'Found money'))
   }
   const curs: Record<ID, string> = {}
   for (const a of Object.values(db.accounts)) if (!a.d) curs[a.id] = a.cur
-  commit({
-    counts: [{ id: uid(), u: 0, date: input.date, bal: input.bal, curs, rates: input.rates, total: r.total, expected: r.expected }],
-    txns,
-  })
+  const count: Count = { id: uid(), u: 0, date: input.date, bal: r.full, curs, rates: input.rates, total: r.total, expected: r.expected }
+  if (r.carried.length) count.carried = r.carried
+  commit({ counts: [count], txns })
   return r
 }
 
