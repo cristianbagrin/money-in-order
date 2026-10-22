@@ -19,6 +19,8 @@ export interface Balance {
   base: number
   /** the day the balance was last typed in (null: never) */
   asOf: Day | null
+  /** what was typed in that day, in the account's currency (null: never) */
+  typedBal: number | null
   /** follows logged transactions, rather than only the last count */
   tracked: boolean
 }
@@ -107,7 +109,13 @@ export function balances(ix: Index): Balance[] {
       }
     }
     bal = Math.round(bal)
-    return { acct: a, bal, base: convert(bal, a.cur, s.base, s.rates, s.base), asOf: typed?.date ?? null, tracked }
+    // (a count made before the account changed currency states it in the currency it had then)
+    let typedBal: number | null = null
+    if (typed) {
+      const was = typed.curs?.[a.id] ?? a.cur
+      typedBal = was === a.cur ? typed.bal[a.id] : Math.round(convert(typed.bal[a.id], was, a.cur, s.rates, s.base))
+    }
+    return { acct: a, bal, base: convert(bal, a.cur, s.base, s.rates, s.base), asOf: typed?.date ?? null, typedBal, tracked }
   })
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { transactionsCSV } from '../lib/export'
 import { refreshRates } from '../lib/rates'
 import { accountsInOrder } from '../lib/accounts'
-import { addSource, changeBase, deleteSource, renameSource, restoreBackup, setTrackAccounts, settings, sources, unarchiveCategory, undoable, updateSettings } from '../lib/store'
+import { addSource, changeBase, deleteSource, placeAccount, placeCurrency, placeSource, renameSource, restoreBackup, setTrackAccounts, settings, sources, unarchiveCategory, undoable, updateSettings } from '../lib/store'
 import { disableSync } from '../lib/sync'
 import { AccountForm, NO_AUTOFILL } from '../ui/account'
 import type { DB, Source } from '../lib/types'
@@ -10,6 +10,7 @@ import { CurrencyPicker } from '../ui/currency'
 import { useIndex, useSync } from '../ui/hooks'
 import { IconPlus, Section, toast } from '../ui/kit'
 import { play, setSoundOn, soundOn } from '../ui/sound'
+import { sortKey, useSortable } from '../ui/sortable'
 import '../ui/accounts.css'
 
 export function Settings(props: { onAccounts: () => void; onBack: () => void }) {
@@ -36,6 +37,10 @@ export function Settings(props: { onAccounts: () => void; onBack: () => void }) 
         <CurrencyPicker
           selected={[s.base, ...s.extraCurrencies]}
           main={s.base}
+          onReorder={(code, index) => {
+            undoable('Moved currency', () => placeCurrency(code, index))
+            play('drop')
+          }}
           onChange={async (selected, main) => {
             if (main !== s.base) {
               // The first tap of the double-tap may have removed it: keep it selected whatever happens next.
@@ -161,10 +166,22 @@ async function share(name: string, text: string, type: string) {
 function Accounts(props: { onAccounts: () => void }) {
   const ix = useIndex()
   const accounts = accountsInOrder(ix)
+  const ref = useRef<HTMLDivElement>(null)
+  const move = (id: string, index: number) => {
+    undoable('Moved account', () => placeAccount(id, index))
+    play('drop')
+  }
+  useSortable(ref, { flow: true, onDrop: (info) => move(info.id, info.index) })
   return (
-    <div class="pills">
-      {accounts.map((a) => (
-        <button key={a.id} class="pill" onClick={props.onAccounts}>
+    <div class="pills" ref={ref}>
+      {accounts.map((a, i) => (
+        <button
+          key={a.id}
+          class="pill"
+          data-sort-id={a.id}
+          onClick={props.onAccounts}
+          onKeyDown={(e) => sortKey(e, i, accounts.length, (to) => move(a.id, to))}
+        >
           {a.name} <small>{a.invest ? 'investment' : a.cur}</small>
         </button>
       ))}
@@ -178,26 +195,34 @@ function Accounts(props: { onAccounts: () => void }) {
   )
 }
 
-/** Income sources: pills, a + that turns into a name field, a tap to rename or remove. */
+/** Income sources: pills (drag to change the order Today offers them in), a + that turns into a name field, a tap to rename or remove. */
 function Sources() {
   useIndex()
   const list = sources()
   const [open, setOpen] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const editing = list.find((x) => x.id === open)
+  const ref = useRef<HTMLDivElement>(null)
+  const move = (id: string, index: number) => {
+    undoable('Moved income source', () => placeSource(id, index))
+    play('drop')
+  }
+  useSortable(ref, { flow: true, disabled: adding, onDrop: (info) => move(info.id, info.index) })
 
   return (
     <>
-      <div class="pills">
-        {list.map((x) => (
+      <div class="pills" ref={ref}>
+        {list.map((x, i) => (
           <button
             key={x.id}
             class="pill"
+            data-sort-id={x.id}
             aria-pressed={open === x.id}
             onClick={() => {
               setAdding(false)
               setOpen(open === x.id ? null : x.id)
             }}
+            onKeyDown={(e) => sortKey(e, i, list.length, (to) => move(x.id, to))}
           >
             {x.name}
           </button>

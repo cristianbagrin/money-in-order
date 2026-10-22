@@ -15,6 +15,22 @@
   will-change: transform;
 }
 
+/* A pill in hand: still a pill, lifted out of its row (the slot keeps its place). */
+.sort-lifted.sort-flow {
+  border-radius: 999px;
+  box-shadow: 0 10px 22px -6px rgba(21, 36, 44, 0.3);
+}
+.sort-lifted.sort-flow[aria-pressed='true'] {
+  background: var(--pen) !important;
+}
+.sort-slot {
+  flex: none;
+  box-sizing: border-box;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
 /* A lifted group reads as one card, not white with grey row bands. */
 .sort-lifted [data-sort-id] {
   background: transparent;
