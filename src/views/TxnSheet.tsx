@@ -63,7 +63,7 @@ export const TxnRow = memo(function TxnRow(props: {
   }
 
   return (
-    <div class={`txn-wrap${props.selected ? ' sel' : ''}`} ref={sw.wrap}>
+    <div class={`txn-wrap${props.selected ? ' sel' : ''}`} ref={sw.wrap} data-sort-id={t.id}>
       <div class="txn-del" aria-hidden="true">
         Delete
       </div>

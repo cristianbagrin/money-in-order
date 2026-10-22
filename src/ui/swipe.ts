@@ -58,6 +58,8 @@ export function useSwipeDelete<W extends HTMLElement = HTMLDivElement, R extends
     const s = swipe.current
     const el = row.current
     if (!s || !el || e.pointerId !== s.id) return
+    // A row held and lifted to be dragged elsewhere isn't swiped too.
+    if (!s.drag && document.body.classList.contains('is-sorting')) return void (swipe.current = null)
     const dx = e.clientX - s.x0
     if (!s.drag) {
       const dy = e.clientY - s.y0

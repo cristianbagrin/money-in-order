@@ -237,8 +237,16 @@ function KeyGrid(props: { decimals: number; press: (k: string) => void; clear: (
 
 // ---------------------------------------------------------------- the keypad under amount fields (phones)
 
-/** Put the caret after the last character once the field shows its value (never select it all). */
+/** The last press anywhere: a field focused by it keeps the caret where it landed. */
+let lastPress = { target: null as EventTarget | null, type: '', at: 0 }
+if (typeof document !== 'undefined')
+  document.addEventListener('pointerdown', (e) => (lastPress = { target: e.target, type: e.pointerType, at: Date.now() }), true)
+const pressedJustNow = (el: Element) => lastPress.target === el && Date.now() - lastPress.at < 800
+
+/** Put the caret after the last character once the field shows its value (never select it all). A field
+ * focused by a press keeps the caret where it was pressed. */
 export function caretToEnd(el: HTMLInputElement) {
+  if (pressedJustNow(el)) return
   requestAnimationFrame(() => {
     if (document.activeElement !== el) return
     const n = el.value.length
@@ -509,6 +517,59 @@ export function letGoOnTapAway() {
     },
     true,
   )
+}
+
+/**
+ * Text that turns into a field when pressed: where the press landed, as an offset into the text, for the
+ * field to put its caret there. Call in the press's handler; the field takes it with `takeCaret`.
+ */
+let caretMark: { at: number; t: number } | null = null
+export function markCaret(e: MouseEvent) {
+  const el = e.currentTarget as Element
+  type Doc = Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null }
+  const d = document as Doc
+  let node: Node | null = null
+  let at = 0
+  if (d.caretPositionFromPoint) {
+    const p = d.caretPositionFromPoint(e.clientX, e.clientY)
+    if (p) ((node = p.offsetNode), (at = p.offset))
+  } else if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(e.clientX, e.clientY)
+    if (r) ((node = r.startContainer), (at = r.startOffset))
+  }
+  caretMark = node && node.nodeType === Node.TEXT_NODE && el.contains(node) ? { at, t: Date.now() } : null
+}
+/** The offset `markCaret` saw a moment ago, once; null when the field wasn't opened by a press (the caret goes to the end). */
+export function takeCaret(): number | null {
+  const m = caretMark
+  caretMark = null
+  return m && Date.now() - m.t < 1500 ? m.at : null
+}
+
+/**
+ * A double-click (or double-tap) on a number selects all of it: browsers stop a word at the thousands
+ * separator, so "12,500" would only give "500".
+ */
+export function wholeNumbers() {
+  const widen = () => {
+    const el = document.activeElement
+    if (!(el instanceof HTMLInputElement)) return
+    const a = el.selectionStart
+    const b = el.selectionEnd
+    const v = el.value
+    if (a === null || b === null || a === b || !/^\d+$/.test(v.slice(a, b))) return
+    if (!/[,.]/.test(v[a - 1] ?? '') && !/[,.]/.test(v[b] ?? '')) return
+    let s = a
+    let e = b
+    while (s > 0 && /[\d,.]/.test(v[s - 1])) s--
+    while (e < v.length && /[\d,.]/.test(v[e])) e++
+    if (s !== a || e !== b) el.setSelectionRange(s, e)
+  }
+  document.addEventListener('dblclick', () => requestAnimationFrame(widen), true)
+  // A double-tap on a phone has no dblclick: its word selection comes right after a touch.
+  document.addEventListener('selectionchange', () => {
+    if (lastPress.type === 'touch' && Date.now() - lastPress.at < 900) widen()
+  })
 }
 
 // ---------------------------------------------------------------- typed amounts
