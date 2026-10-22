@@ -1,0 +1,238 @@
+/* Plan: the planner (savings line, coming months), category rows that swipe away, and the category sheet. */
+
+/* ---------------------------------------------------------------- rows */
+
+/* the row's outer box: holds the red Delete layer a swipe uncovers */
+.crow-wrap {
+  position: relative;
+}
+.crow-wrap.swiping {
+  overflow: hidden;
+}
+.crow-wrap > .swipe-del {
+  border-radius: 0;
+}
+.crow-wrap.swiping > .crow {
+  will-change: transform;
+}
+/* lifted to reorder: one card, no grey row band */
+.sort-lifted .crow {
+  background: transparent;
+}
+/* what the plan suggests, faint in an empty box */
+.casg::placeholder {
+  color: var(--ink-3);
+  opacity: 0.55;
+}
+
+/* ---------------------------------------------------------------- savings line */
+
+.plan-save {
+  margin-top: 12px;
+  font-size: 14px;
+}
+.plan-save-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-2);
+}
+.plan-save-line b {
+  color: var(--ink);
+  font-weight: 650;
+}
+.plan-save.done .plan-save-line b {
+  color: var(--green);
+}
+.plan-save-line .faint {
+  font-size: 12.5px;
+}
+.plan-save-bar {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--sunk);
+  overflow: hidden;
+}
+.plan-save-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--green);
+  transition: width 0.4s var(--ease);
+}
+
+/* ---------------------------------------------------------------- coming months */
+
+.outlook {
+  margin-top: 12px;
+}
+.outlook-months {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+/* a month: its name over a short bar (planned green, covered pale green, short red) */
+.outlook-m {
+  position: relative;
+  min-height: 34px;
+  padding: 4px 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+.outlook-m::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--green-wash);
+}
+.outlook-m.funded::after {
+  background: var(--green);
+}
+.outlook-m.short {
+  color: var(--red);
+}
+.outlook-m.short::after {
+  background: var(--red);
+}
+.outlook-m[aria-current] {
+  color: var(--ink);
+  background: var(--sunk);
+}
+.outlook-m.short[aria-current] {
+  color: var(--red);
+}
+.outlook-m:active {
+  transform: scale(0.95);
+}
+@media (hover: hover) {
+  .outlook-m:hover {
+    background: var(--sunk);
+  }
+}
+.outlook-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.outlook-line.neg {
+  color: var(--red);
+  font-weight: 560;
+}
+
+/* ---------------------------------------------------------------- category sheet */
+
+/* Assigned ± from last month − Spent, reading toward the big number above */
+.cs-math {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px 10px;
+  margin-top: 12px;
+}
+.cs-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--ink);
+}
+.cs-fig-l {
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.cs-fig > .num,
+.cs-op {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 36px;
+}
+.cs-op {
+  color: var(--ink-3);
+  font-weight: 450;
+}
+/* spent opens what it went on */
+.cs-spent > .num {
+  color: var(--pen);
+}
+.cs-spent:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) {
+  .cs-spent:hover > .num {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+}
+.cs-math .cs-asg {
+  width: calc(var(--len, 1) * 0.6em + 24px);
+  min-width: 76px;
+  max-width: 170px;
+  min-height: 36px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  text-align: right;
+  font-variation-settings: var(--vs-column);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.cs-math .cs-asg:focus {
+  border-color: var(--pen);
+}
+
+/* a labelled pill row ("Goes into") */
+.cs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 14px;
+}
+.cs-row-l {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.cs-foot-r {
+  display: flex;
+  gap: 18px;
+}
+
+/* deleting a category with history: where its transactions go */
+.cs-del {
+  margin-top: 8px;
+  padding: 12px 12px 6px;
+  border-radius: 16px;
+  background: var(--sunk);
+}
+.cs-del p {
+  margin: 0 0 10px;
+  font-weight: 620;
+}
+.cs-del-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.cs-del-foot .link {
+  font-size: 14px;
+}

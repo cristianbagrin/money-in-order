@@ -1,9 +1,12 @@
 import type { ComponentChildren } from 'preact'
 import { createPortal } from 'preact/compat'
-import { useEffect, useRef, useState } from 'preact/hooks'
-import { groupTyped } from '../lib/money'
-import { undo } from '../lib/store'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { calcPress, isSum } from '../lib/calc'
+import { cur, evalAmount, fmt, groupTyped } from '../lib/money'
+import { settings, undo } from '../lib/store'
+import { useMedia } from './hooks'
 import { onTopSheet, topSheet } from './sheet'
+import './calc.css'
 import { haptic, play } from './sound'
 
 // ---------------------------------------------------------------- toast
@@ -114,8 +117,6 @@ export function showSum(s: string): string {
 export function Keypad(props: { value: string; onChange: (v: string) => void; decimals: number }) {
   const value = useRef(props.value)
   value.current = props.value
-  const lastPointer = useRef(0)
-  const hold = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const press = (k: string) => {
     let v = value.current
@@ -151,27 +152,40 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
     value.current = v
     props.onChange(v)
   }
+  const clear = () => {
+    if (!value.current) return false
+    value.current = ''
+    props.onChange('')
+    return true
+  }
+  return <KeyGrid decimals={props.decimals} press={press} clear={clear} />
+}
+
+/** The keys themselves, shared by Today's keypad and the one docked under amount fields. */
+function KeyGrid(props: { decimals: number; press: (k: string) => void; clear: () => boolean }) {
+  const lastPointer = useRef(0)
+  const hold = useRef<ReturnType<typeof setTimeout>>(undefined)
   const endHold = () => clearTimeout(hold.current)
+  useEffect(() => endHold, [])
   const keys = ['1', '2', '3', '+', '4', '5', '6', '-', '7', '8', '9', '*', props.decimals ? '.' : '00', '0', 'back', '/']
   return (
     <div class="keypad" role="group" aria-label="Amount keypad">
       {keys.map((k) => (
         <button
           key={k}
+          type="button"
           class={`key${OPS.includes(k) ? ' op' : ''}`}
-          // Pointer-down feels instant on a phone. The click that follows a touch is ignored;
-          // a click with no pointer before it comes from the keyboard.
+          // Pointer-down feels instant on a phone (and keeps the focus where it is). The click that
+          // follows a touch is ignored; a click with no pointer before it comes from the keyboard.
           onPointerDown={(e) => {
             e.preventDefault()
             lastPointer.current = Date.now()
-            press(k)
+            props.press(k)
             if (k === 'back') {
               endHold()
               // Hold ⌫ to clear everything (iOS never fires contextmenu, so time it ourselves).
               hold.current = setTimeout(() => {
-                if (!value.current) return
-                value.current = ''
-                props.onChange('')
+                if (!props.clear()) return
                 play('delete')
                 haptic('medium')
               }, 480)
@@ -182,7 +196,7 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
           onPointerCancel={endHold}
           onClick={() => {
             if (Date.now() - lastPointer.current < 1000) return
-            press(k)
+            props.press(k)
           }}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={k === 'back' ? 'Delete (hold to clear)' : OP_NAME[k] ?? k}
@@ -191,6 +205,158 @@ export function Keypad(props: { value: string; onChange: (v: string) => void; de
         </button>
       ))}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------- the keypad under amount fields (phones)
+
+/** Put the caret after the last character once the field shows its value (never select it all). */
+export function caretToEnd(el: HTMLInputElement) {
+  requestAnimationFrame(() => {
+    if (document.activeElement !== el) return
+    const n = el.value.length
+    el.setSelectionRange(n, n)
+  })
+}
+
+/** Change a field as typing would, so its own input handlers (regrouping, drafts) run just as for a key. */
+function typeInto(el: HTMLInputElement, value: string, caret: number, inputType: string, data: string | null) {
+  el.value = value
+  el.setSelectionRange(caret, caret)
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data }))
+}
+
+/** Enter on the field, as the keyboard would press it; a field that has no use for it just lets go. */
+function pressEnter(el: HTMLInputElement) {
+  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+  el.dispatchEvent(ev)
+  if (!ev.defaultPrevented && document.activeElement === el) el.blur()
+}
+
+/**
+ * Our keypad for an amount field on touch screens: the system keyboard stays away (inputMode none)
+ * and the keypad docks at the bottom while the field has focus. Spread `field` on the input and
+ * render `pad(...)` beside it.
+ */
+export function useCalc() {
+  const touch = useMedia('(pointer: coarse)')
+  const [el, setEl] = useState<HTMLInputElement | null>(null)
+  return {
+    touch,
+    field: {
+      inputMode: (touch ? 'none' : 'decimal') as 'none' | 'decimal',
+      onFocusCapture: (e: FocusEvent) => {
+        if (touch) setEl(e.target as HTMLInputElement)
+      },
+      onBlurCapture: () => setEl(null),
+    },
+    /** the keypad while its field has focus; options can be a function, worked out only then */
+    pad: (opts: PadOpts | (() => PadOpts) = {}) => el && <CalcPad input={el} {...(typeof opts === 'function' ? opts() : opts)} />,
+  }
+}
+
+interface PadOpts {
+  /** currency of the amount (decimals, and how a sum's result reads); the budget's own by default */
+  cur?: string
+  /** Enter goes on to the next field */
+  next?: boolean
+  /** a one-tap amount offered in the bar while the field is empty */
+  hint?: { label: string; value: number }
+}
+
+const PAD_KEY: Record<string, string> = { '-': '−', '*': '×', '/': '÷' }
+let padsOpen = 0
+let padClosedAt = 0
+
+/**
+ * Docked at the bottom of the screen, inside the top sheet when one is open (everything outside a
+ * sheet is inert). The page or the sheet makes room, so the field stays in view above it.
+ */
+function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
+  const { input } = props
+  const code = props.cur ?? settings().base
+  const decimals = cur(code).decimals
+  const ref = useRef<HTMLDivElement>(null)
+  const [host] = useState(topSheet)
+  // Next swaps one field's keypad for another's: the new one doesn't slide in again.
+  const [still] = useState(() => padsOpen > 0 || Date.now() - padClosedAt < 200)
+  const [value, setValue] = useState(input.value)
+
+  useEffect(() => {
+    const on = () => setValue(input.value)
+    on()
+    input.addEventListener('input', on)
+    return () => input.removeEventListener('input', on)
+  }, [input])
+
+  useLayoutEffect(() => {
+    padsOpen++
+    const h = ref.current?.offsetHeight ?? 0
+    if (host) {
+      host.style.setProperty('--sheet-kb', `${h}px`)
+      host.style.setProperty('--sheet-vh', `${window.innerHeight - h}px`)
+    } else document.body.style.paddingBottom = `${h}px`
+    const id = requestAnimationFrame(() => {
+      const r = input.getBoundingClientRect()
+      const limit = window.innerHeight - h - 12
+      if (r.bottom <= limit && r.top >= 0) return
+      if (host) input.scrollIntoView({ block: 'nearest' })
+      else window.scrollBy({ top: r.bottom - limit, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    })
+    return () => {
+      cancelAnimationFrame(id)
+      padsOpen--
+      padClosedAt = Date.now()
+      if (padsOpen) return
+      if (host) {
+        host.style.removeProperty('--sheet-kb')
+        host.style.removeProperty('--sheet-vh')
+      } else document.body.style.paddingBottom = ''
+    }
+  }, [input])
+
+  const press = (k: string) => {
+    const key = PAD_KEY[k] ?? k
+    const r = calcPress(input.value, input.selectionStart ?? input.value.length, key, decimals)
+    if (!r) return
+    haptic('light')
+    typeInto(input, r.value, r.caret, k === 'back' ? 'deleteContentBackward' : 'insertText', k === 'back' ? null : key)
+  }
+  const clear = () => {
+    if (!input.value) return false
+    typeInto(input, '', 0, 'deleteContentBackward', null)
+    return true
+  }
+  const sum = isSum(value) ? evalAmount(value, code) : null
+  const hint = props.hint && !value.trim() ? props.hint : null
+
+  return createPortal(
+    <div class={`calc${still ? ' still' : ''}`} ref={ref} onPointerDown={(e) => e.preventDefault()}>
+      <div class="calc-bar">
+        {sum !== null ? (
+          <span class="calc-sum num">= {fmt(sum, code)}</span>
+        ) : hint ? (
+          <button
+            type="button"
+            class="pill sm"
+            onClick={() => {
+              const v = groupTyped(String(hint.value / 100))
+              typeInto(input, v, v.length, 'insertText', v)
+              pressEnter(input)
+            }}
+          >
+            {hint.label} <small>{fmt(hint.value, code, { bare: true })}</small>
+          </button>
+        ) : (
+          <span />
+        )}
+        <button type="button" class="calc-done" onClick={() => pressEnter(input)}>
+          {props.next ? 'Next' : 'Done'}
+        </button>
+      </div>
+      <KeyGrid decimals={decimals} press={press} clear={clear} />
+    </div>,
+    host ?? document.body,
   )
 }
 
@@ -232,7 +398,13 @@ export function regroup(e: Event): string {
 
 // ---------------------------------------------------------------- amount field with clear button
 
-/** A text field for money: selects everything on focus, and has an × to clear and type fresh. */
+/** Keeps password managers and iOS's password bar away from fields that are only amounts or notes. */
+const NO_AUTOFILL = { autocomplete: 'off', 'data-1p-ignore': true, 'data-lpignore': 'true', 'data-bwignore': true, 'data-form-type': 'other' }
+
+/**
+ * A text field for money: the caret goes to the end on focus, an × clears it to type fresh, and on
+ * phones our keypad (sums included) replaces the system one.
+ */
 export function AmountField(props: {
   value: string
   onInput: (v: string) => void
@@ -240,10 +412,14 @@ export function AmountField(props: {
   class?: string
   autoFocus?: boolean
   label: string
+  placeholder?: string
+  /** currency of the amount (decimals on the keypad); the budget's own by default */
+  cur?: string
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const orig = useRef(props.value) // what the field held when it got focus
   const abandoned = useRef(false) // Esc was pressed: the blur that follows must not commit
+  const calc = useCalc()
   useEffect(() => {
     if (props.autoFocus) ref.current?.focus()
   }, [])
@@ -252,14 +428,15 @@ export function AmountField(props: {
       <input
         ref={ref}
         type="text"
-        inputMode="decimal"
+        {...NO_AUTOFILL}
+        {...calc.field}
         aria-label={props.label}
+        placeholder={props.placeholder}
         value={props.value}
         onFocus={(e) => {
-          const el = e.currentTarget
           orig.current = props.value
           abandoned.current = false
-          requestAnimationFrame(() => document.activeElement === el && el.select())
+          caretToEnd(e.currentTarget)
         }}
         onInput={(e) => {
           abandoned.current = false
@@ -291,6 +468,7 @@ export function AmountField(props: {
           <IconClear />
         </button>
       )}
+      {calc.pad({ cur: props.cur })}
     </div>
   )
 }
@@ -308,7 +486,7 @@ export function NoteField(props: { value: string; onInput: (v: string) => void; 
         value={props.value}
         list={props.list}
         enterKeyHint="done"
-        autocomplete="off"
+        {...NO_AUTOFILL}
         onFocus={() => {
           orig.current = props.value
           abandoned.current = false

@@ -1043,16 +1043,17 @@ textarea:focus {
 }
 
 .crow {
-  /* the Assigned and Available columns with their gaps; what's left is the name column */
-  --rest: 222px;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 106px;
+  /* the Assigned box fits up to 100,000 without shrinking */
+  grid-template-columns: minmax(0, 1fr) 88px 106px;
   align-items: center;
   column-gap: 10px;
   min-height: 42px;
   padding: 3px 0;
   background: var(--bg);
+  /* vertical scrolling stays the browser's; a horizontal drag is the row's swipe */
+  touch-action: pan-y;
 }
 /* rows can be dragged from anywhere that isn't a field or a button */
 @media (hover: hover) and (pointer: fine) {
@@ -1060,7 +1061,7 @@ textarea:focus {
     cursor: grab;
   }
 }
-/* the row's bottom rule doubles as its spending gauge */
+/* the row's bottom rule */
 .crow::before {
   content: '';
   position: absolute;
@@ -1069,23 +1070,6 @@ textarea:focus {
   bottom: 0;
   height: 1px;
   background: var(--rule);
-}
-.crow::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 2px;
-  /* how much of the money is spent, drawn under the name only */
-  width: calc((100% - var(--rest)) * var(--used, 0));
-  background: var(--ink-3);
-  opacity: 0.6;
-  border-radius: 2px;
-  transition: width 0.4s var(--ease);
-}
-.crow.over::after {
-  background: var(--red);
-  opacity: 0.75;
 }
 .cname {
   min-width: 0;
@@ -1173,7 +1157,7 @@ textarea:focus {
 }
 /* long amounts step down while the box isn't being edited (focused, it stays 16px and scrolls) */
 .casg:not(:focus) {
-  font-size: min(16px, calc(136px / var(--len, 1))) !important;
+  font-size: min(16px, calc(122px / var(--len, 1))) !important;
 }
 @media (hover: hover) {
   .casg:hover {
@@ -1185,6 +1169,18 @@ textarea:focus {
 }
 .cspent {
   display: none;
+  justify-self: end;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+}
+@media (hover: hover) {
+  .cspent:hover {
+    color: var(--pen);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
 /* Bare numbers like the Assigned column (the currency is in the hero). Never cut: very long amounts
    (8+ digits) step the font down instead; --len is the number of characters. */
@@ -1873,7 +1869,7 @@ textarea:focus {
 
   .colhead {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 120px 110px 120px;
+    grid-template-columns: minmax(0, 1fr) 96px 110px 120px;
     column-gap: 14px;
     padding: 6px 0 2px;
     font-size: 12px;
@@ -1884,12 +1880,13 @@ textarea:focus {
     text-align: right;
   }
   .crow {
-    --rest: 392px;
-    grid-template-columns: minmax(0, 1fr) 120px 110px 120px;
+    grid-template-columns: minmax(0, 1fr) 96px 110px 120px;
     column-gap: 14px;
   }
   .cspent {
     display: block;
+    font: inherit;
+    font-variation-settings: var(--vs-column);
     text-align: right;
     color: var(--ink-2);
     font-size: 14px;
@@ -1899,7 +1896,7 @@ textarea:focus {
     font-size: min(14px, calc(160px / var(--len, 1)));
   }
   .casg:not(:focus) {
-    font-size: min(16px, calc(176px / var(--len, 1))) !important;
+    font-size: min(16px, calc(134px / var(--len, 1))) !important;
   }
 }
 
@@ -1977,15 +1974,14 @@ textarea:focus {
     --gutter: 13px;
   }
   .crow {
-    --rest: 208px;
-    grid-template-columns: minmax(0, 1fr) 90px 102px;
+    grid-template-columns: minmax(0, 1fr) 84px 102px;
     column-gap: 8px;
   }
   .casg {
     padding-inline: 6px !important;
   }
   .casg:not(:focus) {
-    font-size: min(16px, calc(132px / var(--len, 1))) !important;
+    font-size: min(16px, calc(118px / var(--len, 1))) !important;
   }
   .avail {
     min-width: 64px;
