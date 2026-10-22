@@ -46,9 +46,6 @@ let again = false
 const listeners = new Set<() => void>()
 /** Tabs share one sync state: a tab that turns sync on or off or joins a budget tells the others. */
 const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('money-in-order/sync') : null
-let ready!: () => void
-/** Resolves once this tab knows whether sync is on, and with which code. */
-export const syncReady = new Promise<void>((r) => (ready = r))
 
 class ServerError extends Error {}
 
@@ -334,11 +331,7 @@ function wire() {
 /** Resume syncing at startup. Resolves after the first sync (at once when sync is off). */
 export async function initSync(opts: { dirty?: boolean } = {}) {
   wire()
-  try {
-    await follow()
-  } finally {
-    ready()
-  }
+  await follow()
   if (!cfg) return
   // Changes recovered after an interrupted save may not have been uploaded yet.
   if (opts.dirty) markDirty()

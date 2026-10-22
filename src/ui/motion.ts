@@ -1,8 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import './motion.css'
 
-const EASE = 'cubic-bezier(.2,.9,.25,1)'
-
 const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
 const reducedMotion = () => reducedQuery?.matches ?? false
 
@@ -45,102 +43,6 @@ export function useCountUp(value: number, ms = 420): number {
   }, [target, ms, reduced])
 
   return reduced ? target : shown
-}
-
-/* ---------- useFlip ---------- */
-
-type Rects = Map<string, DOMRect>
-
-const running = new WeakMap<Element, Animation>()
-
-function keyAttr(selector: string): string {
-  const m = /^\s*\[\s*([\w-]+)\s*(?:[~|^$*]?=[^\]]*)?\]\s*$/.exec(selector)
-  return m ? m[1] : 'data-flip'
-}
-
-function collect(root: HTMLElement, selector: string): Map<string, HTMLElement> {
-  const attr = keyAttr(selector)
-  const out = new Map<string, HTMLElement>()
-  root.querySelectorAll<HTMLElement>(selector).forEach((el, i) => {
-    const key = el.getAttribute(attr) || el.id || `#${i}`
-    if (!out.has(key)) out.set(key, el)
-  })
-  return out
-}
-
-function measure(root: HTMLElement, selector: string): Rects {
-  const rects: Rects = new Map()
-  for (const [key, el] of collect(root, selector)) rects.set(key, el.getBoundingClientRect())
-  return rects
-}
-
-const visible = (r: DOMRect) => r.width > 0 || r.height > 0
-
-function animateFrom(root: HTMLElement, selector: string, before: Rects, ms: number) {
-  const els = collect(root, selector)
-  // Measure the settled layout, not a half-finished previous move.
-  for (const el of els.values()) running.get(el)?.cancel()
-
-  type Plan = { el: HTMLElement; dx: number; dy: number; enter: boolean }
-  const plans = new Map<Element, Plan>()
-  for (const [key, el] of els) {
-    const now = el.getBoundingClientRect()
-    if (!visible(now)) continue
-    const was = before.get(key)
-    if (was && visible(was)) plans.set(el, { el, dx: was.left - now.left, dy: was.top - now.top, enter: false })
-    else plans.set(el, { el, dx: 0, dy: 0, enter: true })
-  }
-
-  for (const plan of plans.values()) {
-    // A nested match rides along with its moving parent: only animate the difference.
-    let up = plan.el.parentElement?.closest(selector)
-    while (up && root.contains(up) && up !== root && !plans.has(up)) up = up.parentElement?.closest(selector)
-    const parent = up && up !== root ? plans.get(up) : undefined
-    if (parent?.enter) continue
-    const dx = plan.dx - (parent?.dx ?? 0)
-    const dy = plan.dy - (parent?.dy ?? 0)
-
-    let keyframes: Keyframe[]
-    if (plan.enter) keyframes = [{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }]
-    else if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) keyframes = [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }]
-    else continue
-
-    if (typeof plan.el.animate !== 'function') continue
-    const anim = plan.el.animate(keyframes, { duration: ms, easing: EASE })
-    running.set(plan.el, anim)
-    anim.onfinish = anim.oncancel = () => {
-      if (running.get(plan.el) === anim) running.delete(plan.el)
-    }
-  }
-}
-
-/**
- * FLIP: when `deps` change, elements under `ref` matching `selector` (keyed by the attribute value)
- * glide from where they were to where they are now; new keys fade and scale in.
- */
-export function useFlip(
-  ref: { current: HTMLElement | null },
-  deps: unknown[],
-  opts?: { selector?: string; ms?: number },
-): void {
-  const selector = opts?.selector ?? '[data-flip]'
-  const ms = opts?.ms ?? 240
-  const lastDeps = useRef<unknown[] | null>(null)
-  const first = useRef<Rects | null>(null)
-
-  // Runs during render, i.e. before this render's DOM changes are committed: the "First" in FLIP.
-  const prev = lastDeps.current
-  if (prev && (prev.length !== deps.length || deps.some((d, i) => d !== prev[i]))) {
-    const root = ref.current
-    first.current = root?.isConnected && !reducedMotion() ? measure(root, selector) : null
-  }
-  lastDeps.current = deps
-
-  useLayoutEffect(() => {
-    const before = first.current
-    first.current = null
-    if (before && ref.current) animateFrom(ref.current, selector, before, ms)
-  }, deps)
 }
 
 /* ---------- flash ---------- */

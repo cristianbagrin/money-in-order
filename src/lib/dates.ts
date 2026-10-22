@@ -56,8 +56,3 @@ export function dateLabel(date: string, today: string): string {
   const sameYear = date.slice(0, 4) === today.slice(0, 4)
   return `${wd.slice(0, 3)} ${d} ${MONTHS[m - 1].slice(0, 3)}${sameYear ? '' : ' ' + y}`
 }
-
-export function longDate(date: string): string {
-  const [y, m, d] = date.split('-').map(Number)
-  return `${WEEKDAYS[new Date(y, m - 1, d).getDay()]}, ${d} ${MONTHS[m - 1]}`
-}

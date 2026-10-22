@@ -308,27 +308,6 @@ export function averageSpent(ix: Index, cat: ID, month: Month, n = 3): number {
   return count ? Math.round(total / count) : 0
 }
 
-export function spentInMonth(ix: Index, cat: ID, month: Month): number {
-  return -(ix.act.get(month)?.get(cat) ?? 0)
-}
-
 export function assignedInMonth(ix: Index, cat: ID, month: Month): number {
   return ix.asg.get(month)?.get(cat) ?? 0
-}
-
-/** Categories ordered by how often they were used recently, for the quick-log chips. */
-export function chipOrder(ix: Index, today: string): Category[] {
-  const counts = new Map<ID, number>()
-  const cutoff = addMonths(monthOf(today), -2)
-  for (const t of ix.txns) {
-    if (monthOf(t.date) < cutoff) break
-    if (t.cat !== RTA && !t.kind) counts.set(t.cat, (counts.get(t.cat) ?? 0) + 1)
-  }
-  const usable = ix.cats.filter((c) => !c.archived)
-  const pos = new Map(usable.map((c, i) => [c.id, i]))
-  return [...usable].sort((a, b) => {
-    if (a.daily !== b.daily) return a.daily ? -1 : 1
-    const d = (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0)
-    return d || (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0)
-  })
 }

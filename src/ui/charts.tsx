@@ -173,11 +173,6 @@ function Tip(props: { x: number; w: number; title: string; rows: Row[] }) {
   )
 }
 
-/** "M x y L ..." through the points. */
-function linePath(pts: [number, number][]): string {
-  return pts.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('')
-}
-
 /** Right-hand y labels and hairline gridlines. */
 function Grid(props: { ticks: number[]; y: (v: number) => number; x0: number; x1: number }) {
   return (
@@ -550,53 +545,6 @@ export function NetWorthChart(props: { points: WealthPoint[]; base: string }): J
         head={invested ? ['Month', 'Net worth', 'Cash', 'Investments'] : ['Month', 'Net worth']}
         rows={points.map((p) => [label(p.month, false), fmt(p.total, base), ...(invested ? [fmt(p.cash, base), fmt(p.invest, base)] : [])])}
       />
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------- a small trend
-
-const SPARK_H = 64
-const SPARK_TOP = 18 // room for the end labels
-
-/**
- * A quiet line for one figure over months: no axis, the first and last values written at their ends.
- * Months without a value yet are left out of the line but keep their place.
- */
-export function Spark(props: { values: (number | null)[]; unit?: string; label: string }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const w = useWidth(ref)
-  const { values } = props
-  const n = values.length
-  const known = values.map((v, k) => [k, v] as const).filter((e): e is readonly [number, number] => e[1] !== null)
-  const hi = Math.max(1, ...known.map(([, v]) => v)) * 1.08
-  const pad = 4
-  const X = (k: number) => (n > 1 ? pad + (k * (w - 2 * pad)) / (n - 1) : w - pad)
-  const Y = (v: number) => SPARK_TOP + (1 - v / hi) * (SPARK_H - SPARK_TOP - 3)
-  const pts: [number, number][] = known.map(([k, v]) => [X(k), Y(v)])
-  const line = pts.length > 1 ? linePath(pts) : ''
-  const area = line ? `${line}L${pts[pts.length - 1][0].toFixed(1)},${SPARK_H}L${pts[0][0].toFixed(1)},${SPARK_H}Z` : ''
-  const first = known[0]
-  const end = known[known.length - 1]
-  return (
-    <div ref={ref} class="ch ch-spark" role="img" aria-label={props.label}>
-      {w > 0 && end && (
-        <svg width={w} height={SPARK_H} viewBox={`0 0 ${w} ${SPARK_H}`} aria-hidden="true">
-          <line class="ch-grid" x1={0} x2={w} y1={SPARK_H - 0.5} y2={SPARK_H - 0.5} />
-          {area && <path class="ch-area ch-fade" d={area} />}
-          {line && <path class="ch-line ch-draw" d={line} pathLength={1} />}
-          <circle class="ch-dot ch-pop" cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r={4} />
-          {pts.length > 1 && (
-            <text class="ch-t ch-num" x={pts[0][0] - pad} y={pts[0][1] - 8} text-anchor="start">
-              {Math.round(first[1])}
-            </text>
-          )}
-          <text class="ch-t ch-num ch-strong" x={w} y={pts[pts.length - 1][1] - 9} text-anchor="end">
-            {Math.round(end[1])}
-            {props.unit ?? ''}
-          </text>
-        </svg>
-      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { balances, investmentsInPlan } from './accounts'
 import { buildIndex, DEFAULT_SETTINGS, monthView, settingsOf, type Index } from './budget'
-import { isoDate, monthOf } from './dates'
+import { isoDate } from './dates'
 import { edit, repair, same } from './merge'
 import { convert, type Rates } from './money'
 import {
@@ -153,17 +153,6 @@ export interface UndoEntry {
 let recording: Recording | null = null
 const undoStack: UndoEntry[] = []
 const redoStack: UndoEntry[] = []
-const undoListeners = new Set<Listener>()
-
-export function onUndoChange(fn: Listener): () => void {
-  undoListeners.add(fn)
-  return () => undoListeners.delete(fn)
-}
-
-function undoChanged() {
-  for (const fn of undoListeners) fn()
-}
-
 /** Run fn as one undoable step. restore() runs after an undo (e.g. to put the typed amount back). */
 export function undoable<T>(label: string, fn: () => T, restore?: () => void): T {
   if (recording) return fn()
@@ -179,7 +168,6 @@ export function undoable<T>(label: string, fn: () => T, restore?: () => void): T
       undoStack.push({ label, at: Date.now(), prev: rec.prev, next, restore })
       if (undoStack.length > 50) undoStack.shift()
       redoStack.length = 0
-      undoChanged()
     }
   }
 }
@@ -241,7 +229,6 @@ export function undo(): UndoEntry | null {
   revert(e.prev, e.next)
   redoStack.push({ label: e.label, at: Date.now(), prev: e.next, next: e.prev })
   e.restore?.()
-  undoChanged()
   return e
 }
 
@@ -250,7 +237,6 @@ export function redo(): UndoEntry | null {
   if (!e) return null
   revert(e.prev, e.next)
   undoStack.push({ label: e.label, at: Date.now(), prev: e.next, next: e.prev })
-  undoChanged()
   return e
 }
 
@@ -471,12 +457,6 @@ export function deleteTxns(ids: ID[]) {
   if (txns.length) commit({ txns })
 }
 
-export function restoreTxn(t: Txn) {
-  const copy = { ...t }
-  delete copy.d
-  commit({ txns: [copy] })
-}
-
 // ---------------------------------------------------------------- assigning
 
 function assignRec(month: Month, cat: ID, amt: number): Assign {
@@ -635,19 +615,6 @@ export function placeCurrency(code: string, index: number) {
   if (list.length === settings().extraCurrencies.length) return
   list.splice(Math.max(0, Math.min(index, list.length)), 0, code)
   updateSettings({ extraCurrencies: list })
-}
-
-export function reorderCategory(id: ID, dir: -1 | 1) {
-  const c = db.cats[id]
-  if (!c) return
-  const siblings = Object.values(db.cats)
-    .filter((x) => !x.d && x.group === c.group)
-    .sort((a, b) => a.order - b.order)
-  const i = siblings.findIndex((x) => x.id === id)
-  const j = i + dir
-  if (j < 0 || j >= siblings.length) return
-  ;[siblings[i], siblings[j]] = [siblings[j], siblings[i]]
-  commit({ cats: siblings.map((s, k) => ({ ...s, order: k })) })
 }
 
 export function saveGroup(g: Group) {
@@ -830,7 +797,6 @@ export function restoreBackup(backup: DB) {
 export function clearUndo() {
   undoStack.length = 0
   redoStack.length = 0
-  undoChanged()
 }
 
 export function lastCount() {
@@ -874,8 +840,4 @@ export function seedCategories() {
 
 export function today(): string {
   return isoDate()
-}
-
-export function currentMonth(): Month {
-  return monthOf(today())
 }
