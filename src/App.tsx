@@ -47,9 +47,9 @@ export function App() {
   const [catMonth, setCatMonth] = useState(monthOf(today))
   const [txn, setTxn] = useState<Txn | null>(null)
   const [accounts, setAccounts] = useState(false)
-  // opened to count: the first balance is ready to type
-  const [counting, setCounting] = useState(false)
-  const openAccounts = (count = false) => {
+  // opened to count: the first balance (or the first investment's) is ready to type
+  const [counting, setCounting] = useState<boolean | 'invest'>(false)
+  const openAccounts = (count: boolean | 'invest' = false) => {
     setCounting(count)
     setAccounts(true)
   }
@@ -165,7 +165,7 @@ export function App() {
         }}
       />
     )
-  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => openAccounts(true)} />
+  else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => openAccounts('invest')} />
   else if (route === 'settings') page = <Settings onAccounts={() => openAccounts()} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 

@@ -989,7 +989,7 @@ class FlowSorter extends Sorter {
       const dx = r0.left - r1.left
       const dy = r0.top - r1.top
       if ((dx || dy) && typeof it.animate === 'function') {
-        it.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: GAP_MS, easing: EASE })
+        it.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: GAP_MS, easing: 'cubic-bezier(0.2, 0.9, 0.25, 1)' }) // animate() takes no var()
       }
     }
   }

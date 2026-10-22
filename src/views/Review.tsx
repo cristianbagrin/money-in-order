@@ -256,7 +256,7 @@ export function Review(props: { today: string; month: string; setMonth: (m: stri
                 </ul>
               )}
               {props.onCount && (
-                <button class="pill sm" onClick={() => updateBalances(ix, props.onCount!)}>
+                <button class="pill sm" onClick={props.onCount}>
                   Update balances
                 </button>
               )}
@@ -447,23 +447,6 @@ function BarRow(props: { name: string; amount: number; usual: number | null; max
       </span>
     </div>
   )
-}
-
-/**
- * Opens the balance editor (which starts on the first account) and moves to the first investment's value,
- * since that's what gets typed in now and then. Without an investment account it stays as it opens.
- */
-function updateBalances(ix: Index, open: () => void) {
-  open()
-  const inv = balances(ix).find((b) => b.acct.invest)
-  if (!inv) return
-  // the sheet puts its own first field up after a moment; this lands just behind it
-  setTimeout(() => {
-    const row = document.querySelector(`[data-acct="${inv.acct.id}"]`)
-    const field = row?.querySelector<HTMLInputElement>('input')
-    if (field) field.focus()
-    else row?.querySelector<HTMLButtonElement>('.acc-amt')?.click()
-  }, 140)
 }
 
 /** A target in a few words: "10,000 a month", "50,000 by 2027-06". */

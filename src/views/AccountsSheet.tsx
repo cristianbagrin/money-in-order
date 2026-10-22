@@ -33,7 +33,13 @@ function dayText(d: Day, today: Day): string {
  * the difference from what the plan expected is booked so the plan matches reality. Investments alone never
  * touch the plan. `count` opens it ready to type the first balance.
  */
-export function AccountsSheet(props: { open: boolean; onClose: () => void; count?: boolean; today: Day }) {
+export function AccountsSheet(props: {
+  open: boolean
+  onClose: () => void
+  /** open with a balance ready to type: the first account's, or with 'invest' the first investment's */
+  count?: boolean | 'invest'
+  today: Day
+}) {
   const ix = useIndex()
   const { base, trackAccounts } = ix.settings
   const [form, setForm] = useState<'add' | 'move' | { edit: ID } | null>(null)
@@ -55,7 +61,8 @@ export function AccountsSheet(props: { open: boolean; onClose: () => void; count
     setEditing(null)
     void refreshRates()
     if (!props.count) return
-    const t = setTimeout(() => setEditing(first ?? null), 60)
+    const pick = props.count === 'invest' ? (all.find((b) => b.acct.invest)?.acct.id ?? first) : first
+    const t = setTimeout(() => setEditing(pick ?? null), 60)
     return () => clearTimeout(t)
   }, [props.open])
 
