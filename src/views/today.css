@@ -1,0 +1,37 @@
+/* Today's account pill: sits in the amount line like the currency and date pills. */
+
+.amountline {
+  position: relative;
+}
+.acctbox {
+  display: contents;
+}
+.acctpill {
+  max-width: 96px;
+  min-width: 0;
+}
+.acctpop {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow:
+    0 12px 40px rgba(21, 36, 44, 0.18),
+    0 0 0 1px rgba(21, 36, 44, 0.05);
+  animation: acctpop-in 0.16s ease-out;
+}
+@keyframes acctpop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .acctpop {
+    animation: none;
+  }
+}

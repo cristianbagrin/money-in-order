@@ -1,0 +1,78 @@
+/* Transaction sheet: funds (or accounts) on the left, the calendar on the right. */
+
+.txn-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin-top: 14px;
+}
+/* The calendar sets the height; the pills fill that column and scroll inside it when there are many. */
+.txn-funds {
+  position: relative;
+  min-width: 0;
+}
+.txn-funds-in {
+  position: absolute;
+  inset: -2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  padding: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.txn-lbl {
+  flex: 0 0 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--ink-3);
+}
+.txn-lbl:first-child {
+  margin-top: 0;
+}
+
+/* A compact month for the phone sheet (7 columns beside ~100px of pills); roomier on a laptop. */
+.txn-cal .cal {
+  --cal-col: 32px;
+  --cal-row: 34px;
+  --cal-dot: 30px;
+}
+.txn-cal .cal-head {
+  height: 38px;
+  padding-left: 4px;
+}
+.txn-cal .cal-title {
+  font-size: 15px;
+}
+.txn-cal .cal-arrow {
+  width: 32px;
+  height: 32px;
+}
+.txn-cal .cal-day > span {
+  font-size: 13px;
+}
+@media (max-width: 359px) {
+  .txn-cal .cal {
+    --cal-col: 29px;
+    --cal-dot: 27px;
+  }
+}
+@media (min-width: 960px) {
+  .txn-cal .cal {
+    --cal-col: 38px;
+    --cal-row: 38px;
+    --cal-dot: 34px;
+  }
+  .txn-cal .cal-head {
+    height: 44px;
+  }
+  .txn-cal .cal-title {
+    font-size: 16px;
+  }
+  .txn-cal .cal-day > span {
+    font-size: 14px;
+  }
+}

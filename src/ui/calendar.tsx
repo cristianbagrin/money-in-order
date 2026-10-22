@@ -55,9 +55,10 @@ function Chevron(props: { dir: 'left' | 'right' }) {
 // ---------------------------------------------------------------- calendar
 
 /** Month grid, week starting Monday. Arrow keys, PageUp/PageDown, Home/End, Enter/Space; swipe sideways on touch. */
-export function Calendar(props: { value: string; onChange: (date: string) => void; max?: string; min?: string }): JSX.Element {
+export function Calendar(props: { value: string; onChange: (date: string) => void; max?: string; min?: string; today?: string }): JSX.Element {
   const { min, max } = props
-  const today = useContext(TodayContext) ?? isoDate()
+  const inherited = useContext(TodayContext)
+  const today = props.today ?? inherited ?? isoDate()
   const value = props.value || today
   const [view, setView] = useState(() => monthOf(value))
   const [dir, setDir] = useState(0) // direction of the last month change; drives the slide
