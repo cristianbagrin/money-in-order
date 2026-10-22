@@ -178,7 +178,7 @@ export async function ensureRate(code: string): Promise<boolean> {
   }
   await refreshRates(false, [code])
   if (hasRate(code)) return true
-  toast(`No rate for ${code} yet. It needs a connection.`)
+  toast(`No rate for ${code} yet. It needs a connection`)
   return false
 }
 

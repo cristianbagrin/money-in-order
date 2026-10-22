@@ -48,6 +48,19 @@
   font-weight: 560;
   color: var(--ink-3);
 }
+/* money planned there already: a dot by the name (under the year, when that shows) */
+.mstrip-dot {
+  position: absolute;
+  top: 7px;
+  left: calc(50% + 1.05em);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pen);
+}
+.mstrip-m small + .mstrip-dot {
+  top: 16px;
+}
 .mstrip-m.past {
   color: var(--ink-4);
 }

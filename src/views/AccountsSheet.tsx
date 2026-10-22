@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { balances, investmentsInPlan, netWorth, totalMoney, type Balance } from '../lib/accounts'
 import { dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { convert, cur, evalAmount, fmt, groupTyped } from '../lib/money'
+import { convert, cur, evalAmount, fmt, groupTyped, SEP } from '../lib/money'
 import { hasRate, refreshRates } from '../lib/rates'
 import { addAccount, addMove, deleteAccount, placeAccountOfKind, previewCount, recordCount, saveAccount, setInvestment, takeOutOfPlan, undoable } from '../lib/store'
 import { RTA, type Account, type Day, type ID } from '../lib/types'
 import { NO_AUTOFILL } from '../ui/account'
 import { useIndex } from '../ui/hooks'
 import { AnyCurrency, CurrencyPill } from '../ui/currency'
-import { AmountField, IconPlus, toast } from '../ui/kit'
+import { AmountField, IconPlus, toast, useTapAway } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
 import { sortKey, useSortable } from '../ui/sortable'
@@ -146,6 +146,9 @@ export function AccountsSheet(props: {
     </div>
   )
 
+  // An open editor or form closes with a tap anywhere else.
+  useTapAway(form !== null, () => setForm(null), (el) => !!el.closest(edit ? `.acc-form, [data-sort-id="${edit}"]` : '.acc-form, .acc-actions'))
+
   // Closed, there is nothing to work out (while it slides away the sheet keeps what it last showed).
   if (!props.open) return <Sheet open={false} onClose={props.onClose} children={null} />
 
@@ -227,7 +230,7 @@ export function AccountsSheet(props: {
               )}
             </>
           )}
-          {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again.</p>}
+          {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again</p>}
           <div class="acc-save">
             <button class="link" onClick={cancel}>
               Cancel
@@ -278,7 +281,7 @@ function AccountRow(props: {
   const remove = () => removeAccount(a)
   const sw = useSwipeDelete<HTMLDivElement, HTMLDivElement>(remove)
   // When the balance was last typed in, and what it was then (a tracked balance has moved on since).
-  const sub = b.asOf && b.typedBal !== null ? `Updated ${dayText(b.asOf, props.today)} · ${fmt(b.typedBal, a.cur)}` : a.invest ? 'No value yet' : 'Not counted'
+  const sub = b.asOf && b.typedBal !== null ? `Updated ${dayText(b.asOf, props.today)}${SEP}${fmt(b.typedBal, a.cur)}` : a.invest ? 'No value yet' : 'Not counted'
   return (
     <div class="acc-wrap" ref={sw.wrap} data-acct={a.id}>
       <div class="swipe-del" aria-hidden="true">
@@ -407,7 +410,6 @@ function AccountEditor(props: { a: Account; today: Day; onDone: () => void }) {
         aria-label="Name"
         autocapitalize="words"
         defaultValue={a.name}
-        onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const name = e.currentTarget.value.trim()
           if (!name) e.currentTarget.value = a.name
@@ -506,7 +508,7 @@ function MoveMoney(props: { accounts: Account[]; today: Day; onDone: () => void 
           <span class="acc-cur">{t.cur}</span>
         </div>
       )}
-      {noRate && <p class="hint neg">No exchange rate for {f.cur} and {t.cur} yet. Connect to the internet and try again.</p>}
+      {noRate && <p class="hint neg">No exchange rate for {f.cur} and {t.cur} yet. Connect to the internet and try again</p>}
       <div class="cs-foot">
         <button class="link" onClick={props.onDone}>
           Cancel

@@ -25,6 +25,8 @@ export function MonthStrip(props: {
   mark?: (m: Month) => MonthMark | undefined
   /** what a mark means, for screen readers */
   markLabel?: (m: Month) => string | undefined
+  /** a tiny dot by the name: money is already planned in that month */
+  dot?: (m: Month) => boolean
 }) {
   const { month, current, min, max } = props
   const count = props.count ?? 6
@@ -90,18 +92,20 @@ export function MonthStrip(props: {
         {months.map((m) => {
           const mark = props.mark?.(m)
           const extra = props.markLabel?.(m)
+          const dot = props.dot?.(m)
           const past = monthDiff(m, current) > 0
           return (
             <button
               key={m}
               class={`mstrip-m${mark ? ` ${mark}` : ''}${past ? ' past' : ''}${m === current ? ' now' : ''}`}
               aria-pressed={m === month}
-              aria-label={`${monthName(m, { year: true })}${m === current ? ', this month' : ''}${extra ? `, ${extra}` : ''}`}
+              aria-label={`${monthName(m, { year: true })}${m === current ? ', this month' : ''}${dot ? ', money planned' : ''}${extra ? `, ${extra}` : ''}`}
               onClick={() => props.setMonth(clamp(m))}
             >
               {monthName(m, { short: true })}
               {/* the year, small in the corner, where it changes (or starts the row) and isn't this one */}
               {m.slice(0, 4) !== thisYear && (m.endsWith('-01') || m === months[0]) && <small>’{m.slice(2, 4)}</small>}
+              {dot && <i class="mstrip-dot" aria-hidden="true" />}
             </button>
           )
         })}

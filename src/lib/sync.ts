@@ -13,8 +13,8 @@ import type { DB } from './types'
 /** PBKDF2 rounds: about half a second on a phone, once per sign-in. */
 const ROUNDS = 310_000
 export const MIN_PASSWORD = 8
-const OFFLINE = 'Offline. Changes will sync when you’re back.'
-const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly.'
+const OFFLINE = 'Offline. Changes will sync when you’re back'
+const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly'
 /** Unsent changes older than this make the status `stale`. */
 const STALE_AFTER = 10 * 60 * 1000
 
@@ -278,7 +278,7 @@ async function syncOnce(): Promise<void> {
     if (cfg !== c) return
     if (!navigator.onLine) return setState('offline', OFFLINE)
     const reach = e instanceof ServerError || e instanceof TypeError || (e instanceof DOMException && e.name === 'TimeoutError')
-    setState('error', reach ? UNREACHABLE : 'Couldn’t sync. Trying again shortly.')
+    setState('error', reach ? UNREACHABLE : 'Couldn’t sync. Trying again shortly')
     schedule(15_000)
   }
 }

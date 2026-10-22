@@ -112,3 +112,13 @@
 .daygrp .txn-wrap.swiping .txn:not(.sel) {
   background: var(--surface);
 }
+
+/* The day a row is lifted from lets it travel over the other days (no paint containment while it does). */
+.daygrp:has(.sort-lifted) {
+  content-visibility: visible;
+  position: relative;
+  z-index: 2;
+}
+.sort-lifted .txn:not(.sel) {
+  background: transparent;
+}

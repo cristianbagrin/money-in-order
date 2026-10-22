@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'preact/hooks'
 import { dateLabel, monthName, monthOf } from '../lib/dates'
-import { fmt } from '../lib/money'
+import { fmt, SEP } from '../lib/money'
 import { deleteTxns, undoable } from '../lib/store'
 import { type ID, type Txn } from '../lib/types'
 import { useIndex } from '../ui/hooks'
@@ -30,9 +30,9 @@ export function SpentSheet(props: { cat: ID | null; month: string; today: string
 
   if (!cat) return <Sheet open={false} onClose={props.onClose} children={null} />
   return (
-    <Sheet open onClose={props.onClose} title={`${cat.name} · ${monthName(month, { short: true })}`}>
+    <Sheet open onClose={props.onClose} title={`${cat.name}${SEP}${monthName(month, { short: true })}`}>
       <p class="cs-line">
-        <span class="num">{fmt(spent, base)}</span> spent{rows.length > 1 ? ` · ${rows.length} times` : ''}
+        <span class="num">{fmt(spent, base)}</span> spent{rows.length > 1 ? `${SEP}${rows.length} times` : ''}
       </p>
       {rows.length ? (
         <div class="spent-list">
@@ -44,7 +44,7 @@ export function SpentSheet(props: { cat: ID | null; month: string; today: string
           ))}
         </div>
       ) : (
-        <p class="empty">Nothing spent yet.</p>
+        <p class="empty">Nothing spent yet</p>
       )}
       <TxnSheet txn={open} today={props.today} onClose={() => setOpen(null)} />
     </Sheet>

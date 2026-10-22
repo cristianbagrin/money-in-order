@@ -1,7 +1,7 @@
 import { memo } from 'preact/compat'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { accountsInOrder, cashAccounts } from '../lib/accounts'
-import { convert, cur, evalAmount, fmt, groupTyped } from '../lib/money'
+import { convert, cur, evalAmount, fmt, groupTyped, SEP } from '../lib/money'
 
 /** How an amount appears in the editor: no grouping, and no cents for currencies without them. */
 function amountText(amt: number, code: string): string {
@@ -9,8 +9,8 @@ function amountText(amt: number, code: string): string {
   return groupTyped(cur(code).decimals ? String(Math.round(v * 100) / 100) : String(Math.round(v)))
 }
 import { currenciesInUse, hasRate } from '../lib/rates'
-import { deleteTxn, undoable, updateTxn, type NewTxn } from '../lib/store'
-import { RTA, type Account, type ID, type Txn } from '../lib/types'
+import { deleteTxn, repeatOf, setRepeat, undoable, updateTxn, type NewTxn } from '../lib/store'
+import { RTA, type Account, type ID, type Repeat, type Txn } from '../lib/types'
 import { Calendar } from '../ui/calendar'
 import { AnyCurrency, CurrencyPill } from '../ui/currency'
 import { useIndex } from '../ui/hooks'
@@ -53,7 +53,7 @@ export const TxnRow = memo(function TxnRow(props: {
     ? t.note
       ? props.moveLabel
       : ''
-    : [title !== catName && !props.plain && !(t.kind && t.cat === RTA) ? catName : '', props.extra].filter(Boolean).join(' · ')
+    : [title !== catName && !props.plain && !(t.kind && t.cat === RTA) ? catName : '', props.extra].filter(Boolean).join(SEP)
   const positive = t.base > 0
   const sw = useSwipeDelete<HTMLDivElement, HTMLButtonElement>(() => props.onDelete(t))
 
@@ -63,7 +63,7 @@ export const TxnRow = memo(function TxnRow(props: {
   }
 
   return (
-    <div class={`txn-wrap${props.selected ? ' sel' : ''}`} ref={sw.wrap}>
+    <div class={`txn-wrap${props.selected ? ' sel' : ''}`} ref={sw.wrap} data-sort-id={t.id}>
       <div class="txn-del" aria-hidden="true">
         Delete
       </div>
@@ -113,6 +113,11 @@ function AccountPills(props: { list: Account[]; value: ID | undefined; onPick: (
     </>
   )
 }
+
+const REPEATS: { every: Repeat['every']; label: string }[] = [
+  { every: 'month', label: 'Monthly' },
+  { every: 'year', label: 'Yearly' },
+]
 
 /** Edit a transaction. Every change applies right away (and can be undone). */
 export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () => void }) {
@@ -225,6 +230,13 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
     if (Math.abs(v) !== tx.toAmt) change({ toAmt: Math.abs(v) }, 'Changed amount')
   }
 
+  const repeat = repeatOf(tx)
+  function chooseRepeat(every: Repeat['every']) {
+    const stop = repeat?.every === every
+    undoable(stop ? 'Stopped repeating' : 'Repeats', () => setRepeat(tx.id, stop ? null : every))
+    toast(stop ? 'Stopped repeating' : `Logs itself every ${every}`, { undo: true })
+  }
+
   const title = tx.kind ? KIND_LABEL[tx.kind] : tx.cat === RTA ? 'Income' : refund ? 'Refund' : 'Spending'
   const allAccts = isMove ? accountsInOrder(ix) : []
   const mixedList = new Set(allAccts.map((a) => a.cur)).size > 1
@@ -304,7 +316,18 @@ export function TxnSheet(props: { txn: Txn | null; today: string; onClose: () =>
         </div>
       </div>
       <div class="cs-foot">
-        <span />
+        {/* Rare, so it waits down here: this entry, again every month or year. */}
+        {!tx.kind ? (
+          <div class="pills txn-repeat" role="group" aria-label="Repeat">
+            {REPEATS.map((r) => (
+              <button key={r.every} class="pill soft sm" aria-pressed={repeat?.every === r.every} onClick={() => chooseRepeat(r.every)}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span />
+        )}
         <button
           class="link red"
           onClick={() => {

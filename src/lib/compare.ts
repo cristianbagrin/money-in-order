@@ -209,7 +209,7 @@ export function standouts(ix: Index, s: MonthSpend): Insight[] {
     // this month already plans for what it costs: nothing left to say
     if (!(s.running && plan >= cost && repeat.spent <= repeat.planned)) {
       const tail = cost - plan < Math.max(100, cost * 0.05) ? '' : `; it costs about ${money(cost)} a month${plan > 0 ? `, not ${money(plan)}` : ''}`
-      out.push({ tone: 'bad', text: `${repeat.name} went over ${repeat.overMonths.length} months in a row${tail}.`, cat: repeat.id })
+      out.push({ tone: 'bad', text: `${repeat.name} went over ${repeat.overMonths.length} months in a row${tail}`, cat: repeat.id })
     }
   }
 
@@ -229,10 +229,10 @@ export function standouts(ix: Index, s: MonthSpend): Insight[] {
       const { c, diff } = best
       const ratio = c.usual ? c.spent / c.usual : Infinity
       let text: string
-      if (diff < 0) text = `${c.name} ${is} ${money(-diff)} below usual.`
-      else if (c.usual! < 100 * 100 || ratio >= 6) text = `${money(c.spent)} went to ${c.name}, usually next to nothing.`
-      else if (ratio >= 1.9) text = `${c.name} ${is} ${ratio < 2.5 ? 'twice' : `${Math.round(ratio)} times`} its usual, ${money(c.spent)}.`
-      else text = `${c.name} ${is} ${money(diff)} above usual.`
+      if (diff < 0) text = `${c.name} ${is} ${money(-diff)} below usual`
+      else if (c.usual! < 100 * 100 || ratio >= 6) text = `${money(c.spent)} went to ${c.name}, usually next to nothing`
+      else if (ratio >= 1.9) text = `${c.name} ${is} ${ratio < 2.5 ? 'twice' : `${Math.round(ratio)} times`} its usual, ${money(c.spent)}`
+      else text = `${c.name} ${is} ${money(diff)} above usual`
       out.push({ tone: diff < 0 ? 'good' : c.spent > c.planned ? 'bad' : 'neutral', text, cat: c.id })
     }
   }

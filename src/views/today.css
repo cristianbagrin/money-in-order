@@ -37,24 +37,13 @@
 }
 
 /* Income: a green pill in the amount line; with several sources an arrow beside it picks another. */
-.incomebox {
+.incomepill {
   flex: none;
-  display: flex;
-  align-items: center;
-  border-radius: 999px;
-}
-.incomebox.suggest {
-  box-shadow: 0 0 0 2px var(--green);
-}
-.incomepill,
-.incomepick {
   border-color: transparent;
   background: var(--green-wash);
   color: var(--green);
   font-weight: 620;
-}
-.incomepill {
-  max-width: 140px;
+  max-width: 160px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -62,18 +51,11 @@
   display: block;
   line-height: 34px;
 }
-.incomebox:has(.incomepick) .incomepill {
-  border-radius: 999px 0 0 999px;
-  padding-right: 8px;
-}
-.incomepick {
-  border-radius: 0 999px 999px 0;
-  padding: 0 10px 0 6px;
-  border-left: 1px solid rgba(10, 127, 90, 0.18);
+.incomepill.suggest {
+  box-shadow: 0 0 0 2px var(--green);
 }
 @media (hover: hover) {
-  .incomepill:hover,
-  .incomepick:hover {
+  .incomepill:hover {
     border-color: transparent;
     background: rgba(10, 127, 90, 0.16);
   }

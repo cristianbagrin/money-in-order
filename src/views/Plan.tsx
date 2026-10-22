@@ -21,7 +21,7 @@ import {
 } from '../lib/store'
 import { live, RTA, type Category, type Group, type ID, type Month } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
-import { caretToEnd, IconGear, IconPlus, NO_AUTOFILL, primeKeyboard, regroup, toast, useCalc } from '../ui/kit'
+import { caretToEnd, IconGear, IconPlus, markCaret, NO_AUTOFILL, primeKeyboard, regroup, takeCaret, toast, useCalc } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { confetti } from '../ui/confetti'
 import { haptic, play } from '../ui/sound'
@@ -201,7 +201,7 @@ export function Plan(props: {
   return (
     <div>
       <div class="pagehead">
-        <MonthStrip month={month} current={current} setMonth={setMonth} mark={markOf} markLabel={markLabel} />
+        <MonthStrip month={month} current={current} setMonth={setMonth} mark={markOf} markLabel={markLabel} dot={(m) => m > current && [...(ix.asg.get(m)?.values() ?? [])].some((v) => v > 0)} />
         <button class="iconbtn gear" aria-label={stale ? 'Settings, changes not synced' : 'Settings'} onClick={props.onSettings}>
           <IconGear />
           {stale && <span class="dot" />}
@@ -225,12 +225,13 @@ export function Plan(props: {
             </div>
           )
         ) : (
-          <div class="rta-line">
-            <span class="rta-cap">
-              {rtaSign > 0 ? 'ready to assign, give it all a job' : over ? 'more assigned than you have' : rtaSign < 0 ? 'planned ahead of income' : 'every bit has a job'}
-            </span>
-            {!showRitual && fillPill && <span class="rta-actions">{fillPill}</span>}
-          </div>
+          // At zero the number says it all.
+          (rtaSign !== 0 || (!showRitual && fillPill)) && (
+            <div class="rta-line">
+              {rtaSign !== 0 && <span class="rta-cap">{rtaSign > 0 ? 'ready to assign' : over ? 'assigned more than you have' : 'planned ahead of income'}</span>}
+              {!showRitual && fillPill && <span class="rta-actions">{fillPill}</span>}
+            </div>
+          )
         )}
         {planning && !empty && <Saving ix={ix} month={month} current={current} saved={view.saved} />}
         {planning && !empty && <Outlook fc={fc} current={current} />}
@@ -288,7 +289,7 @@ export function Plan(props: {
                     role="button"
                     tabIndex={0}
                     aria-label={`Rename ${g.group.name}`}
-                    onClick={() => (primeKeyboard(), setEditingGroup(g.group.id))}
+                    onClick={(e) => (markCaret(e), primeKeyboard(), setEditingGroup(g.group.id))}
                     onKeyDown={onActivate(() => setEditingGroup(g.group.id))}
                   >
                     {g.group.name}
@@ -411,12 +412,16 @@ function Outlook(props: { fc: Forecast; current: Month }) {
 function InlineInput(props: { value: string; label: string; onDone: (v: string | null, enter: boolean) => void; placeholder?: string; plain?: boolean }) {
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
-  // As wide as what it holds (and a little room to type), like the text it replaces.
-  const fit = (v: string) => Math.max(4, v.length, props.placeholder?.length ?? 0) + 2
-  const [size, setSize] = useState(() => fit(props.value))
+  // As wide as what it holds (and a little room to type), like the text it replaces: a hidden copy of the
+  // text sizes it, so it fits in every browser and font (the size attribute guesses by average letters).
+  const [text, setText] = useState(props.value)
+  // The caret goes where the text was pressed (the end when it opened otherwise), never a select-all.
   useEffect(() => {
-    ref.current?.focus()
-    ref.current?.select()
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const at = Math.min(takeCaret() ?? el.value.length, el.value.length)
+    el.setSelectionRange(at, at)
   }, [])
   // A layout cleanup runs before the input leaves the DOM (and fires its blur); a passive one would run too late.
   useLayoutEffect(
@@ -431,24 +436,25 @@ function InlineInput(props: { value: string; label: string; onDone: (v: string |
     props.onDone(v, enter)
   }
   return (
-    <input
-      ref={ref}
-      type="text"
-      aria-label={props.label}
-      placeholder={props.placeholder}
-      defaultValue={props.value}
-      size={size}
-      {...NO_AUTOFILL}
-      onInput={(e) => setSize(fit(e.currentTarget.value))}
-      spellcheck={props.plain ? false : undefined}
-      autocorrect={props.plain ? 'off' : undefined}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={(e) => finish(e.currentTarget.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') finish(e.currentTarget.value, true)
-        if (e.key === 'Escape') finish(null)
-      }}
-    />
+    <span class="fit" data-text={`${text || props.placeholder || ''}\u00a0\u00a0`}>
+      <input
+        ref={ref}
+        type="text"
+        aria-label={props.label}
+        placeholder={props.placeholder}
+        defaultValue={props.value}
+        {...NO_AUTOFILL}
+        onInput={(e) => setText(e.currentTarget.value)}
+        spellcheck={props.plain ? false : undefined}
+        autocorrect={props.plain ? 'off' : undefined}
+        onClick={(e) => e.stopPropagation()}
+        onBlur={(e) => finish(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') finish(e.currentTarget.value, true)
+          if (e.key === 'Escape') finish(null)
+        }}
+      />
+    </span>
   )
 }
 
@@ -469,8 +475,10 @@ function CatRow(props: {
   const { c, base } = props
   const cat = c.cat
   const spent = -c.activity
-  const short = c.need > 0 && c.available >= 0
-  const tone = c.available < 0 ? 'neg' : short ? 'short' : c.available > 0 ? 'pos' : 'zero'
+  // Toned by the amount as shown: a sliver left over from a conversion is all spent, not money left.
+  const sign = shownSign(c.available, base)
+  const short = c.need > 0 && sign >= 0
+  const tone = sign < 0 ? 'neg' : short ? 'short' : sign > 0 ? 'pos' : 'zero'
   const availText = fmt(c.available, base, { bare: true })
   const [draft, setDraftVal] = useState<string | null>(null)
   const asgRef = useRef<HTMLInputElement>(null)
@@ -546,7 +554,7 @@ function CatRow(props: {
       </div>
       <div
         ref={swipe.row}
-        class={`crow${c.available < 0 ? ' over' : ''}${props.editing ? ' editing' : ''}`}
+        class={`crow${sign < 0 ? ' over' : ''}${props.editing ? ' editing' : ''}`}
         // A swipe starts anywhere but the Assigned box, and never while the row is being dragged into place.
         onPointerDown={(e) => {
           if (!(e.target as Element).closest('input')) swipe.handlers.onPointerDown(e)
@@ -569,7 +577,7 @@ function CatRow(props: {
                 tabIndex={0}
                 aria-label={`Rename ${cat.name}`}
                 aria-keyshortcuts="Delete"
-                onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('name'))}
+                onClick={(e) => !swipe.swallow(e) && (markCaret(e), primeKeyboard(), props.setEditing('name'))}
                 onKeyDown={(e) => {
                   // Delete on a focused name deletes the row, as a swipe does on a phone.
                   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -586,7 +594,7 @@ function CatRow(props: {
                 key="add"
                 class="cnote-add"
                 role="button"
-                // A tab stop only while renaming, so the keyboard path is name → Add note → Assigned.
+                // A tab stop only while renaming, so the keyboard path is name → add note → Assigned.
                 tabIndex={props.editing === 'name' ? 0 : -1}
                 onPointerDown={(e) => {
                   if (e.button !== 0) return
@@ -600,7 +608,7 @@ function CatRow(props: {
                 onClick={() => props.setEditing('note')}
                 onKeyDown={onActivate(() => props.setEditing('note'))}
               >
-                Add note
+                add note
               </span>
             )}
           </div>
@@ -613,7 +621,7 @@ function CatRow(props: {
               class="cnote"
               role="button"
               tabIndex={0}
-              onClick={(e) => !swipe.swallow(e) && (primeKeyboard(), props.setEditing('note'))}
+              onClick={(e) => !swipe.swallow(e) && (markCaret(e), primeKeyboard(), props.setEditing('note'))}
               onKeyDown={onActivate(() => props.setEditing('note'))}
             >
               {cat.note}
@@ -668,7 +676,7 @@ function CatRow(props: {
         />
         {calc.pad(() => ({
           next: !isLast(),
-          hint: ghost ? { label: cat.target ? 'Target' : cat.saving ? 'Savings' : 'Usual', value: ghost } : undefined,
+          hint: ghost ? { label: cat.target ? 'Target' : props.plan?.due && ghost === props.plan.base ? 'Repeats' : cat.saving ? 'Savings' : 'Usual', value: ghost } : undefined,
         }))}
         <button
           class="cspent num"
