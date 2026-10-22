@@ -94,7 +94,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   const base = ix.settings.base
   const { filter } = props
   const [q, setQ] = useState('')
-  const [period, setPeriod] = useState<Period>('all')
+  const [period, setPeriod] = useState<Period>('this')
   const [picking, setPicking] = useState(false)
   const [limit, setLimit] = useState(PAGE)
   // The keyboard selection is a transaction, not a position, so it can't drift onto another row when the list changes.
@@ -186,13 +186,6 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
     select(null)
     setLimit(PAGE)
   }
-
-  // Keep the active filter in view where the row scrolls sideways (it may sit far to the right on a phone).
-  const pillsRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = pillsRef.current
-    if (el && el.scrollWidth > el.clientWidth) el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' })
-  }, [filter])
 
   // The period pill opens its choices right under the search; one tap picks and closes.
   const periodBtn = useRef<HTMLButtonElement>(null)
@@ -334,8 +327,14 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
   )
   // Months to pick from, newest first: the ones with data, up to now.
   const months = useMemo(() => ix.months.filter((m) => m <= monthOf(props.today)).reverse(), [ix.months, props.today])
-  const filtered = !!q || filter !== 'all' || period !== 'all'
+  // The broad views (this month, all time) show the rows alone; a narrower one says what it adds up to.
+  const filtered = !!q || filter !== 'all' || (period !== 'all' && period !== 'this')
   const total = useMemo(() => (filtered ? rows.reduce((s, t) => s + t.base, 0) : 0), [rows, filtered])
+  const pill = (id: string, label: string) => (
+    <button key={id} class="pill sm" aria-pressed={filter === id} onClick={() => restart(props.setFilter, id)}>
+      {label}
+    </button>
+  )
   if (!ix.txns.length) return <p class="empty">Nothing yet.</p>
 
   return (
@@ -347,7 +346,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
         </label>
         <button
           ref={periodBtn}
-          class={`pill${period !== 'all' ? ' picked' : ''}`}
+          class={`pill${period !== 'this' ? ' picked' : ''}`}
           aria-haspopup="true"
           aria-expanded={picking ? 'true' : 'false'}
           aria-label={`Period: ${periodLabel(period, props.today)}`}
@@ -376,28 +375,20 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
           )}
         </div>
       )}
-      <div class="pills scroll filters" ref={pillsRef}>
-        <button class="pill sm" aria-pressed={filter === 'all'} onClick={() => restart(props.setFilter, 'all')}>
-          All
-        </button>
-        <button class="pill sm" aria-pressed={filter === 'income'} onClick={() => restart(props.setFilter, 'income')}>
-          Income
-        </button>
-        {sources.map((s) => (
-          <button key={s.id} class="pill sm" aria-pressed={filter === `src:${s.id}`} onClick={() => restart(props.setFilter, `src:${s.id}`)}>
-            {s.name}
-          </button>
-        ))}
-        {used.map((c) => (
-          <button key={c.id} class="pill sm" aria-pressed={filter === c.id} onClick={() => restart(props.setFilter, c.id)}>
-            {c.name}
-          </button>
-        ))}
-        {cash.map((a) => (
-          <button key={a.id} class="pill sm" aria-pressed={filter === `acct:${a.id}`} onClick={() => restart(props.setFilter, `acct:${a.id}`)}>
-            {a.name}
-          </button>
-        ))}
+      <div class="filters">
+        <div class="pills" role="group" aria-label="Categories">
+          {pill('all', 'All')}
+          {used.map((c) => pill(c.id, c.name))}
+        </div>
+        <div class="pills income" role="group" aria-label="Income">
+          {pill('income', 'Income')}
+          {sources.map((s) => pill(`src:${s.id}`, s.name))}
+        </div>
+        {cash.length > 0 && (
+          <div class="pills accts" role="group" aria-label="Accounts">
+            {cash.map((a) => pill(`acct:${a.id}`, a.name))}
+          </div>
+        )}
       </div>
       {filtered && rows.length > 0 && (
         <p class="faint" style={{ fontSize: '13px', margin: '12px 0 0' }}>
@@ -407,7 +398,16 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       {days.map((d) => (
         <DayGroup key={d.date} day={d} today={props.today} base={base} catById={catById} plain={filter !== 'all' && !filter.startsWith('acct:')} sel={daySel.get(d.date) ?? null} onOpen={open} onDelete={removeOne} names={names} />
       ))}
-      {!rows.length && <p class="empty">Nothing matches.</p>}
+      {!rows.length && (
+        <div class="empty histempty">
+          <p>Nothing matches.</p>
+          {period !== 'all' && (
+            <button class="pill sm" onClick={() => restart(setPeriod, 'all' as Period)}>
+              All time
+            </button>
+          )}
+        </div>
+      )}
       {rows.length > limit && (
         <button class="btn soft block" style={{ marginTop: '16px' }} onClick={() => setLimit(limit + PAGE)}>
           Show more
