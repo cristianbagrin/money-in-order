@@ -1349,49 +1349,6 @@ textarea:focus {
   color: var(--red);
 }
 
-/* Count your money: one account per row, balance on the right in the app's amount style */
-.count-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 62px;
-  border-bottom: 1px solid var(--rule);
-}
-.count-row b {
-  display: block;
-  font-weight: 600;
-}
-.count-sub {
-  display: block;
-  font-size: 12px;
-}
-.count-head {
-  margin: 18px 0 0;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink-2);
-}
-.amountfield.count-amt {
-  flex: none;
-  width: 52%;
-}
-.amountfield.count-amt input::placeholder {
-  color: var(--ink-3);
-}
-.amountfield.count-amt input {
-  min-height: 46px;
-  padding-right: 40px;
-  font-size: 22px;
-  text-align: right;
-}
-.amountfield.count-amt .clear {
-  right: 3px;
-}
-.amountfield.count-amt.bad input {
-  border-color: var(--red);
-  color: var(--red);
-}
-
 /* ---------------------------------------------------------------- HISTORY */
 
 .searchbar {

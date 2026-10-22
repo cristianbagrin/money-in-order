@@ -12,7 +12,7 @@ import { IconPlus, Section, toast } from '../ui/kit'
 import { play, setSoundOn, soundOn } from '../ui/sound'
 import '../ui/accounts.css'
 
-export function Settings(props: { onCount: () => void; onAccounts: () => void; onBack: () => void }) {
+export function Settings(props: { onAccounts: () => void; onBack: () => void }) {
   const ix = useIndex()
   const s = ix.settings
   const [sound, setSound] = useState(soundOn())
@@ -29,7 +29,7 @@ export function Settings(props: { onCount: () => void; onAccounts: () => void; o
       <SyncBox />
 
       <Section title="Accounts">
-        <Accounts onCount={props.onCount} onAccounts={props.onAccounts} />
+        <Accounts onAccounts={props.onAccounts} />
       </Section>
 
       <Section title="Currencies">
@@ -158,7 +158,7 @@ async function share(name: string, text: string, type: string) {
 }
 
 /** The accounts; tapping one opens the same sheet the rail's Total money does, where they are edited. */
-function Accounts(props: { onCount: () => void; onAccounts: () => void }) {
+function Accounts(props: { onAccounts: () => void }) {
   const ix = useIndex()
   const accounts = accountsInOrder(ix)
   return (
@@ -170,9 +170,6 @@ function Accounts(props: { onCount: () => void; onAccounts: () => void }) {
       ))}
       <button class="pill ghost" aria-label="Add an account" onClick={props.onAccounts}>
         <IconPlus />
-      </button>
-      <button class="pill" onClick={props.onCount}>
-        Update balances
       </button>
       <button class="pill toggle" aria-pressed={!!ix.settings.trackAccounts} onClick={() => setTrackAccounts(!ix.settings.trackAccounts)}>
         Track accounts

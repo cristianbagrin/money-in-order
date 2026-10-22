@@ -43,7 +43,7 @@
 .mstrip-m small {
   position: absolute;
   top: 1px;
-  right: 3px;
+  left: calc(50% + 0.85em);
   font-size: 9.5px;
   font-weight: 560;
   color: var(--ink-3);

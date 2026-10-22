@@ -13,7 +13,7 @@
   position: relative;
   margin: 0 -10px;
   width: calc(100% + 20px);
-  border-radius: var(--r-sm, 10px);
+  border-radius: var(--r-sm);
 }
 /* the name opens the editor, the balance turns into a field: two targets side by side */
 .acc-row {
@@ -21,7 +21,7 @@
   align-items: center;
   gap: 4px;
   min-height: 56px;
-  border-radius: var(--r-sm, 10px);
+  border-radius: var(--r-sm);
   /* vertical scrolling stays the browser's; a horizontal drag is the row's swipe */
   touch-action: pan-y;
   -webkit-touch-callout: none;
@@ -32,7 +32,7 @@
   min-height: 56px;
   padding: 6px 10px;
   border: 0;
-  border-radius: var(--r-sm, 10px);
+  border-radius: var(--r-sm);
   background: none;
   text-align: left;
   transition: background 0.12s;
@@ -65,13 +65,14 @@
   font-weight: 600;
 }
 /* the balance as a field: the number's own size, the balance kept as placeholder */
+/* fits a balance in the millions */
 .amountfield.acc-count {
   flex: none;
-  width: 52%;
+  width: min(52%, 190px);
   margin: 6px 10px 6px 0;
 }
 .amountfield.acc-count input {
-  min-height: 44px;
+  min-height: 40px;
   padding-right: 40px;
   font-size: 18px;
   font-weight: 600;
@@ -217,7 +218,7 @@
   gap: 10px;
   margin: 10px 0 4px;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--r-sm);
   background: var(--sunk);
 }
 .acc-form .cs-foot {

@@ -34,7 +34,9 @@ export function recentCurrencies(): string[] {
 /** Currencies the budget actually deals with: the base, the ones you chose, and any you used lately. */
 export function currenciesInUse(): string[] {
   const s = settings()
-  return [...new Set([s.base, ...s.extraCurrencies, ...recentCurrencies()])]
+  // Accounts kept in another currency need its rate too, to show what they're worth.
+  const accounts = Object.values(getIndex().db.accounts).filter((a) => !a.d).map((a) => a.cur)
+  return [...new Set([s.base, ...s.extraCurrencies, ...accounts, ...recentCurrencies()])]
 }
 
 /**

@@ -7,6 +7,7 @@ import { addAccount, addMove, deleteAccount, previewCount, recordCount, saveAcco
 import { RTA, type Account, type Day, type ID } from '../lib/types'
 import { NO_AUTOFILL } from '../ui/account'
 import { useIndex } from '../ui/hooks'
+import { AnyCurrency, CurrencyPill } from '../ui/currency'
 import { AmountField, IconPlus, toast } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
@@ -347,11 +348,7 @@ function NewAccount(props: { onDone: () => void }) {
         }}
       />
       <div class="pills">
-        {currencies.map((x) => (
-          <button key={x} class="pill sm" aria-pressed={c === x} onClick={() => setC(x)}>
-            {x}
-          </button>
-        ))}
+        <CurPills list={currencies} value={c} onPick={setC} />
         <button class="pill sm toggle" aria-pressed={invest} onClick={() => setInvest(!invest)}>
           Investment
         </button>
@@ -390,11 +387,7 @@ function AccountEditor(props: { a: Account; today: Day; onDone: () => void }) {
         onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
       />
       <div class="pills">
-        {currencies.map((c) => (
-          <button key={c} class="pill sm" aria-pressed={a.cur === c} onClick={() => saveAccount({ ...a, cur: c })}>
-            {c}
-          </button>
-        ))}
+        <CurPills list={currencies} value={a.cur} onPick={(c) => c !== a.cur && saveAccount({ ...a, cur: c })} />
         <button
           class="pill sm toggle"
           aria-pressed={!!a.invest}
@@ -494,5 +487,18 @@ function MoveMoney(props: { accounts: Account[]; today: Day; onDone: () => void 
         </button>
       </div>
     </div>
+  )
+}
+
+/** The currencies offered, one tap each; holding one offers every currency there is. */
+function CurPills(props: { list: string[]; value: string; onPick: (code: string) => void }) {
+  const [any, setAny] = useState(false)
+  return (
+    <>
+      {[...new Set([...props.list, props.value])].map((x) => (
+        <CurrencyPill key={x} code={x} class="sm" pressed={props.value === x} onTap={() => props.onPick(x)} onHold={() => setAny(true)} />
+      ))}
+      <AnyCurrency open={any} onClose={() => setAny(false)} value={props.value} onPick={props.onPick} />
+    </>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { totalMoney } from './lib/accounts'
-import { monthView } from './lib/budget'
+import { assignedAhead, monthView } from './lib/budget'
 import { monthOf } from './lib/dates'
 import { fmt, shownSign } from './lib/money'
 import { redo } from './lib/store'
@@ -170,7 +170,7 @@ export function App() {
       />
     )
   else if (route === 'review') page = <Review today={today} month={reviewMonth} setMonth={setReviewMonth} onCount={() => openAccounts(true)} />
-  else if (route === 'settings') page = <Settings onCount={() => openAccounts(true)} onAccounts={() => openAccounts()} onBack={() => go(lastMain.current)} />
+  else if (route === 'settings') page = <Settings onAccounts={() => openAccounts()} onBack={() => go(lastMain.current)} />
   else page = <Today today={today} onPlan={() => go('plan')} />
 
   return (
@@ -203,7 +203,10 @@ function useBadges(today: string) {
   const ix = useIndex()
   const m = monthOf(today)
   const v = useMemo(() => monthView(ix, m, m), [ix, m])
-  return { rta: shownSign(v.readyToAssign, ix.settings.base), overspent: v.overspent.length }
+  const rta = shownSign(v.readyToAssign, ix.settings.base)
+  // Below zero only because coming months are planned ahead of their income: nothing needs fixing.
+  const ahead = rta < 0 && shownSign(v.readyToAssign + assignedAhead(ix, m), ix.settings.base) >= 0
+  return { rta: ahead ? 0 : rta, overspent: v.overspent.length }
 }
 
 function Dot(props: { rta: number; overspent: number }) {
