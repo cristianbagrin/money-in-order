@@ -269,6 +269,9 @@ export function commit(patch: Patch, asStamped = false) {
   const cats = next.cats as DB['cats']
   const risky = written.some(([name, r]) => name === 'cats' || name === 'groups' || cats[(r as Txn).cat]?.d)
   db = risky ? repair(next as unknown as DB) : (next as unknown as DB)
+  // What the repair brought back is stamped just after its deletion: the next edit must come later still,
+  // or an edit to it would tie with the same repair made on another device and could lose.
+  if (risky) for (const r of [...Object.values(db.cats), ...Object.values(db.groups)] as Rec[]) if (r.u > lastStamp) lastStamp = r.u
   for (const [name, r] of written) persistence?.wrote?.(name, r)
   emit()
   if (written.length) for (const fn of changeListeners) fn()

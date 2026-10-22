@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildIndex, monthView } from '../src/lib/budget'
 import { hasNews, merge, mergeRec, repair } from '../src/lib/merge'
 import * as S from '../src/lib/store'
@@ -181,6 +181,26 @@ describe('repair after a merge', () => {
     // The spending still counts.
     const v = monthView(buildIndex(m1), OCT, OCT)
     expect(v.byId.get(gifts.id)?.activity).toBe(-25000)
+  })
+
+  it('an edit right after a repair is newer than it, so it wins over the same repair made elsewhere', () => {
+    // every edit lands in the same millisecond: only the stamps' own order separates them
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+    try {
+      const gifts = S.addCategory(cat(shared, 'Other').group, 'Gifts')
+      S.addTxn({ date: '2026-10-05', cat: gifts.id, amt: -25000, cur: 'TWD' })
+      // Deleted while it has spending (say, logged on another device and just arrived): it comes back archived.
+      S.deleteCategory(gifts.id)
+      const repaired = S.getDB()
+      expect(repaired.cats[gifts.id]).toMatchObject({ archived: 1 })
+      S.unarchiveCategory(gifts.id)
+      const here = S.getDB()
+      expect(here.cats[gifts.id].u).toBeGreaterThan(repaired.cats[gifts.id].u)
+      expect(merge(here, repaired).cats[gifts.id].archived).toBeUndefined()
+      expect(merge(repaired, here).cats[gifts.id].archived).toBeUndefined()
+    } finally {
+      now.mockRestore()
+    }
   })
 
   it('brings back a deleted group while an active category is in it', () => {
