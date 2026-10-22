@@ -572,6 +572,40 @@ export function wholeNumbers() {
   })
 }
 
+/**
+ * Something opened in place (an editor, a form, a choice) closes with a tap anywhere outside it, on a
+ * phone or with a mouse. `inside` says what counts as part of it: itself and the thing that opened it.
+ * A tap, not a scroll: it has to end close to where it started. A field typed in there lets go first,
+ * so what was typed saves as it would on leaving the field.
+ */
+export function useTapAway(active: boolean, onAway: () => void, inside: (el: Element) => boolean) {
+  const live = useRef({ onAway, inside })
+  live.current = { onAway, inside }
+  useEffect(() => {
+    if (!active) return
+    let start: { x: number; y: number; t: number } | null = null
+    // (A picker it opens renders inside it, so a tap there is inside too.)
+    const hit = (e: Event) => !(e.target as Element).isConnected || live.current.inside(e.target as Element)
+    const down = (e: PointerEvent) => {
+      start = hit(e) ? null : { x: e.clientX, y: e.clientY, t: Date.now() }
+    }
+    const up = (e: PointerEvent) => {
+      const s = start
+      start = null
+      if (!s || hit(e) || Date.now() - s.t > 600 || Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) return
+      const f = document.activeElement as HTMLElement | null
+      if (f && live.current.inside(f)) f.blur()
+      live.current.onAway()
+    }
+    document.addEventListener('pointerdown', down, true)
+    document.addEventListener('pointerup', up, true)
+    return () => {
+      document.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('pointerup', up, true)
+    }
+  }, [active])
+}
+
 // ---------------------------------------------------------------- typed amounts
 
 /**

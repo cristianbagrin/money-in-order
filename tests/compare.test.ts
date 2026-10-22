@@ -106,11 +106,11 @@ describe('standouts', () => {
       give(m, 'Living', 15000)
       spend(`${m}-10`, 'Living', 17200)
     }
-    expect(texts(OCT, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000.')
+    expect(texts(OCT, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000')
     // November, still going: the run ends in October until November goes over too
     give(NOV, 'Living', 15000)
     spend('2026-11-03', 'Living', 1000)
-    expect(texts(NOV, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000.')
+    expect(texts(NOV, '2026-11-10')[0]).toBe('Living went over 3 months in a row; it costs about NT$17,000 a month, not NT$15,000')
     // once November plans for what it costs there is nothing to say
     give(NOV, 'Living', 17500)
     expect(texts(NOV, '2026-11-10').some((t) => t.includes('went over'))).toBe(false)
@@ -127,7 +127,7 @@ describe('standouts', () => {
     }
     spend('2026-11-05', 'Living', 10500)
     spend('2026-11-06', 'Purchases', 5000)
-    expect(texts(NOV, '2026-12-02')).toEqual(['Purchases was 5 times its usual, NT$5,000.'])
+    expect(texts(NOV, '2026-12-02')).toEqual(['Purchases was 5 times its usual, NT$5,000'])
     expect(standouts(ix(), spending(ix(), NOV, '2026-12-02'))[0].tone).toBe('bad') // past its plan
   })
 
@@ -135,7 +135,7 @@ describe('standouts', () => {
     for (const m of [AUG, SEP, OCT, NOV]) give(m, 'Living', 10000)
     for (const m of [AUG, SEP, OCT]) spend(`${m}-05`, 'Living', 10000)
     spend('2026-11-05', 'Living', 6000)
-    expect(standouts(ix(), spending(ix(), NOV, '2026-12-02'))).toMatchObject([{ tone: 'good', text: 'Living was NT$4,000 below usual.' }])
+    expect(standouts(ix(), spending(ix(), NOV, '2026-12-02'))).toMatchObject([{ tone: 'good', text: 'Living was NT$4,000 below usual' }])
   })
 
   it('stays quiet about small moves', () => {

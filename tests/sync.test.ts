@@ -29,7 +29,7 @@ describe('sync status', () => {
     const S = await import('../src/lib/store')
     await sync.enableSync('ABCDE-FGHJK-MNPQR-STUVW')
     expect(sync.syncStatus()).toMatchObject({ state: 'offline', stale: false })
-    expect(sync.syncStatus().error).toBe('Offline. Changes will sync when you’re back.')
+    expect(sync.syncStatus().error).toBe('Offline. Changes will sync when you’re back')
     let heard = 0
     const off = sync.onSyncStatus(() => heard++)
     S.updateSettings({ savingsTarget: 0.25 })

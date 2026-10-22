@@ -36,25 +36,25 @@ export function Onboarding(props: { onDone: () => void }) {
           <li>
             <span>
               <b>Give every bit of money a job</b>
-              <span>Count what you have, then plan it down to zero.</span>
+              <span>Count what you have, then plan it down to zero</span>
             </span>
           </li>
           <li>
             <span>
               <b>Log it the moment you spend</b>
-              <span>Type the amount, tap the category.</span>
+              <span>Type the amount, tap the category</span>
             </span>
           </li>
           <li>
             <span>
               <b>Roll with it</b>
-              <span>Overspent? Move money from somewhere else.</span>
+              <span>Overspent? Move money from somewhere else</span>
             </span>
           </li>
           <li>
             <span>
               <b>Fund the big things monthly</b>
-              <span>Trips, a new phone, yearly bills: a little every month.</span>
+              <span>Trips, a new phone, yearly bills: a little every month</span>
             </span>
           </li>
         </ol>
@@ -106,7 +106,7 @@ export function Onboarding(props: { onDone: () => void }) {
     if (missing.length) {
       setBusy(false)
       play('error')
-      toast(`Couldn’t get exchange rates for ${missing.join(', ')}. Check your connection.`)
+      toast(`Couldn’t get exchange rates for ${missing.join(', ')}. Check your connection`)
       return
     }
     seedCategories()
@@ -138,7 +138,7 @@ export function Onboarding(props: { onDone: () => void }) {
             setMain(m)
           }}
         />
-        <p class="hint">Tap the currencies you use. Double-tap the one you plan in.</p>
+        <p class="hint">Tap the currencies you use. Double-tap the one you plan in</p>
       </div>
 
       <div style={{ marginTop: '18px' }}>
@@ -171,7 +171,6 @@ export function Onboarding(props: { onDone: () => void }) {
               placeholder="0"
               style={{ textAlign: 'right' }}
               value={a.bal}
-              onFocus={(e) => e.currentTarget.select()}
               onInput={(e) => {
                 const bal = regroup(e)
                 setAccounts(accounts.map((x, k) => (k === i ? { ...x, bal } : x)))

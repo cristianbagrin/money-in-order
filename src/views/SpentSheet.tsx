@@ -44,7 +44,7 @@ export function SpentSheet(props: { cat: ID | null; month: string; today: string
           ))}
         </div>
       ) : (
-        <p class="empty">Nothing spent yet.</p>
+        <p class="empty">Nothing spent yet</p>
       )}
       <TxnSheet txn={open} today={props.today} onClose={() => setOpen(null)} />
     </Sheet>

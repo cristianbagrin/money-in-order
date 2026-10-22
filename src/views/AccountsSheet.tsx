@@ -8,7 +8,7 @@ import { RTA, type Account, type Day, type ID } from '../lib/types'
 import { NO_AUTOFILL } from '../ui/account'
 import { useIndex } from '../ui/hooks'
 import { AnyCurrency, CurrencyPill } from '../ui/currency'
-import { AmountField, IconPlus, toast } from '../ui/kit'
+import { AmountField, IconPlus, toast, useTapAway } from '../ui/kit'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
 import { sortKey, useSortable } from '../ui/sortable'
@@ -146,6 +146,9 @@ export function AccountsSheet(props: {
     </div>
   )
 
+  // An open editor or form closes with a tap anywhere else.
+  useTapAway(form !== null, () => setForm(null), (el) => !!el.closest(edit ? `.acc-form, [data-sort-id="${edit}"]` : '.acc-form, .acc-actions'))
+
   const gap = r ? r.diff + r.fx : 0
   const line = (label: string, v: number) => (
     <div class="acc-line">
@@ -224,7 +227,7 @@ export function AccountsSheet(props: {
               )}
             </>
           )}
-          {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again.</p>}
+          {noRate.length > 0 && <p class="hint neg">No exchange rate for {noRate.join(', ')} yet. Connect to the internet and try again</p>}
           <div class="acc-save">
             <button class="link" onClick={cancel}>
               Cancel
@@ -404,7 +407,6 @@ function AccountEditor(props: { a: Account; today: Day; onDone: () => void }) {
         aria-label="Name"
         autocapitalize="words"
         defaultValue={a.name}
-        onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const name = e.currentTarget.value.trim()
           if (!name) e.currentTarget.value = a.name
@@ -503,7 +505,7 @@ function MoveMoney(props: { accounts: Account[]; today: Day; onDone: () => void 
           <span class="acc-cur">{t.cur}</span>
         </div>
       )}
-      {noRate && <p class="hint neg">No exchange rate for {f.cur} and {t.cur} yet. Connect to the internet and try again.</p>}
+      {noRate && <p class="hint neg">No exchange rate for {f.cur} and {t.cur} yet. Connect to the internet and try again</p>}
       <div class="cs-foot">
         <button class="link" onClick={props.onDone}>
           Cancel

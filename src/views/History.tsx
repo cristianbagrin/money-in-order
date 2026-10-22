@@ -356,7 +356,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       {label}
     </button>
   )
-  if (!ix.txns.length) return <p class="empty">Nothing yet.</p>
+  if (!ix.txns.length) return <p class="empty">Nothing yet</p>
 
   return (
     <div>
@@ -423,7 +423,7 @@ export function History(props: { today: string; filter: string; setFilter: (f: s
       </div>
       {!rows.length && (
         <div class="empty histempty">
-          <p>Nothing matches.</p>
+          <p>Nothing matches</p>
           {period !== 'all' && (
             <button class="pill sm" onClick={() => restart(setPeriod, 'all' as Period)}>
               All time
