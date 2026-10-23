@@ -1,5 +1,6 @@
 import { averageSpent, monthView, targetNeed, type CatMonth, type Index } from './budget'
 import { addMonths } from './dates'
+import { dueIn } from './repeat'
 import type { ID, Month } from './types'
 
 /*
@@ -54,6 +55,8 @@ export interface Suggestion {
   /** already assigned */
   assigned: number
   saving: boolean
+  /** repeating payments due in the month (part of `base`) */
+  due: number
 }
 
 /** A category's usual monthly cost, in whole units. */
@@ -79,6 +82,7 @@ export function suggestions(ix: Index, month: Month, current: Month): Suggestion
   const anchor = future ? current : month
   const out: Suggestion[] = []
   const savers: { s: Suggestion; c: CatMonth }[] = []
+  const bills = dueIn(ix, month)
   for (const c of view.cats) {
     const cat = c.cat
     if (cat.archived) continue
@@ -93,7 +97,10 @@ export function suggestions(ix: Index, month: Month, current: Month): Suggestion
       base = u > 0 ? Math.min(t.amount, u) : t.amount
     }
     else base = targetNeed(cat, c.carry, 0, month).goal
-    const s: Suggestion = { cat: cat.id, want: base, base, assigned: c.assigned, saving: !!cat.saving }
+    // Repeating payments come first too: a coming month needs all of them, this one what it has no money for yet.
+    const due = roundUp(bills.get(cat.id) ?? 0)
+    if (due > 0) base = Math.max(base, future ? due : roundUp(due - c.carry))
+    const s: Suggestion = { cat: cat.id, want: base, base, assigned: c.assigned, saving: !!cat.saving, due }
     if (cat.saving) savers.push({ s, c })
     else if (!t) {
       // Usual cost, less what it starts the month with (a debt adds to it).

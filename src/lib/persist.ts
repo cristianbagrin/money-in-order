@@ -69,13 +69,20 @@ export async function loadDB(): Promise<{ db: DB | null; replayed: boolean }> {
   } catch {
     // IndexedDB unavailable (private mode): run in memory.
   }
+  const extra = journaled((k, raw) => replayed.set(k, raw))
+  const news = !!extra && hasNews(saved ?? emptyDB(), extra)
+  return { db: news ? merge(saved ?? emptyDB(), extra!) : (saved ?? null), replayed: news }
+}
+
+/** The records other tabs journaled for the budget held here (`each` hears of every journal read). */
+function journaled(each?: (key: string, raw: string) => void): DB | null {
   let extra: DB | null = null
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
-      if (!k?.startsWith(JOURNAL)) continue
+      if (!k?.startsWith(JOURNAL) || k === JOURNAL + TAB) continue
       const raw = localStorage.getItem(k) ?? '[]'
-      replayed.set(k, raw)
+      each?.(k, raw)
       // Older journals are plain lists (of the budget stored then); one of a budget swapped out since is dropped.
       const data = JSON.parse(raw) as [string, Rec][] | { epoch: string; recs: [string, Rec][] }
       const [from, recs] = Array.isArray(data) ? ['', data] : [data.epoch, data.recs]
@@ -88,10 +95,9 @@ export async function loadDB(): Promise<{ db: DB | null; replayed: boolean }> {
       extra = merge(extra ?? emptyDB(), part as unknown as DB)
     }
   } catch {
-    // unreadable journal: nothing to replay
+    // unreadable journal: nothing to take in
   }
-  const news = !!extra && hasNews(saved ?? emptyDB(), extra)
-  return { db: news ? merge(saved ?? emptyDB(), extra!) : (saved ?? null), replayed: news }
+  return extra
 }
 
 /**
@@ -146,16 +152,23 @@ function adopt(other: Swapped) {
 async function pull() {
   const e = epoch
   try {
-    if ((await get('dbw', store)) === seen) return
-    const [stored, mark, era] = await getMany(['db', 'dbw', 'dbe'], store)
-    // A budget swapped in here (meanwhile, or not stored yet) replaces whatever is stored.
-    if (fresh || epoch !== e) return
-    if ((era ?? '') !== epoch) return adopt({ db: stored as DB | undefined, mark, epoch: era ?? '' })
-    if (stored && hasNews(getDB(), stored)) replaceDB(merge(getDB(), stored))
-    seen = mark
+    if ((await get('dbw', store)) !== seen) {
+      const [stored, mark, era] = await getMany(['db', 'dbw', 'dbe'], store)
+      // A budget swapped in here (meanwhile, or not stored yet) replaces whatever is stored.
+      if (fresh || epoch !== e) return
+      if ((era ?? '') !== epoch) return adopt({ db: stored as DB | undefined, mark, epoch: era ?? '' })
+      if (stored && hasNews(getDB(), stored)) replaceDB(merge(getDB(), stored))
+      seen = mark
+    }
   } catch {
     // IndexedDB unavailable
   }
+  if (fresh || epoch !== e) return
+  // A tab closed right after an edit, before storing it, left it in its journal: take it in now rather than
+  // at the next start (a tab still saving its own is taken in early, which changes nothing). Nobody else will
+  // send it to other devices, so it counts as an edit made here.
+  const left = journaled()
+  if (left && hasNews(getDB(), left)) replaceDB(merge(getDB(), left), { local: true })
 }
 
 export function startPersistence(opts: { replayed: boolean }) {

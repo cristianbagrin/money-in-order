@@ -182,35 +182,58 @@ export interface WealthPoint {
  */
 export function wealthSeries(ix: Index, months: Month[], today: Day): WealthPoint[] {
   const s = ix.settings
-  const invests = investAccounts(ix)
   const counts = countsDesc(ix)
   const links = linkedCats(ix)
+  // Oldest first (by day, then by when written), with running totals: any month is a few binary searches away.
   const asc = [...ix.txns].reverse()
+  const cashSum = runningSums(asc.map((t) => t.base))
+  const invests = investAccounts(ix).map((a) => {
+    const linked = links.get(a.id)
+    const flows: Txn[] = []
+    const put: number[] = []
+    for (const t of asc) {
+      // money put into the account, in the base currency
+      const v = t.kind === 'move' ? convert(flowInto(t, a, { cash: false }, s.rates, s.base), a.cur, s.base, s.rates, s.base) : linked?.has(t.cat) && !t.kind ? -t.base : 0
+      if (!v) continue
+      flows.push(t)
+      put.push(v)
+    }
+    return { a, flows, sum: runningSums(put) }
+  })
   return months.map((m) => {
     const lastDay = `${m}-${String(daysInMonth(m)).padStart(2, '0')}`
     const end = lastDay < today ? lastDay : today
-    let cash = 0
-    let added = 0
-    for (const t of asc) {
-      if (t.date > end) break
-      cash += t.base
-    }
+    const cash = cashSum[firstWhere(asc, (t) => t.date > end)]
     let invest = 0
-    for (const a of invests) {
+    let added = 0
+    for (const { a, flows, sum } of invests) {
+      const n = firstWhere(flows, (t) => t.date > end)
       const anchor = counts.find((c) => c.date <= end && c.bal[a.id] !== undefined)
-      const rates = anchor?.rates ?? s.rates
-      let v = anchor ? convert(anchor.bal[a.id], anchor.curs?.[a.id] ?? a.cur, s.base, rates, s.base) : 0
-      const linked = links.get(a.id)
-      for (const t of asc) {
-        if (t.date > end) break
-        // put in during this month
-        const inBase = t.kind === 'move' ? convert(flowInto(t, a, { cash: false }, s.rates, s.base), a.cur, s.base, s.rates, s.base) : linked?.has(t.cat) && !t.kind ? -t.base : 0
-        if (!inBase) continue
-        if (t.date.slice(0, 7) === m) added += inBase
-        if (!anchor || afterCount(t, anchor)) v += inBase
-      }
+      let v = anchor ? convert(anchor.bal[a.id], anchor.curs?.[a.id] ?? a.cur, s.base, anchor.rates, s.base) : 0
+      v += sum[n] - sum[anchor ? Math.min(n, firstWhere(flows, (t) => afterCount(t, anchor))) : 0]
+      // put in during this month
+      added += sum[n] - sum[Math.min(n, firstWhere(flows, (t) => t.date >= `${m}-01`))]
       invest += Math.round(v)
     }
     return { month: m, cash, invest, total: cash + invest, added }
   })
+}
+
+/** sums[k] = the first k values added up. */
+function runningSums(values: number[]): number[] {
+  const out = [0]
+  for (const v of values) out.push(out[out.length - 1] + v)
+  return out
+}
+
+/** The first index where `pred` holds, for a predicate that stays true once it turns (list.length when never). */
+function firstWhere<T>(list: T[], pred: (x: T) => boolean): number {
+  let lo = 0
+  let hi = list.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (pred(list[mid])) hi = mid
+    else lo = mid + 1
+  }
+  return lo
 }

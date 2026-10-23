@@ -130,10 +130,26 @@ function budget(tag: string): DB {
 
 function seed(device: string, db: DB) {
   deviceOf(device).kv.set('db', structuredClone(db))
+  // Every device's budget is its own (as its epoch says): here one stand-in localStorage serves them all, and a
+  // tab takes in what other tabs of its budget journaled.
+  deviceOf(device).kv.set('dbe', device)
 }
 
 const ids = (db: DB) => Object.keys(db.txns).sort()
 const stored = (device: string) => deviceOf(device).kv.get('db') as DB
+
+describe('a tab closed right after an edit', () => {
+  it('leaves the edit in its journal, and the tab still open takes it in without waiting for a restart', async () => {
+    seed('desk', budget('J'))
+    const t1 = await tab('desk')
+    const t2 = await tab('desk')
+    // Logged, then the tab is gone before its save reaches IndexedDB: only its journal has it.
+    t1.S.commit({ txns: [txn('closing', 'cJ')] })
+    expect(ids(stored('desk'))).toEqual(['tJ'])
+    await t2.S.pullNow()
+    expect(ids(t2.S.getDB())).toEqual(['closing', 'tJ'])
+  })
+})
 
 describe('a budget swapped in one tab', () => {
   it('replaces the old one in every tab; a tab still holding the old one cannot write it back', async () => {

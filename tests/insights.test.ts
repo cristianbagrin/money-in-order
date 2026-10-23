@@ -82,9 +82,9 @@ describe('saving', () => {
   it('says the rate against the target', () => {
     earn('2026-09-01', 50000)
     give(SEP, 'Future me', 9000)
-    expect(savedLine(ix(), SEP, TODAY)).toEqual({ text: 'Saved 18% of income · target 20%', good: false, rate: '18%' })
+    expect(savedLine(ix(), SEP, TODAY)).toEqual({ text: 'Saved 18% of income\u2003target 20%', good: false, rate: '18%' })
     give(SEP, 'Emergency', 1000)
-    expect(savedLine(ix(), SEP, TODAY)).toMatchObject({ text: 'Saved 20% of income · target 20%', good: true })
+    expect(savedLine(ix(), SEP, TODAY)).toMatchObject({ text: 'Saved 20% of income\u2003target 20%', good: true })
     S.updateSettings({ savingsTarget: 0 })
     expect(savedLine(ix(), SEP, TODAY)!.text).toBe('Saved 20% of income')
   })

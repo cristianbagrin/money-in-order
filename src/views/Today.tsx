@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { cashAccounts } from '../lib/accounts'
 import { daily, monthView } from '../lib/budget'
 import { dayOfMonth, daysInMonth, isoDate, monthOf } from '../lib/dates'
-import { cur, evalAmount, fmt } from '../lib/money'
+import { cur, evalAmount, fmt, SEP } from '../lib/money'
 import { currenciesInUse, hasRate } from '../lib/rates'
 import { addTxn, getIndex, toBase, undoable } from '../lib/store'
 import { RTA, type Account, type ID, type Source } from '../lib/types'
 import { DatePill } from '../ui/calendar'
 import { useIndex, useMedia } from '../ui/hooks'
-import { AnyCurrency, CurrencyPill } from '../ui/currency'
-import { IconChevron, Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
+import { AnyCurrency, CurrencyPill, useLongPress } from '../ui/currency'
+import { Keypad, NoteField, regroup, showSum, toast } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
 import { haptic, play } from '../ui/sound'
 import './today.css'
@@ -230,41 +230,32 @@ function AccountPill(props: { accounts: Account[]; value: Account; onPick: (a: A
 }
 
 /**
- * Income, beside the currency and the date: a tap logs the amount as income from the source it shows (the
- * first one in Settings unless another was picked). With several sources the arrow picks another.
+ * Income, beside the currency and the date: a tap moves to the next source (the first one in Settings
+ * unless another was picked), a hold logs the amount as income from the source it shows.
  */
 function IncomePill(props: { sources: Source[]; value: Source | null; suggest: boolean; amount: string; onLog: (el: Element) => void; onPick: (s: Source) => void }) {
   const { sources, value } = props
-  const { open, setOpen, box } = usePopover()
+  const el = useRef<HTMLButtonElement>(null)
   const name = value?.name ?? 'Income'
+  const lp = useLongPress(
+    () => props.onLog(el.current!),
+    () => {
+      if (sources.length < 2) return toast('Hold to log it as income')
+      haptic('light')
+      props.onPick(sources[(sources.findIndex((x) => x.id === value?.id) + 1) % sources.length])
+    },
+  )
   return (
-    <div class={`incomebox${props.suggest ? ' suggest' : ''}`} ref={box}>
-      <button class="pill incomepill" aria-label={`Log ${props.amount || 'the amount'} as income${value ? ` from ${name}` : ''}`} onClick={(e) => props.onLog(e.currentTarget)}>
-        +&#8202;{name}
-      </button>
-      {sources.length > 1 && (
-        <button class="pill incomepick" aria-label="Pick the income source" aria-haspopup="true" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}>
-          <IconChevron dir="down" />
-        </button>
-      )}
-      {open && (
-        <div class="acctpop pills" role="group" aria-label="Income source">
-          {sources.map((x) => (
-            <button
-              key={x.id}
-              class="pill sm"
-              aria-pressed={x.id === value?.id}
-              onClick={() => {
-                props.onPick(x)
-                setOpen(false)
-              }}
-            >
-              {x.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <button
+      ref={el}
+      type="button"
+      class={`pill lp incomepill${props.suggest ? ' suggest' : ''}`}
+      aria-label={`Income${value ? ` from ${name}` : ''}. Hold to log ${props.amount || 'the amount'}${sources.length > 1 ? ', tap for the next source' : ''}`}
+      title="Hold to log as income"
+      {...lp}
+    >
+      +&#8202;{name}
+    </button>
   )
 }
 
@@ -376,7 +367,7 @@ export function Register(props: { today: string; touch: boolean }) {
     const before = { ...draft }
     const income = cat === RTA
     const name = income ? 'Income' : ix.catById.get(cat)?.name ?? ''
-    const label = `${inflow && !income ? '+' : ''}${fmt(amount, currency)} ${income ? 'income' : `· ${name}`}`
+    const label = `${inflow && !income ? '+' : ''}${fmt(amount, currency)} ${income ? 'income' : `${SEP}${name}`}`
     undoable(
       label,
       () =>
@@ -409,14 +400,14 @@ export function Register(props: { today: string; touch: boolean }) {
     } else if (ddAfter) {
       toast(
         ddAfter.leftToday >= 0
-          ? `${name} · ${fmt(ddAfter.leftToday, base)} left today`
-          : `Over · ${fmt(ddAfter.tomorrow ?? 0, base)} tomorrow`,
+          ? `${name}${SEP}${fmt(ddAfter.leftToday, base)} left today`
+          : `Over${SEP}${fmt(ddAfter.tomorrow ?? 0, base)} tomorrow`,
         { undo: true },
       )
     } else if (cm && cm.available < 0) {
       toast(`${name} is ${fmt(-cm.available, base)} over`, { undo: true })
     } else {
-      toast(`${name} · ${fmt(cm?.available ?? 0, base)} left`, { undo: true })
+      toast(`${name}${SEP}${fmt(cm?.available ?? 0, base)} left`, { undo: true })
     }
   }
 

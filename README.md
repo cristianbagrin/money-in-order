@@ -14,8 +14,8 @@ devices in sync with end-to-end encryption.
 | --- | --- |
 | **Today** | What's left for today, and the register: type the amount, tap where it went (every category, plus Income). Each bubble shows what the category will have *after* this purchase. Phones get a keypad; on a laptop you just type, arrow to a category and press Enter. |
 | **Plan** | Ready to assign, and every category with an Assigned field (type sums like `6000+500`, ↑/↓ to move), Spent and Available. Click a name or note to edit it, hold and drag to reorder, tap Available for details (Cover overspending, assign suggestions, target). |
-| **History** | Every transaction, searchable, filterable by category; edit with the same pills as everywhere else. |
-| **Review** | What this month means in plain words, this month vs. your plan, the last six months, weeks, category trends, your notes, and **Copy for Claude**. |
+| **History** | Every transaction by day, searchable, filterable by category and period; edit with the same pills as everywhere else. |
+| **Review** | A month in plain words against its usual: your usual day and month, what stands out, where it went (categories or groups), net worth over time, income by source, goals, and **Copy for Claude**. |
 
 Everything important can be undone for a few seconds (and with ⌘Z on a laptop). Sounds are kept for moments that mean something (logging, a finished plan, mistakes, deletes); they can be switched off in Settings.
 
@@ -55,14 +55,18 @@ Devices that synced with a 20-character code before accounts existed keep syncin
 ```sh
 npm install
 npm run dev          # UI only, no sync endpoint
-npm test             # budget math, targets, daily allowance, counting, merge
+npm test             # budget math, targets, counting, merge, tabs and sync, and a randomized stress test
+STRESS_SEEDS=80 STRESS_STEPS=400 npm test   # the stress test, much harder
 npm run serve        # build + local server with a real Blobs emulator: sync works between tabs on http://localhost:4174
 ```
 
 Code map:
 
 - `src/lib/budget.ts`: all budget math (pure functions over an index of the data)
-- `src/lib/store.ts`: data, persistence hooks and every mutation
+- `src/lib/plan.ts`: the planner (suggestions, Fill in, how far ahead the money goes)
+- `src/lib/accounts.ts`: balances, investments and net worth
+- `src/lib/compare.ts`, `src/lib/insights.ts`: Review's figures (a month against its usual, savings, goals)
+- `src/lib/store.ts`: data, undo and every mutation; `src/lib/persist.ts`: IndexedDB, safe across tabs and reloads
 - `src/lib/sync.ts`: encryption and the pull/merge/push loop; `src/lib/merge.ts`: the record merge
 - `src/lib/export.ts`: the Claude summary and CSV
 - `src/views/*`: screens; `src/styles.css`: the whole design system

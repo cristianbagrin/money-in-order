@@ -226,11 +226,6 @@
   background: var(--s-invest);
 }
 
-.ch-spark svg {
-  display: block;
-  overflow: visible;
-}
-
 /* ---- motion */
 
 .ch-grow {

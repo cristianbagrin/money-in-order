@@ -54,7 +54,7 @@ export function AccountForm(props: { signInOnly?: boolean; onDone?: () => void }
     }
     // A device with no budget yet has nothing to lose; otherwise ask before the account's budget replaces this one.
     const r = await signIn(email, password, () =>
-      props.signInOnly ? true : confirm('Use the budget from your account on this device? What is on this device now is replaced.'),
+      props.signInOnly ? true : confirm('Use the budget from your account on this device? What is on this device now is replaced'),
     )
     setBusy(false)
     if (r === 'joined') {

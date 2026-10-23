@@ -3,12 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { investAccounts } from '../lib/accounts'
 import { assignedInMonth, averageSpent, monthView, type CatMonth } from '../lib/budget'
 import { addMonths, monthName } from '../lib/dates'
-import { evalAmount, fmt, roundFor } from '../lib/money'
+import { evalAmount, fmt, roundFor, shownSign } from '../lib/money'
 import { suggestions } from '../lib/plan'
+import { dueIn } from '../lib/repeat'
 import { archiveCategory, categoryHasHistory, deleteCategory, getIndex, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
 import { useIndex, useToday } from '../ui/hooks'
-import { caretToEnd, regroup, toast, useCalc } from '../ui/kit'
+import { caretToEnd, regroup, toast, useCalc, useTapAway } from '../ui/kit'
 import { useCountUp } from '../ui/motion'
 import { Sheet } from '../ui/sheet'
 import { play } from '../ui/sound'
@@ -32,6 +33,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
   const available = cm?.available ?? 0
   const shown = useCountUp(available)
   const [deleting, setDeleting] = useState(false)
+  useTapAway(deleting, () => setDeleting(false), (el) => !!el.closest('.cs-del, .link.red'))
   const [spentOpen, setSpentOpen] = useState(false)
   useEffect(() => {
     setDeleting(!!props.catId && pendingDelete === props.catId)
@@ -41,6 +43,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
 
   if (!cat) return <Sheet open={false} onClose={props.onClose} children={null} />
 
+  const availSign = shownSign(available, base)
   const assigned = cm?.assigned ?? 0
   const spent = -(cm?.activity ?? 0)
   const carry = cm?.carry ?? 0
@@ -57,6 +60,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
     if (value > 0 && value !== assigned && !quick.some((q) => q.value === value)) quick.push({ label, value })
   }
   if (cm && cm.goal > 0) offer(cat.target ? 'Target' : 'Clear it', cm.goal)
+  offer('Repeats', roundFor(base, dueIn(ix, month).get(cat.id) ?? 0))
   if (cat.saving) {
     // Savings: its share of the month's savings target (spending from it isn't a cost to repeat).
     const s = month >= current ? suggestions(ix, month, current).find((x) => x.cat === cat.id) : undefined
@@ -79,7 +83,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
 
   return (
     <Sheet open onClose={props.onClose} title={cat.name}>
-      <div class={`cs-avail ${available < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : available > 0 ? 'pos' : 'faint'}`}>
+      <div class={`cs-avail ${availSign < 0 ? 'neg' : cm && cm.need > 0 ? 'short' : availSign > 0 ? 'pos' : 'faint'}`}>
         <span class={`marked${available < 0 ? ' neg' : ''}`}>{fmt(shown, base)}</span>
       </div>
 
@@ -140,7 +144,7 @@ export function CategorySheet(props: { catId: ID | null; month: string; current:
                 {s.cat.name} <small>{fmt(s.available, base)}</small>
               </button>
             ))}
-            {!sources.length && view.readyToAssign <= 0 && <span class="muted">Nothing has money to spare yet.</span>}
+            {!sources.length && view.readyToAssign <= 0 && <span class="muted">Nothing has money to spare yet</span>}
           </div>
         </div>
       )}
@@ -322,7 +326,7 @@ function DeleteStep(props: { cat: Category; onCancel: () => void; onDone: () => 
     // Deleting spending gives that money back (and income takes it away): your total changes.
     const change = -txns.reduce((s, t) => s + t.base, 0)
     const n = txns.length
-    if (!confirm(`Delete ${cat.name} and its ${n} ${n === 1 ? 'transaction' : 'transactions'}? Your total money changes by ${fmt(change, base, { sign: true })}.`)) return
+    if (!confirm(`Delete ${cat.name} and its ${n} ${n === 1 ? 'transaction' : 'transactions'}? Your total money changes by ${fmt(change, base, { sign: true })}`)) return
     undoable(`Deleted ${cat.name}`, () => deleteCategory(cat.id, { dropTxns: true }))
     play('delete')
     props.onDone()
@@ -427,19 +431,19 @@ function TargetEditor(props: { cat: Category; cm: CatMonth | undefined; base: st
 
   // The goal's pace: what this month asks for, the same figure as the Target pill and Fill in.
   let pace = ''
-  if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? '' : 'Goal reached.'
+  if (t?.kind === 'goal' && t.by && t.amount > 0 && cm) pace = cm.goal > 0 ? '' : 'Goal reached'
   // Monthly and Top up differ only in what came over from last month: say what that means this month.
   else if (t && t.amount > 0 && cm && !cat.archived) {
     const carry = cm.carry
     const prev = monthName(addMonths(month, -1))
-    if (t.kind === 'topup') pace = `Add ${fmt(t.amount, base)} every month, no matter what.`
+    if (t.kind === 'topup') pace = `Add ${fmt(t.amount, base)} every month, no matter what`
     else if (t.kind === 'monthly')
       pace =
         carry > 0
-          ? `${fmt(carry, base)} came over from ${prev}, so ${fmt(cm.goal, base)} tops it up.`
+          ? `${fmt(carry, base)} came over from ${prev}, so ${fmt(cm.goal, base)} tops it up`
           : carry < 0
-            ? `You need ${fmt(cm.goal, base)} because you went ${fmt(-carry, base)} over in ${prev}.`
-            : 'What’s left at the end of the month counts toward the next.'
+            ? `You need ${fmt(cm.goal, base)} because you went ${fmt(-carry, base)} over in ${prev}`
+            : 'What’s left at the end of the month counts toward the next'
   }
 
   return (

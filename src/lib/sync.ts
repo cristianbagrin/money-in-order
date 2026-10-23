@@ -17,8 +17,8 @@ import { COLLECTIONS, emptyDB, type DB, type Rec } from './types'
 /** PBKDF2 rounds: about half a second on a phone, once per sign-in. */
 const ROUNDS = 310_000
 export const MIN_PASSWORD = 8
-const OFFLINE = 'Offline. Changes will sync when you’re back.'
-const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly.'
+const OFFLINE = 'Offline. Changes will sync when you’re back'
+const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly'
 /** Unsent changes older than this make the status `stale`. */
 const STALE_AFTER = 10 * 60 * 1000
 /** Fold the server's change log into a new snapshot once it holds this many changes. */
@@ -73,9 +73,6 @@ let again = false
 const listeners = new Set<() => void>()
 /** Tabs share one sync state: a tab that turns sync on or off or joins a budget tells the others. */
 const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('money-in-order/sync') : null
-let ready!: () => void
-/** Resolves once this tab knows whether sync is on, and with which code. */
-export const syncReady = new Promise<void>((r) => (ready = r))
 
 class ServerError extends Error {}
 
@@ -369,7 +366,7 @@ async function syncOnce(): Promise<void> {
     if (cfg !== c) return
     if (!navigator.onLine) return setState('offline', OFFLINE)
     const reach = e instanceof ServerError || e instanceof TypeError || (e instanceof DOMException && e.name === 'TimeoutError')
-    setState('error', reach ? UNREACHABLE : 'Couldn’t sync. Trying again shortly.')
+    setState('error', reach ? UNREACHABLE : 'Couldn’t sync. Trying again shortly')
     schedule(15_000)
   }
 }
@@ -422,11 +419,7 @@ function wire() {
 /** Resume syncing at startup. Resolves after the first sync (at once when sync is off). */
 export async function initSync(opts: { dirty?: boolean } = {}) {
   wire()
-  try {
-    await follow()
-  } finally {
-    ready()
-  }
+  await follow()
   if (!cfg) return
   // Changes recovered after an interrupted save may not have been uploaded yet.
   if (opts.dirty) {

@@ -173,11 +173,6 @@ function Tip(props: { x: number; w: number; title: string; rows: Row[] }) {
   )
 }
 
-/** "M x y L ..." through the points. */
-function linePath(pts: [number, number][]): string {
-  return pts.map(([x, y], k) => `${k ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('')
-}
-
 /** Right-hand y labels and hairline gridlines. */
 function Grid(props: { ticks: number[]; y: (v: number) => number; x0: number; x1: number }) {
   return (
@@ -292,8 +287,9 @@ export function slicesOf(parts: Part[], max = SERIES.length, min = 0.03): { slic
 }
 
 const RING = 0.64 // inner radius, of the outer
-const LEAD = 14 // leader line, ring to label
+const LEAD = 10 // from the ring to where a label may start
 const LINE = 38 // one two-line label, with the space under it
+const LINE1 = 19 // one one-line label, when a side is crowded
 const NAME_PX = 12
 const DETAIL_PX = 11
 
@@ -321,41 +317,65 @@ export function SpendDonut(props: {
     return { s, a0, a1: a }
   })
   const maxW = w < 420 ? 96 : 140
-  const labels = arcs
-    .filter(({ s }) => s.share >= 0.05)
-    .map(({ s, a0, a1 }) => {
-      const name = fit(s.name, NAME_PX, maxW, 560)
-      const detail = share(s.share)
-      const mid = (a0 + a1) / 2
-      return { s, name, detail, mid, side: Math.sin(mid) >= 0 ? 1 : -1, width: Math.max(textWidth(name, NAME_PX, 560), figWidth(detail, DETAIL_PX)), y: 0 }
-    })
-  // the ring takes what the labels on each side leave, and sits between them
-  const room = (side: number) => {
-    const ws = labels.filter((l) => l.side === side).map((l) => l.width)
-    return ws.length ? Math.min(maxW, Math.max(...ws)) + LEAD + 8 : 6
-  }
-  const left = room(-1)
-  const right = room(1)
   const rMax = w >= 460 ? 128 : 108
-  let r = Math.min(rMax, (w - left - right) / 2)
-  const labelled = r >= 56 && labels.length > 0
-  if (!labelled) r = Math.min(rMax, w / 2 - 4)
-  const placed = labelled ? labels : []
-  const perSide = Math.max(placed.filter((p) => p.side > 0).length, placed.filter((p) => p.side < 0).length)
-  const H = Math.max(Math.round(2 * r + 32), perSide * LINE + 12)
-  const cx = labelled ? left + r + (w - left - right - 2 * r) / 2 : w / 2
-  const cy = H / 2
-  const at = (a: number, rad: number): [number, number] => [cx + rad * Math.sin(a), cy - rad * Math.cos(a)]
-  // each side: labels at their slice's height, pushed apart where they would touch, and kept inside
-  for (const side of [1, -1]) {
-    const col = placed.filter((p) => p.side === side)
-    for (const p of col) p.y = at(p.mid, r + LEAD * 0.6)[1]
-    col.sort((x, y) => x.y - y.y)
-    const top = LINE / 2
-    const bottom = H - LINE / 2 + 4
-    for (let k = 0; k < col.length; k++) col[k].y = Math.max(col[k].y, top, k ? col[k - 1].y + LINE : -Infinity)
-    for (let k = col.length - 1; k >= 0; k--) col[k].y = Math.min(col[k].y, bottom, k < col.length - 1 ? col[k + 1].y - LINE : Infinity)
+
+  /**
+   * Labels hug the ring: each sits level with its slice, just clear of the ring's curve, so the leader
+   * stays short. Where labels would push each other far from their slices, they go on one line each.
+   */
+  function layout(oneLine: boolean) {
+    const line = oneLine ? LINE1 : LINE
+    const labels = arcs
+      .filter(({ s }) => s.share >= 0.02)
+      .map(({ s, a0, a1 }) => {
+        const name = fit(s.name, NAME_PX, maxW, 560)
+        const detail = share(s.share)
+        const nameW = textWidth(name, NAME_PX, 560)
+        const figW = figWidth(detail, DETAIL_PX)
+        const mid = (a0 + a1) / 2
+        return { s, name, detail, mid, side: Math.sin(mid) >= 0 ? 1 : -1, width: oneLine ? nameW + 5 + figW : Math.max(nameW, figW), y: 0, want: 0, x: 0 }
+      })
+    // the ring takes what the labels on each side leave, and sits between them
+    const room = (side: number) => {
+      const ws = labels.filter((l) => l.side === side).map((l) => l.width)
+      return ws.length ? Math.min(maxW + (oneLine ? 30 : 0), Math.max(...ws)) + LEAD + 6 : 6
+    }
+    const left = room(-1)
+    const right = room(1)
+    let r = Math.min(rMax, (w - left - right) / 2)
+    const labelled = r >= 56 && labels.length > 0
+    if (!labelled) r = Math.min(rMax, w / 2 - 4)
+    const placed = labelled ? labels : []
+    const perSide = Math.max(placed.filter((p) => p.side > 0).length, placed.filter((p) => p.side < 0).length)
+    const H = Math.max(Math.round(2 * r + 32), perSide * line + 12)
+    const cx = labelled ? left + r + (w - left - right - 2 * r) / 2 : w / 2
+    const cy = H / 2
+    const R = r + LEAD
+    // a label's text runs from 11px above its baseline to 3px under it, or under its second line
+    const above = 11
+    const below = oneLine ? 4 : 17
+    let drift = 0
+    for (const side of [1, -1]) {
+      const col = placed.filter((p) => p.side === side)
+      // level with the middle of its slice (the name's middle, 4px over the baseline)
+      for (const p of col) p.y = p.want = cy - R * Math.cos(p.mid) + 4
+      col.sort((x, y) => x.y - y.y)
+      const top = above + 2
+      const bottom = H - below - 2
+      for (let k = 0; k < col.length; k++) col[k].y = Math.max(col[k].y, top, k ? col[k - 1].y + line : -Infinity)
+      for (let k = col.length - 1; k >= 0; k--) col[k].y = Math.min(col[k].y, bottom, k < col.length - 1 ? col[k + 1].y - line : Infinity)
+      for (const p of col) {
+        drift = Math.max(drift, Math.abs(p.y - p.want))
+        // just clear of the ring at the height of the label's edge nearest the centre
+        const dy = Math.max(0, p.y - above - cy, cy - p.y - below)
+        p.x = cx + side * (dy < R ? Math.sqrt(R * R - dy * dy) : 0)
+      }
+    }
+    return { placed, r, H, cx, cy, drift, oneLine }
   }
+  const two = layout(false)
+  const { placed, r, H, cx, cy, oneLine } = two.drift > LINE * 0.5 ? layout(true) : two
+  const at = (a: number, rad: number): [number, number] => [cx + rad * Math.sin(a), cy - rad * Math.cos(a)]
 
   const r0 = r * RING
   const ring = (a0: number, a1: number) => {
@@ -391,20 +411,28 @@ export function SpendDonut(props: {
             ))}
           </g>
           {placed.map((p) => {
-            const [x0, y0] = at(p.mid, r + 3)
-            const [x1, y1] = at(p.mid, r + LEAD * 0.6)
-            const ex = cx + p.side * (r + LEAD)
-            const tx = ex + p.side * 4
+            const [x0, y0] = at(p.mid, r + 2)
             const anchor = p.side > 0 ? 'start' : 'end'
             return (
               <g key={p.s.id} class={`ch-callout${hot && hot !== p.s.id ? ' dim' : ''}`} onClick={() => props.onOpen(p.s.id)}>
-                <polyline class="ch-leader" points={`${x0.toFixed(1)},${y0.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)} ${ex.toFixed(1)},${(p.y - 4).toFixed(1)}`} />
-                <text class="ch-label" x={tx} y={p.y} text-anchor={anchor}>
-                  {p.name}
-                </text>
-                <text class="ch-t ch-num" x={tx} y={p.y + 14} text-anchor={anchor}>
-                  {p.detail}
-                </text>
+                <line class="ch-leader" x1={x0.toFixed(1)} y1={y0.toFixed(1)} x2={(p.x - p.side * 2).toFixed(1)} y2={(p.y - 4).toFixed(1)} />
+                {oneLine ? (
+                  <text class="ch-label" x={p.x + p.side * 2} y={p.y} text-anchor={anchor}>
+                    {p.name}
+                    <tspan class="ch-t ch-num" dx={5}>
+                      {p.detail}
+                    </tspan>
+                  </text>
+                ) : (
+                  <>
+                    <text class="ch-label" x={p.x + p.side * 2} y={p.y} text-anchor={anchor}>
+                      {p.name}
+                    </text>
+                    <text class="ch-t ch-num" x={p.x + p.side * 2} y={p.y + 14} text-anchor={anchor}>
+                      {p.detail}
+                    </text>
+                  </>
+                )}
               </g>
             )
           })}
@@ -550,53 +578,6 @@ export function NetWorthChart(props: { points: WealthPoint[]; base: string }): J
         head={invested ? ['Month', 'Net worth', 'Cash', 'Investments'] : ['Month', 'Net worth']}
         rows={points.map((p) => [label(p.month, false), fmt(p.total, base), ...(invested ? [fmt(p.cash, base), fmt(p.invest, base)] : [])])}
       />
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------- a small trend
-
-const SPARK_H = 64
-const SPARK_TOP = 18 // room for the end labels
-
-/**
- * A quiet line for one figure over months: no axis, the first and last values written at their ends.
- * Months without a value yet are left out of the line but keep their place.
- */
-export function Spark(props: { values: (number | null)[]; unit?: string; label: string }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const w = useWidth(ref)
-  const { values } = props
-  const n = values.length
-  const known = values.map((v, k) => [k, v] as const).filter((e): e is readonly [number, number] => e[1] !== null)
-  const hi = Math.max(1, ...known.map(([, v]) => v)) * 1.08
-  const pad = 4
-  const X = (k: number) => (n > 1 ? pad + (k * (w - 2 * pad)) / (n - 1) : w - pad)
-  const Y = (v: number) => SPARK_TOP + (1 - v / hi) * (SPARK_H - SPARK_TOP - 3)
-  const pts: [number, number][] = known.map(([k, v]) => [X(k), Y(v)])
-  const line = pts.length > 1 ? linePath(pts) : ''
-  const area = line ? `${line}L${pts[pts.length - 1][0].toFixed(1)},${SPARK_H}L${pts[0][0].toFixed(1)},${SPARK_H}Z` : ''
-  const first = known[0]
-  const end = known[known.length - 1]
-  return (
-    <div ref={ref} class="ch ch-spark" role="img" aria-label={props.label}>
-      {w > 0 && end && (
-        <svg width={w} height={SPARK_H} viewBox={`0 0 ${w} ${SPARK_H}`} aria-hidden="true">
-          <line class="ch-grid" x1={0} x2={w} y1={SPARK_H - 0.5} y2={SPARK_H - 0.5} />
-          {area && <path class="ch-area ch-fade" d={area} />}
-          {line && <path class="ch-line ch-draw" d={line} pathLength={1} />}
-          <circle class="ch-dot ch-pop" cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r={4} />
-          {pts.length > 1 && (
-            <text class="ch-t ch-num" x={pts[0][0] - pad} y={pts[0][1] - 8} text-anchor="start">
-              {Math.round(first[1])}
-            </text>
-          )}
-          <text class="ch-t ch-num ch-strong" x={w} y={pts[pts.length - 1][1] - 9} text-anchor="end">
-            {Math.round(end[1])}
-            {props.unit ?? ''}
-          </text>
-        </svg>
-      )}
     </div>
   )
 }

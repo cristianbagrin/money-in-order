@@ -118,6 +118,9 @@ export interface FormatOpts {
   exact?: boolean
 }
 
+/** What sets two facts on one line apart: a little more room, no dot. */
+export const SEP = '\u2003'
+
 /** 12345 (minor) in EUR -> "€123.45"; in TWD -> "NT$123" */
 export function fmt(minor: number, code: string, opts: FormatOpts = {}): string {
   const c = cur(code)
@@ -200,10 +203,6 @@ export function keypadToMinor(s: string): number {
   return Number(w || '0') * 100 + Number((f + '00').slice(0, 2))
 }
 
-/**
- * Evaluate what someone typed into an amount field, allowing simple sums like "6000+500" or "1200*3".
- * Returns minor units, or null if it isn't a number.
- */
 /** Round to what the currency can hold: TWD, JPY and friends have no cents. */
 export function roundFor(code: string | undefined, minor: number): number {
   if (!code || cur(code).decimals > 0) return minor
