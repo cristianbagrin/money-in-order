@@ -48,6 +48,8 @@ interface SyncConfig {
   seen?: string[]
   /** when the last upload began: records written since then aren't on the server yet. Missing: upload everything */
   mark?: number
+  /** the oldest time among edits since `mark` that carry an older time than when they were made */
+  from?: number
   /** the server may lack more than the records written since `mark`: upload everything next time */
   full?: boolean
 }
@@ -317,7 +319,7 @@ async function syncOnce(): Promise<void> {
       if (gone()) return
       // Remember exactly what we upload: edits made while the upload is in flight must stay dirty.
       const snapshot = getDB()
-      const changed = c.mark !== undefined && !c.full && c.rev ? changedSince(snapshot, c.mark - OVERLAP) : null
+      const changed = c.mark !== undefined && !c.full && c.rev ? changedSince(snapshot, Math.min(c.mark - OVERLAP, c.from ?? Infinity)) : null
       // A change that holds most of the budget (a restored backup), or a long log, is better sent as a new snapshot.
       const whole = !changed || (c.seen?.length ?? 0) >= COMPACT_AT || (changed.n > 50 && changed.n * 2 > changed.total)
       if (!whole && changed.n) {
@@ -350,8 +352,10 @@ async function syncOnce(): Promise<void> {
       }
       c.mark = mark
       done = true
-      if (getDB() === snapshot) markClean()
-      else {
+      if (getDB() === snapshot) {
+        markClean()
+        delete c.from
+      } else {
         c.since = Date.now()
         again = true
       }
@@ -396,10 +400,13 @@ let wired = false
 function wire() {
   if (wired) return
   wired = true
-  onLocalChange(() => {
+  onLocalChange((since) => {
     if (!cfg) return
     const was = cfg.dirty
     markDirty()
+    // Written with an older time (a repeating payment logged for earlier today, an edit another tab left behind):
+    // the next change reaches back for it.
+    if (since < Date.now() - OVERLAP && since < (cfg.from ?? Infinity)) cfg.from = since
     void saveCfg()
     schedule(1200)
     if (!was) notify()

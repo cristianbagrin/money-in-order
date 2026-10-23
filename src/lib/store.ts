@@ -26,6 +26,8 @@ import {
 } from './types'
 
 type Listener = () => void
+/** Hears the oldest time among the records just written (most edits are stamped now; some carry an older time). */
+type ChangeListener = (since: number) => void
 
 export interface Persistence {
   save(db: DB): void
@@ -46,7 +48,7 @@ let ix: Index | null = null
 let lastStamp = 0
 let persistence: Persistence | null = null
 const listeners = new Set<Listener>()
-const changeListeners = new Set<Listener>()
+const changeListeners = new Set<ChangeListener>()
 
 export function uid(): ID {
   const a = new Uint8Array(9)
@@ -75,7 +77,7 @@ export function subscribe(fn: Listener): () => void {
 }
 
 /** Called only for local edits (not for data arriving from sync). */
-export function onLocalChange(fn: Listener): () => void {
+export function onLocalChange(fn: ChangeListener): () => void {
   changeListeners.add(fn)
   return () => changeListeners.delete(fn)
 }
@@ -104,7 +106,7 @@ export function replaceDB(next: DB, opts: { local?: boolean } = {}) {
     for (const r of Object.values(db[name]) as Rec[]) if (r.u > lastStamp) lastStamp = r.u
   }
   emit()
-  if (opts.local) for (const fn of changeListeners) fn()
+  if (opts.local) for (const fn of changeListeners) fn(0)
 }
 
 /**
@@ -274,7 +276,10 @@ export function commit(patch: Patch, asStamped = false) {
   if (risky) for (const r of [...Object.values(db.cats), ...Object.values(db.groups)] as Rec[]) if (r.u > lastStamp) lastStamp = r.u
   for (const [name, r] of written) persistence?.wrote?.(name, r)
   emit()
-  if (written.length) for (const fn of changeListeners) fn()
+  if (!written.length) return
+  let since = Infinity
+  for (const [, r] of written) if (r.u < since) since = r.u
+  for (const fn of changeListeners) fn(since)
 }
 
 function tomb<T extends Rec>(r: T): T {

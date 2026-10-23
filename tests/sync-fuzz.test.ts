@@ -391,12 +391,15 @@ async function deliverAll() {
 // ---------------------------------------------------------------- the sync server
 
 const vault = new Map<string, { rev: string; body: string }>()
+/** Each vault's log of changes on top of its snapshot (see netlify/functions/vault.mts). */
+const changes = new Map<string, Map<string, string>>()
+let changeNo = 0
 const emails = new Set<string>()
 let revs = 0
 type Hook = { method: string; when: 'before' | 'after'; fn: () => Promise<void> | void }
 let hooks: Hook[] = []
 let fault: 'lost' | 'fail' | null = null
-const stats = { puts: 0, conflicts: 0, lost: 0, failed: 0, reloads: 0, crashes: 0, undos: 0 }
+const stats = { puts: 0, changes: 0, conflicts: 0, lost: 0, failed: 0, reloads: 0, crashes: 0, undos: 0 }
 
 function handle(url: string, method: string, init: RequestInit): Response {
   const id = url.split('/').pop()!
@@ -410,8 +413,23 @@ function handle(url: string, method: string, init: RequestInit): Response {
   }
   const headers = new Headers(init.headers)
   const cur = vault.get(id)
+  const log = changes.get(id) ?? new Map<string, string>()
+  const ids = (h: string | null) => (h ?? '').split(',').filter(Boolean)
+  if (method === 'POST') {
+    if (!cur) return new Response(null, { status: 404 })
+    stats.changes++
+    const c = String(++changeNo)
+    changes.set(id, log.set(c, init.body as string))
+    return new Response(null, { status: 201, headers: { 'X-Change': c } })
+  }
   if (method !== 'PUT') {
     if (!cur) return new Response(null, { status: 404 })
+    if (headers.get('X-Sync') === '2') {
+      const have = new Set(ids(headers.get('X-Have')))
+      const snap = headers.get('X-Have-Rev') === cur.rev ? undefined : cur.body
+      const add = [...log].filter(([c]) => !have.has(c))
+      return new Response(JSON.stringify({ rev: cur.rev, changes: [...log.keys()], snap, add }), { status: 200 })
+    }
     if (headers.get('X-Have-Rev') === cur.rev) return new Response(null, { status: 204, headers: { 'X-Rev': cur.rev } })
     return new Response(method === 'HEAD' ? null : cur.body, { status: 200, headers: { 'X-Rev': cur.rev } })
   }
@@ -422,6 +440,7 @@ function handle(url: string, method: string, init: RequestInit): Response {
   stats.puts++
   const rev = String(++revs)
   vault.set(id, { rev, body: init.body as string })
+  for (const c of ids(headers.get('X-Covers'))) log.delete(c)
   return new Response(null, { status: 201, headers: { 'X-Rev': rev } })
 }
 
@@ -442,15 +461,18 @@ async function server(input: unknown, init: RequestInit = {}): Promise<Response>
     await lag(L.int(3))
     if (t?.dead) return hang()
     const method = init.method ?? 'GET'
-    await runHooks(method, 'before')
-    if (method === 'PUT' && url.startsWith('/api/vault/') && fault === 'fail') {
+    // an upload is a PUT (the whole budget) or a POST (a change): hooks and faults treat both alike
+    const upload = (method === 'PUT' || method === 'POST') && url.startsWith('/api/vault/')
+    const hook = method === 'POST' ? 'PUT' : method
+    await runHooks(hook, 'before')
+    if (upload && fault === 'fail') {
       fault = null
       stats.failed++
       return new Response(null, { status: 503 })
     }
     const res = handle(url, method, init)
-    await runHooks(method, 'after')
-    if (method === 'PUT' && url.startsWith('/api/vault/') && fault === 'lost') {
+    await runHooks(hook, 'after')
+    if (upload && fault === 'lost') {
       // the server took it, the answer never arrived
       fault = null
       stats.lost++
@@ -471,11 +493,21 @@ function serverDB(code: string): DB | null {
   const key = createHash('sha256').update(Buffer.concat([Buffer.from('money-in-order/key/'), raw])).digest()
   const v = vault.get(id)
   if (!v) return null
-  const [, iv, ct] = v.body.split('.')
-  const b = Buffer.from(ct, 'base64')
-  const d = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'))
-  d.setAuthTag(b.subarray(b.length - 16))
-  return JSON.parse(Buffer.concat([d.update(b.subarray(0, b.length - 16)), d.final()]).toString()).db as DB
+  const open = (body: string) => {
+    const [, iv, ct] = body.split('.')
+    const b = Buffer.from(ct, 'base64')
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'))
+    d.setAuthTag(b.subarray(b.length - 16))
+    return JSON.parse(Buffer.concat([d.update(b.subarray(0, b.length - 16)), d.final()]).toString()).db as DB
+  }
+  // the snapshot with every change in the log merged in
+  return [...(changes.get(id)?.values() ?? [])].reduce((db, c) => merge(db, open(c)), merge(emptyDB(), open(v.body)))
+}
+
+/** Changes whenever the server's data does (a new snapshot or a change appended or folded in). */
+function serverVersion(): string {
+  const [id, v] = [...vault.entries()][0] ?? []
+  return v ? `${v.rev}/${[...(changes.get(id!)?.keys() ?? [])].join(',')}` : ''
 }
 
 // ---------------------------------------------------------------- tabs
@@ -673,11 +705,11 @@ function observeDurable(code: string) {
       for (const [key, rec] of data.recs) oracle.observe(key.slice(0, key.indexOf('|')), rec, `${d.name}/journal`)
     }
   }
-  const v = [...vault.values()][0]
-  if (v && v.rev !== lastServerRev) {
-    lastServerRev = v.rev
+  const version = serverVersion()
+  if (version && version !== lastServerRev) {
+    lastServerRev = version
     const db = serverDB(code)
-    if (db) oracle.observeDB(db, `server@${v.rev}`)
+    if (db) oracle.observeDB(db, `server@${version}`)
   }
 }
 
@@ -972,6 +1004,8 @@ function reset(seed: number) {
   timers.clear()
   mail.length = 0
   vault.clear()
+  changes.clear()
+  changeNo = 0
   emails.clear()
   hooks = []
   fault = null
