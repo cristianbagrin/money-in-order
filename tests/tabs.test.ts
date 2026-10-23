@@ -59,10 +59,9 @@ function idbOf(dev: Device) {
   }
 }
 
-// The sync server: one blob per id, with revisions.
-const vault = new Map<string, { rev: string; body: string }>()
+// The sync server: the real vault function over an in-memory Blobs store.
+vi.mock('@netlify/blobs', () => import('./fake-blobs'))
 const accounts = new Set<string>()
-let revs = 0
 async function server(url: string, init: RequestInit = {}): Promise<Response> {
   const id = url.split('/').pop()!
   const method = init.method ?? 'GET'
@@ -74,17 +73,8 @@ async function server(url: string, init: RequestInit = {}): Promise<Response> {
     }
     return new Response(null, { status: accounts.has(id) ? 200 : 404 })
   }
-  const headers = new Headers(init.headers)
-  const cur = vault.get(id)
-  if (method !== 'PUT') {
-    if (!cur) return new Response(null, { status: 404 })
-    if (headers.get('X-Have-Rev') === cur.rev) return new Response(null, { status: 204, headers: { 'X-Rev': cur.rev } })
-    return new Response(method === 'HEAD' ? null : cur.body, { status: 200, headers: { 'X-Rev': cur.rev } })
-  }
-  if ((cur?.rev ?? 'new') !== headers.get('X-Base-Rev')) return new Response(null, { status: 412 })
-  const rev = String(++revs)
-  vault.set(id, { rev, body: init.body as string })
-  return new Response(null, { status: 201, headers: { 'X-Rev': rev } })
+  const { default: vault } = await import('../netlify/functions/vault.mts')
+  return vault(new Request('http://local' + url, { method, headers: init.headers, body: init.body }), { params: { id } } as never)
 }
 
 const local = new Map<string, string>()

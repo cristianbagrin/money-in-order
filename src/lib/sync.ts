@@ -4,11 +4,15 @@
 // becomes the account's secret; the vault id and the encryption key are derived from that secret, so
 // the server never sees the password, the secret or the data. Budgets synced before accounts existed
 // used a random 20-character code in place of the secret, and keep working until the device signs in.
+//
+// The server keeps a snapshot of the budget plus a short log of changes (see netlify/functions/vault.mts).
+// An edit uploads only the records written since this device's last upload; now and then a device folds
+// the log into a new snapshot. Records merge commutatively and idempotently, so the log needs no locking.
 
 import { get, set, update } from 'idb-keyval'
 import { hasNews, merge } from './merge'
 import { dbEpoch, getDB, onLocalChange, persistNow, pullNow, replaceDB, swapDB } from './store'
-import type { DB } from './types'
+import { COLLECTIONS, emptyDB, type DB, type Rec } from './types'
 
 /** PBKDF2 rounds: about half a second on a phone, once per sign-in. */
 const ROUNDS = 310_000
@@ -17,6 +21,13 @@ const OFFLINE = 'Offline. Changes will sync when you’re back.'
 const UNREACHABLE = 'Couldn’t reach the sync server. Trying again shortly.'
 /** Unsent changes older than this make the status `stale`. */
 const STALE_AFTER = 10 * 60 * 1000
+/** Fold the server's change log into a new snapshot once it holds this many changes. */
+const COMPACT_AT = 30
+/**
+ * A change also carries the records written this long before the last upload began: an edit saved by
+ * another tab just then may have missed that upload's snapshot.
+ */
+const OVERLAP = 60 * 1000
 
 export type SyncState = 'off' | 'idle' | 'syncing' | 'offline' | 'error'
 
@@ -33,6 +44,22 @@ interface SyncConfig {
   last: number
   /** the budget (see dbEpoch) this code syncs; missing when saved before budgets had one */
   epoch?: string
+  /** the server's changes (on top of snapshot `rev`) already merged here */
+  seen?: string[]
+  /** when the last upload began: records written since then aren't on the server yet. Missing: upload everything */
+  mark?: number
+  /** the server may lack more than the records written since `mark`: upload everything next time */
+  full?: boolean
+}
+
+interface VaultReply {
+  rev: string
+  /** every change in the server's log */
+  changes: string[]
+  /** the snapshot, when it isn't the one this device has */
+  snap?: string
+  /** the changes this device hasn't got */
+  add: [string, string][]
 }
 
 let cfg: SyncConfig | null = null
@@ -164,6 +191,38 @@ async function open(blob: string, key: CryptoKey): Promise<DB> {
   return JSON.parse(new TextDecoder().decode(json)).db as DB
 }
 
+/** The records written at or after `since`, and how many that is out of all of them. */
+function changedSince(db: DB, since: number) {
+  const part: Record<string, Record<string, Rec>> = {}
+  let n = 0
+  let total = 0
+  for (const name of COLLECTIONS) {
+    for (const r of Object.values(db[name]) as Rec[]) {
+      total++
+      if (r.u < since) continue
+      ;(part[name] ??= {})[r.id] = r
+      n++
+    }
+  }
+  return { part: part as unknown as DB, n, total }
+}
+
+/** Ask for what the server has that this device lacks. */
+function pullVault(id: string, c?: SyncConfig): Promise<Response> {
+  const headers: Record<string, string> = { 'X-Sync': '2' }
+  if (c?.rev) {
+    headers['X-Have-Rev'] = c.rev
+    headers['X-Have'] = (c.seen ?? []).join(',')
+  }
+  return fetch(`/api/vault/${id}`, { headers, cache: 'no-store', signal: AbortSignal.timeout(30_000) })
+}
+
+/** The snapshot and changes in a reply, merged (null when it brought nothing). */
+async function openReply(r: VaultReply, key: CryptoKey): Promise<DB | null> {
+  const parts = await Promise.all([...(r.snap ? [r.snap] : []), ...r.add.map((a) => a[1])].map((b) => open(b, key)))
+  return parts.length ? parts.reduce(merge) : null
+}
+
 function epochOf(c: SyncConfig | null | undefined): string {
   return c?.epoch ?? ''
 }
@@ -220,50 +279,79 @@ async function syncOnce(): Promise<void> {
   try {
     let done = false
     for (let attempt = 0; attempt < 4 && !done; attempt++) {
-      const res = await fetch(`/api/vault/${k.id}`, {
-        headers: c.rev ? { 'X-Have-Rev': c.rev } : {},
-        cache: 'no-store',
-        signal: AbortSignal.timeout(30_000),
-      })
+      const res = await pullVault(k.id, c)
       if (gone()) return // turned off or budget swapped meanwhile
-      let remoteRev: string | null = c.rev
       if (res.status === 200) {
-        remoteRev = res.headers.get('X-Rev')
-        const remote = await open(await res.text(), k.key)
+        const reply = (await res.json()) as VaultReply
+        const remote = await openReply(reply, k.key)
         if (gone()) return
-        const local = getDB()
-        if (hasNews(local, remote)) {
-          replaceDB(merge(local, remote))
-          // Only remember the new revision once its data is saved on this device.
-          await persistNow()
-          if (gone()) return
+        if (remote) {
+          const local = getDB()
+          if (hasNews(local, remote)) {
+            replaceDB(merge(local, remote))
+            // Only remember the new revision once its data is saved on this device.
+            await persistNow()
+            if (gone()) return
+          }
+          // Holding all the server has, with nothing waiting here: if the server still lacks something, send everything.
+          const everything = !!reply.snap && reply.add.length === reply.changes.length
+          if (everything && !c.dirty && hasNews(remote, getDB())) {
+            markDirty()
+            c.full = true
+          }
         }
-        if (hasNews(remote, getDB())) markDirty()
-        c.rev = remoteRev
+        c.rev = reply.rev
+        c.seen = reply.changes
       } else if (res.status === 404) {
-        remoteRev = null
         c.rev = null
+        c.seen = []
+        c.full = true
         markDirty()
-      } else if (res.status !== 204) {
+      } else {
         throw new ServerError(String(res.status))
       }
       if (!c.dirty) {
         done = true
         break
       }
+      // Edits from now on are left for the next upload. Take in other tabs' edits first, so the snapshot has them.
+      const mark = Date.now()
+      await pullNow()
+      if (gone()) return
       // Remember exactly what we upload: edits made while the upload is in flight must stay dirty.
       const snapshot = getDB()
-      const body = await seal(snapshot, k.key)
-      const put = await fetch(`/api/vault/${k.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/plain', 'X-Base-Rev': remoteRev ?? 'new' },
-        body,
-        signal: AbortSignal.timeout(30_000),
-      })
-      if (gone()) return
-      if (put.status === 412) continue // someone else wrote first: pull, merge, try again
-      if (!put.ok) throw new ServerError(String(put.status))
-      c.rev = put.headers.get('X-Rev')
+      const changed = c.mark !== undefined && !c.full && c.rev ? changedSince(snapshot, c.mark - OVERLAP) : null
+      // A change that holds most of the budget (a restored backup), or a long log, is better sent as a new snapshot.
+      const whole = !changed || (c.seen?.length ?? 0) >= COMPACT_AT || (changed.n > 50 && changed.n * 2 > changed.total)
+      if (!whole && changed.n) {
+        const post = await fetch(`/api/vault/${k.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: await seal(changed.part, k.key),
+          signal: AbortSignal.timeout(30_000),
+        })
+        if (gone()) return
+        if (post.status === 404 || post.status === 409) {
+          c.full = true // the snapshot is gone, or the log is full: send everything
+          continue
+        }
+        if (!post.ok) throw new ServerError(String(post.status))
+        c.seen = [...(c.seen ?? []), post.headers.get('X-Change') ?? '']
+      } else if (whole) {
+        const put = await fetch(`/api/vault/${k.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/plain', 'X-Base-Rev': c.rev ?? 'new', 'X-Covers': (c.seen ?? []).join(',') },
+          body: await seal(snapshot, k.key),
+          signal: AbortSignal.timeout(30_000),
+        })
+        if (gone()) return
+        if (put.status === 412) continue // someone else wrote first: pull, merge, try again
+        if (!put.ok) throw new ServerError(String(put.status))
+        c.rev = put.headers.get('X-Rev')
+        c.seen = []
+        delete c.full
+      }
+      c.mark = mark
       done = true
       if (getDB() === snapshot) markClean()
       else {
@@ -341,7 +429,10 @@ export async function initSync(opts: { dirty?: boolean } = {}) {
   }
   if (!cfg) return
   // Changes recovered after an interrupted save may not have been uploaded yet.
-  if (opts.dirty) markDirty()
+  if (opts.dirty) {
+    markDirty()
+    cfg.full = true
+  }
   await syncNow()
 }
 
@@ -363,10 +454,12 @@ export async function enableSync(code: string, email?: string) {
 
 /** Take the budget stored under a secret as it is: this device's own data is replaced, so two budgets never get mixed. */
 async function adopt(code: string, email: string | undefined, res: Response, k: Awaited<ReturnType<typeof derive>>) {
-  const remote = await open(await res.text(), k.key)
+  const reply = (await res.json()) as VaultReply
+  const mark = Date.now()
+  const remote = (await openReply(reply, k.key)) ?? emptyDB()
   // A different budget, not a merge: other tabs drop the old one instead of merging it back in.
   swapDB(remote)
-  cfg = { code, email, rev: res.headers.get('X-Rev'), dirty: false, last: Date.now(), epoch: dbEpoch() }
+  cfg = { code, email, rev: reply.rev, seen: reply.changes, mark, dirty: false, last: Date.now(), epoch: dbEpoch() }
   keys = k
   await storeCfg()
   await persistNow()
@@ -412,7 +505,7 @@ export async function signIn(
     const secret = await accountSecret(email, password)
     if (cfg?.code === secret) return 'joined'
     const k = await derive(secret)
-    const res = await fetch(`/api/vault/${k.id}`, { cache: 'no-store' })
+    const res = await pullVault(k.id)
     if (res.status === 404) {
       const known = await fetch(await emailUrl(email), { method: 'HEAD', cache: 'no-store' })
       return known.status === 200 ? 'wrong' : known.status === 404 ? 'none' : 'error'

@@ -40,9 +40,11 @@ Sync works with an account: an email and a password (Settings → Sync). The pas
 - a **vault id** (`SHA-256("money-in-order/id/" + secret)`) that names the blob on the server, and
 - an **AES-GCM key** (`SHA-256("money-in-order/key/" + secret)`) that encrypts it.
 
-The server (`netlify/functions/vault.mts`, Netlify Blobs) stores one gzip-then-encrypted blob per vault and only ever sees ciphertext.
+The server (`netlify/functions/vault.mts`, Netlify Blobs) stores a gzip-then-encrypted snapshot per vault plus a short log of encrypted changes, and only ever sees ciphertext.
+An edit uploads only the records written since the device's last upload (a change of a few hundred bytes), and a device that syncs downloads only the changes it lacks.
+Merging is commutative and idempotent, so changes are appended without any locking; once 30 have piled up, the next device to upload folds them into a new snapshot.
 `netlify/functions/account.mts` only notes that a hash of an email has an account, so one email can't get two budgets and a sign-in can say "wrong password".
-Every write must name the revision it was based on, so two devices can't silently overwrite each other: the loser gets `412`, pulls, merges and retries.
+Every snapshot write must name the revision it was based on, so two devices can't silently overwrite each other: the loser gets `412`, pulls, merges and retries.
 Records carry an update timestamp and tombstones, and merging keeps the newest version of each record, so devices converge whatever order they sync in.
 
 There is no password reset: the server can't decrypt anything, so a forgotten password means losing the synced copy (each device still has its full local data, and **Settings → Your data → Save backup** saves a file).
