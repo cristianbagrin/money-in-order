@@ -151,6 +151,11 @@
   text-align: left;
   color: var(--ink);
 }
+.cs-asg-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .cs-fig-l {
   font-size: 12px;
   font-weight: 560;
@@ -158,6 +163,7 @@
   white-space: nowrap;
 }
 .cs-fig > .num,
+.cs-asg-line > .num,
 .cs-op {
   font-size: 17px;
   font-weight: 600;

@@ -35,6 +35,10 @@
   font-size: 15px;
   color: var(--ink-2);
 }
+.calc-cur {
+  flex: none;
+  margin-left: auto;
+}
 .calc-done {
   flex: none;
   min-height: 38px;

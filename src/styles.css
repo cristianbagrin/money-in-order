@@ -1258,6 +1258,9 @@ textarea:focus {
     text-underline-offset: 3px;
   }
 }
+.casg-cur {
+  justify-self: end;
+}
 /* Bare numbers like the Assigned column (the currency is in the hero). Never cut: very long amounts
    (8+ digits) step the font down instead; --len is the number of characters. */
 .avail {

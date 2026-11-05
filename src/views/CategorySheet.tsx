@@ -3,10 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { investAccounts } from '../lib/accounts'
 import { assignedInMonth, averageSpent, monthView, type CatMonth } from '../lib/budget'
 import { addMonths, monthName } from '../lib/dates'
-import { evalAmount, fmt, roundFor, shownSign } from '../lib/money'
+import { cur, evalAmount, fmt, roundFor, shownSign } from '../lib/money'
+import { currenciesInUse, hasRate } from '../lib/rates'
 import { suggestions } from '../lib/plan'
 import { dueIn } from '../lib/repeat'
-import { archiveCategory, categoryHasHistory, deleteCategory, getIndex, moveMoney, saveCategory, setAssigned, unarchiveCategory, undoable } from '../lib/store'
+import { archiveCategory, categoryHasHistory, deleteCategory, getIndex, moveMoney, saveCategory, setAssigned, toBase, unarchiveCategory, undoable } from '../lib/store'
 import { RTA, type Category, type ID, type Target } from '../lib/types'
 import { useIndex, useToday } from '../ui/hooks'
 import { caretToEnd, regroup, toast, useCalc, useTapAway } from '../ui/kit'
@@ -237,13 +238,30 @@ function AssignedField(props: { value: number; base: string; label: string; onCo
   const focused = useRef(false)
   const abandoned = useRef(false)
   const calc = useCalc()
+  const ref = useRef<HTMLInputElement>(null)
+  // Typed in another currency, converted at today's rate as the field lets go.
+  const currencies = currenciesInUse().filter(hasRate)
+  const [code, setCode] = useState(base)
+  const [open, setOpen] = useState(false)
+  function pickCur(next: string) {
+    const el = ref.current
+    setCode(next)
+    if (!el) return
+    const typed = el.value !== show(value)
+    const v = !typed ? (next === base ? show(value) : '') : cur(next).decimals ? el.value : el.value.replace(/\.\d*/g, '')
+    if (v === el.value) return
+    el.value = v
+    setText(v)
+    caretToEnd(el)
+  }
   // A quick pill, an undo or a sync changed it: show the new amount unless it's being typed over.
   useEffect(() => {
     if (!focused.current) setText(show(value))
   }, [value, base])
   return (
-    <>
+    <span class="cs-asg-line">
       <input
+        ref={ref}
         class="cs-asg num"
         type="text"
         autocomplete="off"
@@ -255,6 +273,7 @@ function AssignedField(props: { value: number; base: string; label: string; onCo
         onFocus={(e) => {
           focused.current = true
           abandoned.current = false
+          setOpen(true)
           caretToEnd(e.currentTarget)
         }}
         onInput={(e) => {
@@ -263,15 +282,20 @@ function AssignedField(props: { value: number; base: string; label: string; onCo
         }}
         onBlur={(e) => {
           focused.current = false
+          setOpen(false)
+          setCode(base)
           if (abandoned.current) {
             abandoned.current = false
             return setText(show(value))
           }
           const raw = e.currentTarget.value
-          const v = raw.trim() === '' ? 0 : evalAmount(raw, base)
-          if (v === null) return setText(show(value))
+          if (raw === show(value)) return
+          const typed = raw.trim() === '' ? 0 : evalAmount(raw, code)
+          if (typed === null) return setText(show(value))
+          const v = code === base ? typed : roundFor(base, toBase(typed, code))
           setText(show(v))
           props.onCommit(v)
+          if (code !== base && v !== value) toast(`${fmt(typed, code)} → ${fmt(v, base)}`, { undo: true })
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur()
@@ -282,8 +306,21 @@ function AssignedField(props: { value: number; base: string; label: string; onCo
           }
         }}
       />
-      {calc.pad()}
-    </>
+      {open && !calc.touch && currencies.length > 1 && (
+        // A click keeps the field focused (no blur, so nothing commits yet).
+        <button
+          type="button"
+          class={`pill sm${code !== base ? ' picked' : ''}`}
+          tabIndex={-1}
+          aria-label={`Currency ${code}. Click to change`}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => pickCur(currencies[(currencies.indexOf(code) + 1) % currencies.length])}
+        >
+          {code}
+        </button>
+      )}
+      {calc.pad({ cur: code, currencies: { list: currencies, onPick: pickCur } })}
+    </span>
   )
 }
 

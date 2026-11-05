@@ -194,6 +194,14 @@ describe('keypad at the caret', () => {
     expect(at('1,234', '5', 0, 1)).toEqual({ value: '15,234', caret: 2 })
     expect(at('1,234', 'back', 0, 3)).toEqual({ value: '134', caret: 1 })
   })
+  it('acts on a selection: ⌫ deletes all of it, a key types over it', () => {
+    const sel = (v: string, k: string, a: number, b: number, d = 0) => calcPress(v, a, k, d, b)
+    expect(sel('12,500', 'back', 0, 6)).toEqual({ value: '', caret: 0 })
+    expect(sel('12,500', '7', 0, 6)).toEqual({ value: '7', caret: 1 })
+    // 12,[500] → 12
+    expect(sel('12,500', 'back', 3, 6)).toEqual({ value: '12', caret: 2 })
+    expect(sel('1,200 + 15', 'back', 6, 10)).toEqual({ value: '1,200 ', caret: 6 })
+  })
   it('sums: operators, never doubled', () => {
     expect(at('200', '+')).toEqual({ value: '200+', caret: 4 })
     expect(at('200+', '−')).toEqual({ value: '200−', caret: 4 })

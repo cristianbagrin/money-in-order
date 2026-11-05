@@ -3,7 +3,7 @@ import { createPortal } from 'preact/compat'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { calcPress, isSum } from '../lib/calc'
 import { cur, evalAmount, fmt, groupTyped } from '../lib/money'
-import { settings, undo } from '../lib/store'
+import { settings, toBase, undo } from '../lib/store'
 import { useMedia } from './hooks'
 import { onTopSheet, topSheet } from './sheet'
 import './calc.css'
@@ -329,6 +329,8 @@ interface PadOpts {
   next?: boolean
   /** a one-tap amount offered in the bar while the field is empty */
   hint?: { label: string; value: number }
+  /** other currencies the amount can be typed in: a pill in the bar steps through them (`cur` is the one now) */
+  currencies?: { list: string[]; onPick: (code: string) => void }
 }
 
 const PAD_KEY: Record<string, string> = { '-': '−', '*': '×', '/': '÷' }
@@ -347,10 +349,12 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
   const [host] = useState(topSheet)
   // Next swaps one field's keypad for another's: the new one doesn't slide in again.
   const [still] = useState(() => padsOpen > 0 || Date.now() - padClosedAt < 200)
-  const [value, setValue] = useState(input.value)
+  // Read from the field on every render (its owner may change it without typing); typing re-renders.
+  const [, setTyped] = useState(input.value)
+  const value = input.value
 
   useEffect(() => {
-    const on = () => setValue(input.value)
+    const on = () => setTyped(input.value)
     on()
     input.addEventListener('input', on)
     return () => input.removeEventListener('input', on)
@@ -384,7 +388,8 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
 
   const press = (k: string) => {
     const key = PAD_KEY[k] ?? k
-    const r = calcPress(input.value, input.selectionStart ?? input.value.length, key, decimals)
+    const at = input.selectionStart ?? input.value.length
+    const r = calcPress(input.value, at, key, decimals, input.selectionEnd ?? at)
     if (!r) return
     haptic('light')
     typeInto(input, r.value, r.caret, k === 'back' ? 'deleteContentBackward' : 'insertText', k === 'back' ? null : key)
@@ -395,6 +400,11 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
     return true
   }
   const sum = isSum(value) ? evalAmount(value, code) : null
+  // Typed in another currency: what it comes to in the budget's.
+  const home = settings().base
+  const typed = code !== home && value.trim() ? evalAmount(value, code) : null
+  const inHome = typed ? toBase(typed, code) : null
+  const curs = props.currencies && props.currencies.list.length > 1 ? props.currencies : null
   const hint = props.hint && !value.trim() ? props.hint : null
 
   // Everything here acts on pointer-down. Cancelling the touch as well keeps iOS from following up with the
@@ -434,7 +444,9 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
       }}
     >
       <div class="calc-bar">
-        {sum !== null ? (
+        {inHome !== null ? (
+          <span class="calc-sum num">≈ {fmt(inHome, home)}</span>
+        ) : sum !== null ? (
           <span class="calc-sum num">= {fmt(sum, code)}</span>
         ) : hint ? (
           <button
@@ -450,6 +462,16 @@ function CalcPad(props: PadOpts & { input: HTMLInputElement }) {
           </button>
         ) : (
           <span />
+        )}
+        {curs && (
+          <button
+            type="button"
+            class={`pill sm calc-cur${code !== home ? ' picked' : ''}`}
+            aria-label={`Currency ${code}. Tap to change`}
+            {...act(() => curs.onPick(curs.list[(curs.list.indexOf(code) + 1) % curs.list.length]))}
+          >
+            {code}
+          </button>
         )}
         {props.next && (
           <button type="button" class="calc-done" {...act(() => pressEnter(input))}>

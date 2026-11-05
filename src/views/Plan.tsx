@@ -1,13 +1,13 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { assignedAhead, expectedTotal, monthView, type CatMonth, type Index } from '../lib/budget'
-import { addMonths, dayOfMonth, monthName, monthOf } from '../lib/dates'
-import { evalAmount, fmt, groupTyped, shownSign } from '../lib/money'
+import { dayOfMonth, monthName, monthOf } from '../lib/dates'
+import { cur, evalAmount, fmt, groupTyped, roundFor, shownSign } from '../lib/money'
+import { currenciesInUse, hasRate } from '../lib/rates'
 import { catsWithHistory, extraOf, fillPlan, forecast, MAX_AHEAD, savingsGoal, suggestions, type Forecast, type Suggestion } from '../lib/plan'
 import {
   addCategory,
   addGroup,
-  addTxn,
   deleteCategory,
   deleteGroup,
   getIndex,
@@ -17,9 +17,10 @@ import {
   saveCategory,
   saveGroup,
   setAssigned,
+  toBase,
   undoable,
 } from '../lib/store'
-import { live, RTA, type Category, type Group, type ID, type Month } from '../lib/types'
+import { live, type Category, type Group, type ID, type Month } from '../lib/types'
 import { useIndex, useSync } from '../ui/hooks'
 import { caretToEnd, IconGear, IconPlus, markCaret, NO_AUTOFILL, primeKeyboard, regroup, takeCaret, toast, useCalc } from '../ui/kit'
 import { flash, useCountUp } from '../ui/motion'
@@ -240,7 +241,6 @@ export function Plan(props: {
       {showRitual && ritual && (
         <Ritual
           r={ritual}
-          today={today}
           onCount={props.onCount}
           fill={
             canFill && (
@@ -489,6 +489,11 @@ function CatRow(props: {
   const ghost = !c.assigned && props.plan && props.plan.want > 0 ? props.plan.want : 0
   const asgText = draft ?? (ghost ? '' : fmt(c.assigned, base, { bare: true }))
   const calc = useCalc()
+  // The currency being typed in: the budget's unless picked otherwise (keypad bar on a phone, a pill in
+  // place of Available on a laptop). It is converted at today's rate when the box lets go.
+  const currencies = currenciesInUse().filter(hasRate)
+  const [asgCur, setAsgCur] = useState(base)
+  const [focused, setFocused] = useState(false)
   const swipe = useSwipeDelete<HTMLDivElement, HTMLDivElement>(props.onDelete, { keep: props.used, disabled: !!props.editing })
 
   // The stored amount changed (undo, sync, a quick-assign pill): never keep showing an old draft.
@@ -526,10 +531,28 @@ function CatRow(props: {
     const wasEdited = edited.current
     edited.current = false
     setDraftVal(null)
+    const code = asgCur
+    setAsgCur(base)
     if (!wasEdited) return
-    const v = raw.trim() === '' ? 0 : evalAmount(raw, base)
-    if (v === null || v === c.assigned) return
+    const typed = raw.trim() === '' ? 0 : evalAmount(raw, code)
+    if (typed === null) return
+    const v = code === base ? typed : roundFor(base, toBase(typed, code))
+    if (v === c.assigned) return
     undoable(`Assigned ${cat.name}`, () => setAssigned(props.month, cat.id, v))
+    if (code !== base) toast(`${fmt(typed, code)} → ${fmt(v, base)}`, { undo: true })
+  }
+
+  /** Another currency for the box. Nothing typed yet: it empties for the amount in that currency (the
+   * stored one comes back with the budget's). Typed: the digits stay, without cents the currency can't hold. */
+  function pickCur(next: string) {
+    const el = asgRef.current
+    setAsgCur(next)
+    if (!el) return
+    const v = !edited.current ? (next === base ? toDraft(c.assigned) : '') : cur(next).decimals ? el.value : el.value.replace(/\.\d*/g, '')
+    if (v === el.value) return
+    el.value = v
+    setDraftVal(v)
+    caretToEnd(el)
   }
 
   /** Save the name being typed (if any) and open the note field instead. */
@@ -641,6 +664,7 @@ function CatRow(props: {
           style={{ '--len': (asgText || (ghost ? fmt(ghost, base, { bare: true }) : '')).length }}
           onFocus={(e) => {
             edited.current = false
+            setFocused(true)
             setDraftVal(toDraft(c.assigned))
             caretToEnd(e.currentTarget)
           }}
@@ -655,7 +679,10 @@ function CatRow(props: {
             edited.current = true
             setDraftVal(regroup(e))
           }}
-          onBlur={(e) => commitAssign(e.currentTarget.value)}
+          onBlur={(e) => {
+            setFocused(false)
+            commitAssign(e.currentTarget.value)
+          }}
           onKeyDown={(e) => {
             const all = [...document.querySelectorAll<HTMLInputElement>('.casg')]
             const i = all.indexOf(e.currentTarget)
@@ -669,6 +696,7 @@ function CatRow(props: {
             } else if (e.key === 'Escape') {
               edited.current = false
               setDraftVal(null)
+              setAsgCur(base)
               e.currentTarget.value = shown(c.assigned)
               e.currentTarget.blur()
             }
@@ -676,6 +704,8 @@ function CatRow(props: {
         />
         {calc.pad(() => ({
           next: !isLast(),
+          cur: asgCur,
+          currencies: { list: currencies, onPick: pickCur },
           hint: ghost ? { label: cat.target ? 'Target' : props.plan?.due && ghost === props.plan.base ? 'Repeats' : cat.saving ? 'Savings' : 'Usual', value: ghost } : undefined,
         }))}
         <button
@@ -687,15 +717,30 @@ function CatRow(props: {
         >
           {fmt(spent, base, { bare: true })}
         </button>
-        <button
-          class={`avail num ${tone}`}
-          data-no-drag
-          style={{ '--len': availText.length }}
-          onClick={(e) => !swipe.swallow(e) && props.onOpen()}
-          aria-label={`${cat.name}: ${fmt(c.available, base)} available. Open`}
-        >
-          {availText}
-        </button>
+{focused && !calc.touch && currencies.length > 1 ? (
+          // A click keeps the box focused (no blur, so nothing commits yet).
+          <button
+            type="button"
+            class={`pill sm casg-cur${asgCur !== base ? ' picked' : ''}`}
+            data-no-drag
+            tabIndex={-1}
+            aria-label={`Currency ${asgCur}. Click to change`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => pickCur(currencies[(currencies.indexOf(asgCur) + 1) % currencies.length])}
+          >
+            {asgCur}
+          </button>
+        ) : (
+                  <button
+            class={`avail num ${tone}`}
+            data-no-drag
+            style={{ '--len': availText.length }}
+            onClick={(e) => !swipe.swallow(e) && props.onOpen()}
+            aria-label={`${cat.name}: ${fmt(c.available, base)} available. Open`}
+          >
+            {availText}
+          </button>
+        )}
         {targetHint && (
           <span class={`avail-hint num${c.need > 0 ? '' : ' met'}`} aria-hidden="true">
             {targetHint}
@@ -710,7 +755,6 @@ function CatRow(props: {
 function useRitual(today: string) {
   const ix = useIndex()
   const month = monthOf(today)
-  const prev = addMonths(month, -1)
   const key = `mio-ritual-${month}`
   const [hidden, setHidden] = useState(() => {
     try {
@@ -726,11 +770,8 @@ function useRitual(today: string) {
   if (dayOfMonth(today) > 12 || hidden || !live(ix.db.accounts).length) return null
   const count = lastCount()
   const counted = !!count && monthOf(count.date) === month
-  const incomeNow = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === month)
-  const seen = new Set(incomeNow.map((t) => (t.note ?? '').toLowerCase()))
-  const again = ix.txns.filter((t) => t.cat === RTA && !t.kind && monthOf(t.date) === prev && !seen.has((t.note ?? '').toLowerCase())).slice(0, 4)
   const funded = left.toFill === 0 || left.rta <= 0
-  if (counted && incomeNow.length > 0 && funded) return null
+  if (counted && funded) return null
   const hide = () => {
     try {
       localStorage.setItem(key, '1')
@@ -739,7 +780,7 @@ function useRitual(today: string) {
     }
     setHidden(true)
   }
-  return { prev, counted, logged: incomeNow.length > 0, suggestions: again, funded, hide }
+  return { counted, funded, hide }
 }
 
 /** One numbered step; a check once it's done. */
@@ -755,14 +796,13 @@ function Step(props: { n: number; done: boolean; text: ComponentChildren; childr
   )
 }
 
-/** The start-of-month routine from the spreadsheet: count, log income, fill in the plan. */
+/** The start-of-month routine from the spreadsheet: count, then fill in the plan. */
 function Ritual(props: {
   r: NonNullable<ReturnType<typeof useRitual>>
-  today: string
   onCount: () => void
   fill: ComponentChildren
 }) {
-  const { r, today } = props
+  const { r } = props
   return (
     <section class="ritual">
       <ol>
@@ -773,31 +813,7 @@ function Ritual(props: {
             </button>
           )}
         </Step>
-        <Step n={2} done={r.logged} text="Log your income">
-          {!r.logged && !r.suggestions.length && (
-            <button class="pill sm" onClick={logIncome}>
-              Log
-            </button>
-          )}
-          {r.suggestions.length > 0 && (
-            <div class="pills">
-              {r.suggestions.map((t) => (
-                <button
-                  key={t.id}
-                  class="pill sm"
-                  onClick={() => {
-                    undoable(`${fmt(t.amt, t.cur)} income`, () => addTxn({ date: today, cat: RTA, amt: t.amt, cur: t.cur, note: t.note }))
-                    play('income')
-                    toast(`+${fmt(t.amt, t.cur)} ready to assign`, { undo: true })
-                  }}
-                >
-                  {t.note || 'Income'} <small>{fmt(t.amt, t.cur)}</small>
-                </button>
-              ))}
-            </div>
-          )}
-        </Step>
-        <Step n={3} done={r.funded} text="Fill in your plan">
+        <Step n={2} done={r.funded} text="Fill in your plan">
           {props.fill}
         </Step>
       </ol>
